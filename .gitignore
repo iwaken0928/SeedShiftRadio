@@ -10,3 +10,4 @@ obj/
 
 # VS / MSBuild logs
 *.log
+/.vs

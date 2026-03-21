@@ -16,6 +16,8 @@
 
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
 - 設定更新、局管理、番組編成管理、監視 API は `X-Admin-Token` による最小保護を推奨する
+- `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/playback-events`, `GET /api/health` は一般操作 API として扱う
+- `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/monitor/summary` は `X-Admin-Token` 前提とする
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
 ## 4. 主要DTO
@@ -45,6 +47,7 @@
   "languagePersonaId": "persona-night-main",
   "defaultVoiceProfileId": "voice-night-main",
   "isActive": true,
+  "version": 4,
   "programming": {
     "enabled": true,
     "defaultTemplateId": "tmpl-night-regular",
@@ -143,36 +146,36 @@
 
 | Method | Path | 用途 |
 |---|---|---|
-| `GET` | `/stations` | 局一覧取得 |
-| `GET` | `/stations/{id}` | 局詳細取得 |
-| `POST` | `/stations` | 局作成 |
-| `PUT` | `/stations/{id}` | 局更新 |
-| `GET` | `/stations/{id}/programming` | 局の番組編成設定取得 |
-| `PUT` | `/stations/{id}/programming` | 局の番組編成設定更新 |
-| `POST` | `/stations/{id}/programming/preview` | 局の番組編成プレビュー |
-| `GET` | `/program-templates` | 番組テンプレート一覧取得 |
-| `GET` | `/program-templates/{id}` | 番組テンプレート詳細取得 |
-| `POST` | `/program-templates` | 番組テンプレート作成 |
-| `PUT` | `/program-templates/{id}` | 番組テンプレート更新 |
-| `POST` | `/clients/capabilities` | クライアント能力申告 |
-| `POST` | `/radio/tune` | 局切替 |
-| `POST` | `/radio/play` | 再生開始 |
-| `POST` | `/radio/stop` | 再生停止 |
-| `GET` | `/radio/status` | 現在の再生状態取得 |
-| `GET` | `/radio/program` | 現在の番組 block 取得 |
-| `GET` | `/radio/queue` | 現在キュー取得 |
-| `GET` | `/radio/next-segment` | 次の再生候補取得 |
-| `GET` | `/radio/next-speech-directive` | Client-side TTS 用指示取得 |
-| `POST` | `/radio/playback-events` | クライアント再生イベント通知 |
-| `GET` | `/letters` | レター一覧取得 |
-| `POST` | `/letters` | レター投稿 |
-| `POST` | `/letters/{id}/status` | レター状態更新 |
-| `POST` | `/letters/{id}/reply` | レター返信追加 |
-| `GET` | `/settings` | 設定取得 |
-| `PUT` | `/settings` | 設定更新 |
-| `POST` | `/settings/test-connections` | Provider 接続テスト |
-| `GET` | `/health` | ヘルス参照 |
-| `GET` | `/monitor/summary` | 監視サマリ参照 |
+| `GET` | `/api/stations` | 局一覧取得 |
+| `GET` | `/api/stations/{id}` | 局詳細取得 |
+| `POST` | `/api/stations` | 局作成 |
+| `PUT` | `/api/stations/{id}` | 局更新 |
+| `GET` | `/api/stations/{id}/programming` | 局の番組編成設定取得 |
+| `PUT` | `/api/stations/{id}/programming` | 局の番組編成設定更新 |
+| `POST` | `/api/stations/{id}/programming/preview` | 局の番組編成プレビュー |
+| `GET` | `/api/program-templates` | 番組テンプレート一覧取得 |
+| `GET` | `/api/program-templates/{id}` | 番組テンプレート詳細取得 |
+| `POST` | `/api/program-templates` | 番組テンプレート作成 |
+| `PUT` | `/api/program-templates/{id}` | 番組テンプレート更新 |
+| `POST` | `/api/clients/capabilities` | クライアント能力申告 |
+| `POST` | `/api/radio/tune` | 局切替 |
+| `POST` | `/api/radio/play` | 再生開始 |
+| `POST` | `/api/radio/stop` | 再生停止 |
+| `GET` | `/api/radio/status` | 現在の再生状態取得 |
+| `GET` | `/api/radio/program` | 現在の番組 block 取得 |
+| `GET` | `/api/radio/queue` | 現在キュー取得 |
+| `GET` | `/api/radio/next-segment` | 次の再生候補取得 |
+| `GET` | `/api/radio/next-speech-directive` | Client-side TTS 用指示取得 |
+| `POST` | `/api/radio/playback-events` | クライアント再生イベント通知 |
+| `GET` | `/api/letters` | レター一覧取得 |
+| `POST` | `/api/letters` | レター投稿 |
+| `POST` | `/api/letters/{id}/status` | レター状態更新 |
+| `POST` | `/api/letters/{id}/reply` | レター返信追加 |
+| `GET` | `/api/settings` | 設定取得 |
+| `PUT` | `/api/settings` | 設定更新 |
+| `POST` | `/api/settings/test-connections` | Provider 接続テスト |
+| `GET` | `/api/health` | ヘルス参照 |
+| `GET` | `/api/monitor/summary` | 監視サマリ参照 |
 
 ## 6. 主要API詳細
 
@@ -195,7 +198,8 @@ Response:
   "sessionId": "playout-20260320-001",
   "stationId": "station-night",
   "state": "PREPARING",
-  "queueWarmupStarted": true
+  "queueWarmupStarted": true,
+  "correlationId": "corr-abc123"
 }
 ```
 
@@ -317,6 +321,8 @@ Response:
 }
 ```
 
+`PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。
+
 ### 6.7 `POST /stations/{id}/programming/preview`
 
 Request:
@@ -360,7 +366,7 @@ Response:
 
 Endpoint:
 
-- `GET /stream/events`
+- `GET /api/stream/events`
 
 Event 種別:
 
@@ -398,6 +404,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - `RadioStatus` と `QueueItem` は番組 block との関連 ID を返し、 UI が局情報と番組情報を同時に表示できるようにする
 - `SpeechDirective` は Native 向けの主契約だが、Web もデバッグ表示に利用できる
 - 監視系 API は UI 用の集約 DTO を返し、生ログ全文は返さない
+- `TuneResponse` は相関追跡のため `correlationId` を返す
 - Preview API は副作用を持たず、未保存設定の検証にも使えるようにする
 
 ## 10. OpenAPI生成方針

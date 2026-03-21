@@ -15,7 +15,7 @@
 ## 3. 認証/認可方針
 
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
-- 設定更新と監視 API は `X-Admin-Token` による最小保護を推奨する
+- 設定更新、局管理、番組編成管理、監視 API は `X-Admin-Token` による最小保護を推奨する
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
 ## 4. 主要DTO
@@ -28,16 +28,41 @@
   "name": "Midnight Echo",
   "frequencyMHz": 81.3,
   "genre": "talk",
-  "isActive": true
+  "isActive": true,
+  "programmingEnabled": true,
+  "defaultProgramTemplateId": "tmpl-night-regular"
 }
 ```
 
-### 4.2 RadioStatus
+### 4.2 StationDetail
+
+```json
+{
+  "id": "station-night",
+  "name": "Midnight Echo",
+  "frequencyMHz": 81.3,
+  "genre": "talk",
+  "languagePersonaId": "persona-night-main",
+  "defaultVoiceProfileId": "voice-night-main",
+  "isActive": true,
+  "programming": {
+    "enabled": true,
+    "defaultTemplateId": "tmpl-night-regular",
+    "fallbackStrategy": "LEGACY_RATIO",
+    "planningHorizonMinutes": 20
+  }
+}
+```
+
+### 4.3 RadioStatus
 
 ```json
 {
   "sessionId": "playout-20260320-001",
   "stationId": "station-night",
+  "programBlockId": "program-20260320-01",
+  "programTemplateId": "tmpl-night-regular",
+  "programTitle": "深夜の作業ノート",
   "state": "PLAYING",
   "currentItemId": "queue-0012",
   "bufferReadyCount": 2,
@@ -46,11 +71,14 @@
 }
 ```
 
-### 4.3 QueueItem
+### 4.4 QueueItem
 
 ```json
 {
   "id": "queue-0012",
+  "programBlockId": "program-20260320-01",
+  "programSlotId": "slot-talk-open",
+  "slotRole": "OPENING",
   "type": "TALK",
   "title": "オープニングトーク",
   "playbackMode": "SERVER_AUDIO",
@@ -61,7 +89,23 @@
 }
 ```
 
-### 4.4 SpeechDirective
+### 4.5 ProgramBlockSummary
+
+```json
+{
+  "id": "program-20260320-01",
+  "stationId": "station-night",
+  "templateId": "tmpl-night-regular",
+  "templateVersion": 3,
+  "title": "深夜の作業ノート",
+  "status": "ACTIVE",
+  "plannedDurationMs": 1200000,
+  "remainingSlotCount": 3,
+  "startedAt": "2026-03-20T09:00:00Z"
+}
+```
+
+### 4.6 SpeechDirective
 
 ```json
 {
@@ -81,7 +125,7 @@
 }
 ```
 
-### 4.5 ErrorResponse
+### 4.7 ErrorResponse
 
 ```json
 {
@@ -101,11 +145,21 @@
 |---|---|---|
 | `GET` | `/stations` | 局一覧取得 |
 | `GET` | `/stations/{id}` | 局詳細取得 |
+| `POST` | `/stations` | 局作成 |
+| `PUT` | `/stations/{id}` | 局更新 |
+| `GET` | `/stations/{id}/programming` | 局の番組編成設定取得 |
+| `PUT` | `/stations/{id}/programming` | 局の番組編成設定更新 |
+| `POST` | `/stations/{id}/programming/preview` | 局の番組編成プレビュー |
+| `GET` | `/program-templates` | 番組テンプレート一覧取得 |
+| `GET` | `/program-templates/{id}` | 番組テンプレート詳細取得 |
+| `POST` | `/program-templates` | 番組テンプレート作成 |
+| `PUT` | `/program-templates/{id}` | 番組テンプレート更新 |
 | `POST` | `/clients/capabilities` | クライアント能力申告 |
 | `POST` | `/radio/tune` | 局切替 |
 | `POST` | `/radio/play` | 再生開始 |
 | `POST` | `/radio/stop` | 再生停止 |
 | `GET` | `/radio/status` | 現在の再生状態取得 |
+| `GET` | `/radio/program` | 現在の番組 block 取得 |
 | `GET` | `/radio/queue` | 現在キュー取得 |
 | `GET` | `/radio/next-segment` | 次の再生候補取得 |
 | `GET` | `/radio/next-speech-directive` | Client-side TTS 用指示取得 |
@@ -192,6 +246,116 @@ Response:
 
 この API は厳密同期ではなく、Server が体感ズレやエラー把握を行うための補助イベントとする。
 
+### 6.5 `GET /radio/program`
+
+Response:
+
+```json
+{
+  "id": "program-20260320-01",
+  "stationId": "station-night",
+  "templateId": "tmpl-night-regular",
+  "templateVersion": 3,
+  "title": "深夜の作業ノート",
+  "status": "ACTIVE",
+  "plannedDurationMs": 1200000,
+  "remainingSlotCount": 3,
+  "slots": [
+    {
+      "slotId": "slot-talk-open",
+      "role": "OPENING",
+      "constraintMode": "HARD",
+      "targetDurationMs": 30000,
+      "resolvedSegmentType": "TALK"
+    }
+  ]
+}
+```
+
+### 6.6 `PUT /stations/{id}/programming`
+
+Request:
+
+```json
+{
+  "version": 4,
+  "enabled": true,
+  "defaultTemplateId": "tmpl-night-regular",
+  "fallbackStrategy": "LEGACY_RATIO",
+  "planningHorizonMinutes": 20,
+  "rules": [
+    {
+      "priority": 100,
+      "days": ["MON", "TUE", "WED", "THU", "FRI"],
+      "startTime": "22:00",
+      "endTime": "02:00",
+      "minimumPendingLetters": 0,
+      "requiredProviderStates": [],
+      "templateId": "tmpl-night-regular"
+    },
+    {
+      "priority": 120,
+      "days": ["SAT", "SUN"],
+      "startTime": "22:00",
+      "endTime": "02:00",
+      "minimumPendingLetters": 3,
+      "requiredProviderStates": ["MUSICGEN_UP"],
+      "templateId": "tmpl-night-letter"
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "stationId": "station-night",
+  "version": 5,
+  "enabled": true,
+  "updatedAt": "2026-03-20T09:00:00Z"
+}
+```
+
+### 6.7 `POST /stations/{id}/programming/preview`
+
+Request:
+
+```json
+{
+  "at": "2026-03-20T23:30:00+09:00",
+  "pendingLetterCount": 4,
+  "providerStates": {
+    "musicGen": "UP",
+    "tts": "UP",
+    "llm": "UP"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "stationId": "station-night",
+  "selectedTemplateId": "tmpl-night-letter",
+  "fallbackApplied": false,
+  "program": {
+    "title": "深夜レター拾い",
+    "plannedDurationMs": 1200000
+  },
+  "slots": [
+    {
+      "slotId": "letter-main",
+      "role": "LETTER",
+      "constraintMode": "HARD",
+      "targetDurationMs": 120000
+    }
+  ],
+  "validationWarnings": []
+}
+```
+
 ## 7. SSE仕様
 
 Endpoint:
@@ -204,6 +368,7 @@ Event 種別:
 |---|---|---|
 | `radio.status.changed` | `RadioStatus` | 再生状態更新 |
 | `queue.updated` | `QueueSnapshot` | キュー差し替え・Ready数更新 |
+| `program.changed` | `ProgramBlockSummary` | 現在番組 block の切替・更新 |
 | `subtitle.updated` | `SubtitlePayload` | 字幕更新 |
 | `provider.health.changed` | `ProviderHealthPayload` | Provider 異常通知 |
 | `buffer.warning` | `BufferWarningPayload` | 先読み不足通知 |
@@ -216,6 +381,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 | Code | HTTP | 意味 |
 |---|---|---|
 | `VALIDATION_ERROR` | 400 | 入力不正 |
+| `INVALID_TEMPLATE` | 400 | 番組テンプレート不正 |
 | `NOT_FOUND` | 404 | 対象なし |
 | `CONFLICT` | 409 | 状態競合 |
 | `QUEUE_NOT_READY` | 409 | 次セグメント未生成 |
@@ -227,9 +393,12 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 
 - レター投稿は `Idempotency-Key` を受け付けて二重投稿を防止する
 - 設定更新は楽観ロック用 `version` を含める
+- 局管理と番組編成管理の更新も楽観ロック用 `version` を含める
 - QueueItem は `status` と `playbackMode` を持ち、 Web と Native で共通利用する
+- `RadioStatus` と `QueueItem` は番組 block との関連 ID を返し、 UI が局情報と番組情報を同時に表示できるようにする
 - `SpeechDirective` は Native 向けの主契約だが、Web もデバッグ表示に利用できる
 - 監視系 API は UI 用の集約 DTO を返し、生ログ全文は返さない
+- Preview API は副作用を持たず、未保存設定の検証にも使えるようにする
 
 ## 10. OpenAPI生成方針
 

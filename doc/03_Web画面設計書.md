@@ -17,7 +17,7 @@
 |---|---|---|
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
-| `/settings` | 設定画面 | Provider 設定、キャッシュ設定、接続テスト |
+| `/settings` | 設定画面 | Provider 設定、局管理、番組管理、キャッシュ設定、接続テスト |
 | `/monitor` | 監視画面 | Provider health, buffer, job, recent errors |
 
 ## 4. レイアウト方針
@@ -35,6 +35,7 @@
 | Header | アプリ名、現在局、接続状態 |
 | Tuner Panel | 周波数ダイヤル、前後スキャン、局一覧 |
 | Playback Panel | 再生/停止、音量、再生モード、NowPlaying |
+| Program Panel | 現在番組タイトル、適用テンプレート、次スロット |
 | Subtitle Panel | 現在発話テキスト、発話者名 |
 | Queue Panel | 次に流れるセグメント、状態、生成中表示 |
 | Provider Panel | LLM/TTS/MusicGen の health と buffer 状態 |
@@ -55,6 +56,7 @@
 - 次セグメントは再生終了 3 秒前を目安に preload する
 - Tune 時は現在音声を即時停止せず、フェードアウト後に新局へ切り替える
 - 再生エラー時は 1 回だけ同一 asset を再試行し、失敗なら次候補へ進む
+- `RadioStatus` や `program.changed` を使って、局名と番組名を分けて表示する
 
 ## 6. レター画面
 
@@ -85,6 +87,10 @@
 - LLM
 - TTS
 - MusicGen
+- Stations
+- Program Templates
+- Programming Rules
+- Programming Preview
 - Paths
 - Cache
 - Security
@@ -96,11 +102,14 @@
 - 変更は一括保存とする
 - 危険な項目は `localhost 以外へ bind` などの注意表示を出す
 - API キー自体は平文表示せず、参照先のみ表示する
+- 番組テンプレート編集では `HARD` / `SOFT` の違いを明示し、保存前に Preview を実行できるようにする
+- 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
 
 ## 8. 監視画面
 
 - Provider 状態
 - バッファ残量
+- 現在番組 block と template version
 - 進行中ジョブ
 - 直近エラー
 - 直近 10 件の監査イベント
@@ -111,7 +120,7 @@
 
 | 種別 | 保存先 |
 |---|---|
-| Stations, Status, Queue, Letters, Health | Server + TanStack Query |
+| Stations, Status, Queue, CurrentProgram, Letters, Health | Server + TanStack Query |
 | 再生中 itemId, UI 一時状態, モーダル開閉 | Zustand |
 | 最後に聴いた局、音量、表示タブ、 radioName | LocalStorage |
 

@@ -14,17 +14,20 @@
 ## 3. 生成パイプライン
 
 1. `ContextAssembler` が局設定、直前文脈、セグメント条件を集約する
-2. `PromptComposer` が system / developer / task prompt を組み立てる
-3. LLM が JSON 形式で候補台本を返す
-4. `JapaneseScriptNormalizer` が話し言葉へ整形する
-5. `JapaneseQualityGuard` が禁止表現、長文、読みづらさを検査する
-6. 問題があれば修正プロンプトで 1 から 2 回だけ再生成する
+2. `ContextAssembler` は必要に応じて `ProgramTemplate` と `ProgramSlot` の制約も集約する
+3. `PromptComposer` が system / developer / task prompt を組み立てる
+4. LLM が JSON 形式で候補台本を返す
+5. `JapaneseScriptNormalizer` が話し言葉へ整形する
+6. `JapaneseQualityGuard` が禁止表現、長文、読みづらさを検査する
+7. 問題があれば修正プロンプトで 1 から 2 回だけ再生成する
 
 ## 4. 入力
 
 | 項目 | 用途 |
 |---|---|
 | station profile | 局の人格、雰囲気、禁則、話題傾向 |
+| program template | 現在番組のテーマ、テンポ、避ける話題、演出方針 |
+| program slot | slot role, `HARD` / `SOFT`, 必須要素, 代替可能範囲 |
 | segment type | TALK / LETTER / ANNOUNCEMENT |
 | target duration | 目標尺 |
 | recent context | 直前 2 から 3 セグメントの要約 |
@@ -74,6 +77,13 @@
 - 必須に含める情報
 - 直前文脈
 
+### 6.4 Program Directive Prompt
+
+- 現在番組名と block の位相
+- 現在 slot の role
+- `requiredPhrases` や `topicHints`
+- `SOFT` 制約時に崩してよい範囲
+
 ## 7. LETTER の安全設計
 
 - レター本文は引用データとしてのみ扱う
@@ -89,6 +99,8 @@
 - segmentType
 - prompt template version
 - persona version
+- program template version
+- program slot hash
 - recent context hash
 - letter id または body hash
 
@@ -112,5 +124,6 @@
 
 - `pgvector` を利用した関連レター要約
 - 時間帯別テンプレート
+- 番組テンプレート別の導入句や締め句ライブラリ
 - ニュースや天気の外部情報注入
 - 掛け合い用の複数話者生成

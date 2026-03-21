@@ -34,7 +34,7 @@ public interface MusicProvider {
 | 項目 | 方針 |
 |---|---|
 | 既定 Provider | `config.json` で指定 |
-| station 固有上書き | 可能 |
+| station / program template 固有上書き | 可能 |
 | fallback Provider | 種別ごとに 1 件以上設定可能 |
 | 接続テスト | `/api/settings/test-connections` から実行 |
 
@@ -112,3 +112,4 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 - Provider 抽象で差異を隠し過ぎず、`capabilities` を上位から参照できるようにする
 - 音声と音楽の生成物はファイル正本を Server が管理する
 - 監視画面には生の provider error ではなく整形した分類を表示する
+- Provider request metadata には `stationId`, `programTemplateId`, `programSlotId` を含め、監査とキャッシュに利用できるようにする

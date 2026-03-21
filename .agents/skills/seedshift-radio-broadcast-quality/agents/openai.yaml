@@ -1,0 +1,4 @@
+interface:
+  display_name: "SeedShiftRadio Broadcast Quality"
+  short_description: "Guide Japanese script and TTS quality checks"
+  default_prompt: "Use $seedshift-radio-broadcast-quality to review this Japanese radio script, speech directive, or TTS-related change."

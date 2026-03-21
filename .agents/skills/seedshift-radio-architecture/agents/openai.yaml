@@ -1,0 +1,4 @@
+interface:
+  display_name: "SeedShiftRadio Architecture"
+  short_description: "Keep SeedShiftRadio aligned with design docs"
+  default_prompt: "Use $seedshift-radio-architecture to plan this change and map it to the right modules and design documents."

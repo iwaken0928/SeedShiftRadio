@@ -302,7 +302,12 @@ public class ProgrammingService {
 
 	private SegmentType resolveSegmentType(ProgramTemplateSlotEntity slot, Map<String, String> providerStates, int pendingLetterCount) {
 		for (String candidate : slot.getCandidateSegmentTypes()) {
-			SegmentType type = SegmentType.valueOf(candidate);
+			SegmentType type = ProgrammingSupport.parseSegmentTypeOrThrow(
+					candidate,
+					"candidateSegmentTypes",
+					slot.getId(),
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"INVALID_TEMPLATE");
 			if (isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
 				return type;
 			}
@@ -312,7 +317,12 @@ public class ProgrammingService {
 
 	private SegmentType resolveFallbackSegmentType(ProgramTemplateSlotEntity slot, Map<String, String> providerStates, int pendingLetterCount) {
 		for (String candidate : slot.getFallbackSegmentTypes()) {
-			SegmentType type = SegmentType.valueOf(candidate);
+			SegmentType type = ProgrammingSupport.parseSegmentTypeOrThrow(
+					candidate,
+					"fallbackSegmentTypes",
+					slot.getId(),
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"INVALID_TEMPLATE");
 			if (isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
 				return type;
 			}
@@ -439,6 +449,10 @@ public class ProgrammingService {
 			if (fallback.getFallbackTemplateId() != null && fallback.getFallbackTemplateId().equals(currentTemplateId)) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TEMPLATE", "fallbackTemplateId が循環しています。", Map.of("fallbackTemplateId", request.fallbackTemplateId()));
 			}
+		}
+		for (ProgramTemplateSlotRequest slot : request.slots()) {
+			ProgrammingSupport.validateSegmentTypes(slot.candidateSegmentTypes(), "candidateSegmentTypes", slot.id());
+			ProgrammingSupport.validateSegmentTypes(slot.fallbackSegmentTypes(), "fallbackSegmentTypes", slot.id());
 		}
 	}
 

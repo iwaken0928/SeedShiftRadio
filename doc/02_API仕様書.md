@@ -236,6 +236,17 @@ Response:
 }
 ```
 
+### 6.3.1 `POST /letters/{id}/status`
+
+`ADOPTED` へ更新する場合は採用先 `sessionId` を必須とする。
+
+```json
+{
+  "status": "ADOPTED",
+  "sessionId": "playout-20260320-001"
+}
+```
+
 ### 6.4 `POST /radio/playback-events`
 
 ```json
@@ -249,6 +260,10 @@ Response:
 ```
 
 この API は厳密同期ではなく、Server が体感ズレやエラー把握を行うための補助イベントとする。
+
+- `sessionId` と `itemId` は同一 `playout_session` に属している必要がある
+- `SEGMENT_STARTED` は `READY` item、`SEGMENT_ENDED` と `PLAYBACK_STOPPED` は現在 `PLAYING` 中の item のみ受け付ける
+- 条件を満たさない場合は `409 CONFLICT` を返す
 
 ### 6.5 `GET /radio/program`
 

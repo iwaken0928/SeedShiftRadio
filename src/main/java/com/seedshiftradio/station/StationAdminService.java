@@ -3,6 +3,7 @@ package com.seedshiftradio.station;
 import java.math.BigDecimal;
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,7 +64,7 @@ public class StationAdminService {
 				request.programmingEnabled(),
 				request.defaultProgramTemplateId(),
 				request.isActive());
-		StationEntity saved = stationRepository.save(entity);
+		StationEntity saved = saveStation(entity);
 		return toResponse(saved);
 	}
 
@@ -85,7 +86,7 @@ public class StationAdminService {
 		existing.setProgrammingEnabled(request.programmingEnabled());
 		existing.setDefaultProgramTemplateId(request.defaultProgramTemplateId());
 		existing.setActive(request.isActive());
-		return toResponse(stationRepository.save(existing));
+		return toResponse(saveStation(existing));
 	}
 
 	private StationEntity findStation(String id) {
@@ -167,6 +168,18 @@ public class StationAdminService {
 			if (!station.getId().equals(stationId) && station.getFrequencyMhz().compareTo(frequency) == 0) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "周波数が重複しています。", java.util.Map.of("frequencyMHz", frequency));
 			}
+		}
+	}
+
+	private StationEntity saveStation(StationEntity station) {
+		try {
+			return stationRepository.save(station);
+		} catch (DataIntegrityViolationException exception) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"周波数が重複しています。",
+					java.util.Map.of("frequencyMHz", station.getFrequencyMhz()));
 		}
 	}
 }

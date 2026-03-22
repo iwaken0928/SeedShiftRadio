@@ -107,12 +107,15 @@ public class RadioService {
 	@Transactional
 	public RadioStatusResponse play() {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
-		QueueItemEntity item = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
-				.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "再生可能なセグメントがまだありません。", Map.of("sessionId", session.getId())));
-		item.setStatus(QueueItemStatus.PLAYING);
-		queueItemRepository.save(item);
-		session.setCurrentQueueItemId(item.getId());
-		session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
+		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
+		QueueItemEntity item = items.stream()
+				.filter(candidate -> candidate.getStatus() == QueueItemStatus.PLAYING)
+				.findFirst()
+				.orElseGet(() -> items.stream()
+						.filter(candidate -> candidate.getStatus() == QueueItemStatus.READY)
+						.findFirst()
+						.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "再生可能なセグメントがまだありません。", Map.of("sessionId", session.getId()))));
+		transitionToPlaying(session, item.getId());
 		refreshSessionState(session);
 		emitSessionEvents(session.getId());
 		return getStatus();
@@ -121,7 +124,7 @@ public class RadioService {
 	@Transactional
 	public RadioStatusResponse stop() {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
-		session.setState(PlayoutState.STOPPED);
+		stopPlayback(session);
 		refreshSessionState(session);
 		emitSessionEvents(session.getId());
 		return getStatus();
@@ -226,28 +229,33 @@ public class RadioService {
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "再生セッションが見つかりません。", Map.of("sessionId", request.sessionId())));
 		QueueItemEntity item = queueItemRepository.findById(request.itemId())
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "QueueItem が見つかりません。", Map.of("itemId", request.itemId())));
+		assertPlaybackEventTargetsSession(session, item);
+		assertPlaybackEventTransition(request, session, item);
 		switch (request.eventType()) {
-			case SEGMENT_STARTED -> {
-				item.setStatus(QueueItemStatus.PLAYING);
-				session.setCurrentQueueItemId(item.getId());
-				session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
-			}
+			case SEGMENT_STARTED -> transitionToPlaying(session, item.getId());
 			case SEGMENT_ENDED -> {
 				item.setStatus(QueueItemStatus.DONE);
+				if (item.getId().equals(session.getCurrentQueueItemId())) {
+					session.setCurrentQueueItemId(null);
+				}
 				markSlotDone(item.getProgramSlotId());
+				queueItemRepository.save(item);
 				ensureBuffer(session);
 			}
 			case SEGMENT_ERROR -> {
 				item.setStatus(QueueItemStatus.FAILED);
 				item.setAssetBanned(true);
+				if (item.getId().equals(session.getCurrentQueueItemId())) {
+					session.setCurrentQueueItemId(null);
+				}
 				session.setState(PlayoutState.DEGRADED);
 				session.setDegradedReason("SEGMENT_ERROR");
+				queueItemRepository.save(item);
 				ensureBuffer(session);
 			}
-			case PLAYBACK_STOPPED -> session.setState(PlayoutState.STOPPED);
+			case PLAYBACK_STOPPED -> stopPlayback(session);
 			default -> throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "未対応の playback event です。", Map.of("eventType", request.eventType()));
 		}
-		queueItemRepository.save(item);
 		refreshSessionState(session);
 		emitSessionEvents(session.getId());
 	}
@@ -405,6 +413,53 @@ public class RadioService {
 		programBlockSlotRepository.saveAll(blockSlots);
 	}
 
+	private void transitionToPlaying(PlayoutSessionEntity session, String itemId) {
+		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
+		List<QueueItemEntity> changedItems = new ArrayList<>();
+		QueueItemEntity target = null;
+		for (QueueItemEntity existing : items) {
+			if (existing.getId().equals(itemId)) {
+				target = existing;
+				if (existing.getStatus() != QueueItemStatus.PLAYING) {
+					existing.setStatus(QueueItemStatus.PLAYING);
+					changedItems.add(existing);
+				}
+				continue;
+			}
+			if (existing.getStatus() == QueueItemStatus.PLAYING) {
+				existing.setStatus(QueueItemStatus.READY);
+				changedItems.add(existing);
+			}
+		}
+		if (target == null) {
+			throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "QueueItem が見つかりません。", Map.of("itemId", itemId));
+		}
+		if (!changedItems.isEmpty()) {
+			queueItemRepository.saveAll(changedItems);
+		}
+		session.setCurrentQueueItemId(target.getId());
+		if (isRecoveryCandidate(target)) {
+			session.setDegradedReason(null);
+		}
+		session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
+	}
+
+	private void stopPlayback(PlayoutSessionEntity session) {
+		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
+		List<QueueItemEntity> changedItems = new ArrayList<>();
+		for (QueueItemEntity item : items) {
+			if (item.getStatus() == QueueItemStatus.PLAYING) {
+				item.setStatus(QueueItemStatus.READY);
+				changedItems.add(item);
+			}
+		}
+		if (!changedItems.isEmpty()) {
+			queueItemRepository.saveAll(changedItems);
+		}
+		session.setCurrentQueueItemId(null);
+		session.setState(PlayoutState.STOPPED);
+	}
+
 	private QueueItemEntity createFallbackQueueItem(PlayoutSessionEntity session, int sequenceNo) {
 		QueueItemEntity entity = new QueueItemEntity();
 		entity.setId(nextId("queue"));
@@ -431,6 +486,62 @@ public class RadioService {
 			blockSlot.setStatus(ProgramBlockSlotStatus.DONE);
 			programBlockSlotRepository.save(blockSlot);
 		}
+	}
+
+	private void assertPlaybackEventTargetsSession(PlayoutSessionEntity session, QueueItemEntity item) {
+		if (!session.getId().equals(item.getSessionId())) {
+			throw new ApiException(
+					HttpStatus.CONFLICT,
+					"CONFLICT",
+					"指定された QueueItem は再生セッションに属していません。",
+					Map.of(
+							"sessionId", session.getId(),
+							"itemId", item.getId(),
+							"itemSessionId", item.getSessionId()));
+		}
+	}
+
+	private void assertPlaybackEventTransition(PlaybackEventRequest request, PlayoutSessionEntity session, QueueItemEntity item) {
+		switch (request.eventType()) {
+			case SEGMENT_STARTED -> {
+				boolean alreadyCurrent = item.getStatus() == QueueItemStatus.PLAYING && item.getId().equals(session.getCurrentQueueItemId());
+				if (item.getStatus() != QueueItemStatus.READY && !alreadyCurrent) {
+					throw invalidPlaybackTransition(request.eventType(), item);
+				}
+			}
+			case SEGMENT_ENDED -> {
+				if (item.getStatus() != QueueItemStatus.PLAYING || !item.getId().equals(session.getCurrentQueueItemId())) {
+					throw invalidPlaybackTransition(request.eventType(), item);
+				}
+			}
+			case SEGMENT_ERROR -> {
+				boolean currentPlaying = item.getStatus() == QueueItemStatus.PLAYING && item.getId().equals(session.getCurrentQueueItemId());
+				if (item.getStatus() != QueueItemStatus.READY && !currentPlaying) {
+					throw invalidPlaybackTransition(request.eventType(), item);
+				}
+			}
+			case PLAYBACK_STOPPED -> {
+				if (item.getStatus() != QueueItemStatus.PLAYING || !item.getId().equals(session.getCurrentQueueItemId())) {
+					throw invalidPlaybackTransition(request.eventType(), item);
+				}
+			}
+			default -> throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "未対応の playback event です。", Map.of("eventType", request.eventType()));
+		}
+	}
+
+	private ApiException invalidPlaybackTransition(PlaybackEventType eventType, QueueItemEntity item) {
+		return new ApiException(
+				HttpStatus.CONFLICT,
+				"CONFLICT",
+				"指定された playback event は現在の QueueItem 状態では受け付けられません。",
+				Map.of(
+						"eventType", eventType.name(),
+						"itemId", item.getId(),
+						"status", item.getStatus().name()));
+	}
+
+	private boolean isRecoveryCandidate(QueueItemEntity item) {
+		return item.getProgramSlotId() != null && !item.isAssetBanned();
 	}
 
 	private void refreshSessionState(PlayoutSessionEntity session) {

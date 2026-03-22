@@ -296,6 +296,8 @@ public class ProgrammingAdminService {
 			if (slot.candidateSegmentTypes() == null || slot.candidateSegmentTypes().isEmpty()) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "候補 segmentType が空です。", Map.of("slotId", slot.slotId()));
 			}
+			ProgrammingSupport.validateSegmentTypes(slot.candidateSegmentTypes(), "candidateSegmentTypes", slot.slotId());
+			ProgrammingSupport.validateSegmentTypes(slot.fallbackSegmentTypes(), "fallbackSegmentTypes", slot.slotId());
 		}
 	}
 

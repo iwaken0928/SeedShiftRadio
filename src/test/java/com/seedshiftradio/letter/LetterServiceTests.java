@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,7 @@ import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterStatusUpdateRequest;
+import com.seedshiftradio.radio.PlayoutSessionRepository;
 import com.seedshiftradio.station.StationRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +35,9 @@ class LetterServiceTests {
 	LetterReplyRepository letterReplyRepository;
 
 	@Mock
+	PlayoutSessionRepository playoutSessionRepository;
+
+	@Mock
 	StationRepository stationRepository;
 
 	@Mock
@@ -42,7 +47,7 @@ class LetterServiceTests {
 
 	@BeforeEach
 	void setUp() {
-		letterService = new LetterService(letterRepository, letterReplyRepository, stationRepository, applicationEventPublisher);
+		letterService = new LetterService(letterRepository, letterReplyRepository, playoutSessionRepository, stationRepository, applicationEventPublisher);
 	}
 
 	@Test
@@ -80,8 +85,48 @@ class LetterServiceTests {
 
 		ApiException exception = assertThrows(
 				ApiException.class,
-				() -> letterService.updateStatus("letter-existing", new LetterStatusUpdateRequest(LetterStatus.ADOPTED)));
+				() -> letterService.updateStatus("letter-existing", new LetterStatusUpdateRequest(LetterStatus.ADOPTED, null)));
 
 		assertEquals("CONFLICT", exception.getCode());
+	}
+
+	@Test
+	void updateStatusRequiresSessionIdWhenAdopting() {
+		LetterEntity existing = new LetterEntity(
+				"letter-existing",
+				null,
+				"夜更かしペンギン",
+				"最近の作業BGM",
+				"深夜作業でおすすめの音を教えてください。",
+				LetterStatus.PENDING,
+				null);
+		when(letterRepository.findById("letter-existing")).thenReturn(Optional.of(existing));
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> letterService.updateStatus("letter-existing", new LetterStatusUpdateRequest(LetterStatus.ADOPTED, null)));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
+	void updateStatusStoresAdoptedSessionId() {
+		LetterEntity existing = new LetterEntity(
+				"letter-existing",
+				null,
+				"夜更かしペンギン",
+				"最近の作業BGM",
+				"深夜作業でおすすめの音を教えてください。",
+				LetterStatus.PENDING,
+				null);
+		when(letterRepository.findById("letter-existing")).thenReturn(Optional.of(existing));
+		when(playoutSessionRepository.existsById("playout-001")).thenReturn(true);
+		when(letterRepository.save(any(LetterEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(letterReplyRepository.findByLetterIdOrderByCreatedAtAsc("letter-existing")).thenReturn(List.of());
+
+		var response = letterService.updateStatus("letter-existing", new LetterStatusUpdateRequest(LetterStatus.ADOPTED, "playout-001"));
+
+		assertEquals(LetterStatus.ADOPTED, response.status());
+		assertEquals("playout-001", response.adoptedInSessionId());
 	}
 }

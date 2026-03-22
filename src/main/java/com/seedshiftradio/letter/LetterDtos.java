@@ -23,7 +23,9 @@ public final class LetterDtos {
 	public record LetterCreateResponse(String id, LetterStatus status, Instant createdAt) {
 	}
 
-	public record LetterStatusUpdateRequest(LetterStatus status) {
+	public record LetterStatusUpdateRequest(
+			LetterStatus status,
+			@Size(max = 100) String sessionId) {
 	}
 
 	public record LetterReplyRequest(@NotBlank @Size(max = 5000) String replyText) {

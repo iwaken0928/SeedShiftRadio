@@ -67,18 +67,22 @@ class RadioApiTests {
 								"""))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.stationId").value("station-night"))
-				.andExpect(jsonPath("$.state").value("PLAYING"))
+				.andExpect(jsonPath("$.state").value("PREPARING"))
 				.andExpect(jsonPath("$.correlationId").exists());
 
 		mockMvc.perform(get("/api/radio/status"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.stationId").value("station-night"))
-				.andExpect(jsonPath("$.state").value("PLAYING"))
+				.andExpect(jsonPath("$.state").value("PREPARING"))
 				.andExpect(jsonPath("$.bufferReadyCount").value(greaterThanOrEqualTo(1)));
 
 		mockMvc.perform(get("/api/radio/queue"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.items.length()").value(greaterThanOrEqualTo(1)));
+
+		mockMvc.perform(post("/api/radio/play"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.state").value("PLAYING"));
 
 		mockMvc.perform(get("/api/radio/next-segment"))
 				.andExpect(status().isOk())

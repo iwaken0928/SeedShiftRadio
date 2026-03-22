@@ -38,7 +38,7 @@ public class LetterController {
 
 	@GetMapping
 	public List<LetterSummaryResponse> list(
-			@RequestHeader(AdminApiGuard.HEADER_NAME) String adminToken,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
 			@RequestParam(required = false) String stationId,
 			@RequestParam(required = false) LetterStatus status) {
 		adminApiGuard.require(adminToken);
@@ -55,7 +55,7 @@ public class LetterController {
 	@PostMapping("/{id}/status")
 	public LetterSummaryResponse updateStatus(
 			@PathVariable("id") String letterId,
-			@RequestHeader(AdminApiGuard.HEADER_NAME) String adminToken,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
 			@Valid @RequestBody LetterStatusUpdateRequest request) {
 		adminApiGuard.require(adminToken);
 		return letterService.updateStatus(letterId, request);
@@ -64,7 +64,7 @@ public class LetterController {
 	@PostMapping("/{id}/reply")
 	public LetterReplyResponse addReply(
 			@PathVariable("id") String letterId,
-			@RequestHeader(AdminApiGuard.HEADER_NAME) String adminToken,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
 			@Valid @RequestBody LetterReplyRequest request) {
 		adminApiGuard.require(adminToken);
 		return letterService.addReply(letterId, request);

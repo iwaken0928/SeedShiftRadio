@@ -21,7 +21,7 @@ public class MonitorController {
 	}
 
 	@GetMapping("/summary")
-	public MonitorSummaryResponse summary(@RequestHeader(AdminApiGuard.HEADER_NAME) String adminToken) {
+	public MonitorSummaryResponse summary(@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
 		adminApiGuard.require(adminToken);
 		return monitorService.summary();
 	}

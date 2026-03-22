@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.seedshiftradio.letter.LetterChangedEvent;
+import com.seedshiftradio.radio.RadioEventRecord;
 
 @Service
 public class StreamEventService {
@@ -23,7 +24,7 @@ public class StreamEventService {
 
 	private final AtomicLong sequence = new AtomicLong();
 	private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
-	private final List<EventEnvelope> history = new ArrayList<>();
+	private final List<RadioEventRecord> history = new ArrayList<>();
 
 	public SseEmitter subscribe(String lastEventId) {
 		SseEmitter emitter = new SseEmitter(0L);
@@ -39,7 +40,7 @@ public class StreamEventService {
 	}
 
 	public void publish(String eventName, Object payload) {
-		EventEnvelope event = new EventEnvelope(Long.toString(sequence.incrementAndGet()), eventName, payload, Instant.now());
+		RadioEventRecord event = new RadioEventRecord(Long.toString(sequence.incrementAndGet()), eventName, Instant.now(), payload);
 		synchronized (history) {
 			history.add(event);
 			while (history.size() > MAX_HISTORY) {
@@ -60,26 +61,28 @@ public class StreamEventService {
 
 	@EventListener
 	public void onLetterChanged(LetterChangedEvent event) {
-		publish("letter.updated", Map.of("letterId", event.letterId()));
+		publish("letter.updated", event.summary());
 	}
 
-	private void sendReplay(SseEmitter emitter, String lastEventId) {
+	List<RadioEventRecord> replayAfter(String lastEventId) {
 		if (lastEventId == null || lastEventId.isBlank()) {
-			return;
+			return List.of();
 		}
 		long lastSeen;
 		try {
 			lastSeen = Long.parseLong(lastEventId);
 		} catch (NumberFormatException exception) {
-			return;
+			return List.of();
 		}
-		List<EventEnvelope> replay;
 		synchronized (history) {
-			replay = history.stream()
+			return history.stream()
 					.filter(event -> Long.parseLong(event.id()) > lastSeen)
 					.toList();
 		}
-		for (EventEnvelope event : replay) {
+	}
+
+	private void sendReplay(SseEmitter emitter, String lastEventId) {
+		for (RadioEventRecord event : replayAfter(lastEventId)) {
 			try {
 				send(emitter, event);
 			} catch (IOException exception) {
@@ -100,13 +103,10 @@ public class StreamEventService {
 		}
 	}
 
-	private void send(SseEmitter emitter, EventEnvelope event) throws IOException {
+	private void send(SseEmitter emitter, RadioEventRecord event) throws IOException {
 		emitter.send(SseEmitter.event()
 				.id(event.id())
-				.name(event.eventName())
+				.name(event.eventType())
 				.data(event.payload()));
-	}
-
-	private record EventEnvelope(String id, String eventName, Object payload, Instant createdAt) {
 	}
 }

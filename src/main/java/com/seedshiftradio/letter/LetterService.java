@@ -85,8 +85,9 @@ public class LetterService {
 			letter.setAdoptedInSessionId(letter.getAdoptedInSessionId());
 		}
 		LetterEntity saved = letterRepository.save(letter);
-		eventPublisher.publishEvent(new LetterChangedEvent(saved.getId()));
-		return toSummary(saved);
+		LetterSummaryResponse summary = toSummary(saved);
+		eventPublisher.publishEvent(new LetterChangedEvent(summary));
+		return summary;
 	}
 
 	@Transactional
@@ -100,7 +101,7 @@ public class LetterService {
 			letterRepository.save(letter);
 		}
 		LetterReplyEntity reply = letterReplyRepository.save(new LetterReplyEntity(nextId("reply"), letter.getId(), request.replyText()));
-		eventPublisher.publishEvent(new LetterChangedEvent(letter.getId()));
+		eventPublisher.publishEvent(new LetterChangedEvent(toSummary(letter)));
 		return new LetterReplyResponse(reply.getId(), reply.getCreatedAt());
 	}
 
@@ -122,7 +123,7 @@ public class LetterService {
 				LetterStatus.UNREAD,
 				idempotencyKey);
 		LetterEntity saved = letterRepository.save(entity);
-		eventPublisher.publishEvent(new LetterChangedEvent(saved.getId()));
+		eventPublisher.publishEvent(new LetterChangedEvent(toSummary(saved)));
 		return new LetterCreateResponse(saved.getId(), saved.getStatus(), saved.getCreatedAt());
 	}
 

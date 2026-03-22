@@ -1,4 +1,6 @@
 package com.seedshiftradio.letter;
 
-public record LetterChangedEvent(String letterId) {
+import com.seedshiftradio.letter.LetterDtos.LetterSummaryResponse;
+
+public record LetterChangedEvent(LetterSummaryResponse summary) {
 }

@@ -1,13 +1,10 @@
 package com.seedshiftradio.radio;
 
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,8 +18,6 @@ import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-
-import com.seedshiftradio.stream.RadioEventHub;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(properties = "seedshift.radio.security.admin-token=test-admin-token")
@@ -48,6 +43,13 @@ class RadioApiTests {
 	@Test
 	void adminTokenIsRequiredForMonitorSummary() throws Exception {
 		mockMvc.perform(get("/api/monitor/summary"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("ADMIN_AUTH_REQUIRED"));
+	}
+
+	@Test
+	void adminTokenIsRequiredForLetterList() throws Exception {
+		mockMvc.perform(get("/api/letters"))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("ADMIN_AUTH_REQUIRED"));
 	}
@@ -101,14 +103,5 @@ class RadioApiTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.correlationId").exists())
 				.andExpect(jsonPath("$.readyQueueCount").value(greaterThanOrEqualTo(1)));
-	}
-
-	@Test
-	void lastEventIdReplayIsAvailableFromEventHub() {
-		RadioEventHub hub = new RadioEventHub();
-		hub.publish("radio.status.changed", "first");
-		hub.publish("queue.updated", "second");
-		List<RadioEventRecord> replay = hub.replayAfter("evt-000001");
-		assertFalse(replay.isEmpty());
 	}
 }

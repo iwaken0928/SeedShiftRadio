@@ -64,7 +64,7 @@ public class StreamEventService {
 		publish("letter.updated", event.summary());
 	}
 
-	List<RadioEventRecord> replayAfter(String lastEventId) {
+	public List<RadioEventRecord> replayAfter(String lastEventId) {
 		if (lastEventId == null || lastEventId.isBlank()) {
 			return List.of();
 		}

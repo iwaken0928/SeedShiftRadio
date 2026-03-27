@@ -36,6 +36,7 @@ public class RadioService {
 	private static final int TARGET_READY_COUNT = 3;
 	private static final int MINIMUM_READY_COUNT = 2;
 	private static final int MIN_READY_DURATION_MS = 90_000;
+	private static final int MIN_REMAINING_SLOT_COUNT = 2;
 
 	private final StationRepository stationRepository;
 	private final ProgrammingService programmingService;
@@ -94,7 +95,7 @@ public class RadioService {
 		session.setCorrelationId(correlationId);
 		session = playoutSessionRepository.save(session);
 
-		ProgramBlockEntity block = createProgramBlock(session, plan);
+		ProgramBlockEntity block = createProgramBlock(session, plan, ProgramBlockStatus.ACTIVE);
 		session.setCurrentProgramBlockId(block.getId());
 		playoutSessionRepository.save(session);
 
@@ -271,7 +272,8 @@ public class RadioService {
 				playoutSessionRepository.count(),
 				queueItemRepository.count(),
 				latestEventId,
-				latest.map(PlayoutSessionEntity::getId).orElse(null));
+				latest.map(PlayoutSessionEntity::getId).orElse(null),
+				Map.of());
 	}
 
 	public byte[] placeholderWav() {
@@ -297,7 +299,7 @@ public class RadioService {
 		return buffer.array();
 	}
 
-	private ProgramBlockEntity createProgramBlock(PlayoutSessionEntity session, ResolvedProgramPlan plan) {
+	private ProgramBlockEntity createProgramBlock(PlayoutSessionEntity session, ResolvedProgramPlan plan, ProgramBlockStatus status) {
 		ProgramBlockEntity block = new ProgramBlockEntity();
 		block.setId(nextId("program"));
 		block.setStationId(session.getStationId());
@@ -305,7 +307,7 @@ public class RadioService {
 		block.setProgramTemplateId(plan.templateId());
 		block.setProgramTemplateVersion(plan.templateVersion());
 		block.setTitle(plan.title());
-		block.setStatus(ProgramBlockStatus.ACTIVE);
+		block.setStatus(status);
 		block.setPlannedDurationMs(plan.plannedDurationMs());
 		block = programBlockRepository.save(block);
 
@@ -382,20 +384,24 @@ public class RadioService {
 				.filter(item -> item.getStatus() == QueueItemStatus.READY)
 				.mapToInt(QueueItemEntity::getDurationMs)
 				.sum();
+		ProgramBlockEntity currentBlock = getCurrentProgramBlock(session);
+		ProgramBlockEntity latestBlock = planNextProgramBlockIfNeeded(session, currentBlock);
 		if (readyCount >= MINIMUM_READY_COUNT && readyDuration >= MIN_READY_DURATION_MS) {
+			completeAndAdvanceProgramBlock(session, items, currentBlock, latestBlock);
 			return;
 		}
-		List<ProgramBlockSlotEntity> blockSlots = session.getCurrentProgramBlockId() == null ? List.of()
-				: programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(session.getCurrentProgramBlockId());
+		ProgramBlockEntity refillBlock = resolveRefillBlock(currentBlock, latestBlock);
+		List<ProgramBlockSlotEntity> blockSlots = refillBlock == null
+				? List.of()
+				: programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(refillBlock.getId());
 		int nextSequence = items.size() + 1;
 		List<QueueItemEntity> additions = new ArrayList<>();
+		List<ProgramBlockSlotEntity> changedSlots = new ArrayList<>();
 		for (ProgramBlockSlotEntity blockSlot : blockSlots) {
 			if (blockSlot.getStatus() == ProgramBlockSlotStatus.PLANNED) {
-				additions.add(createQueueItem(session,
-						programBlockRepository.findById(session.getCurrentProgramBlockId()).orElseThrow(),
-						blockSlot,
-						nextSequence++));
+				additions.add(createQueueItem(session, refillBlock, blockSlot, nextSequence++));
 				blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
+				changedSlots.add(blockSlot);
 				readyCount++;
 				readyDuration += blockSlot.getTargetDurationMs();
 			}
@@ -410,7 +416,94 @@ public class RadioService {
 			streamEventService.publish("buffer.warning", Map.of("sessionId", session.getId(), "readyCount", readyCount));
 		}
 		queueItemRepository.saveAll(additions);
-		programBlockSlotRepository.saveAll(blockSlots);
+		if (!changedSlots.isEmpty()) {
+			programBlockSlotRepository.saveAll(changedSlots);
+		}
+		completeAndAdvanceProgramBlock(
+				session,
+				queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()),
+				currentBlock,
+				latestBlock);
+	}
+
+	private ProgramBlockEntity getCurrentProgramBlock(PlayoutSessionEntity session) {
+		if (session.getCurrentProgramBlockId() == null) {
+			return null;
+		}
+		return programBlockRepository.findById(session.getCurrentProgramBlockId()).orElse(null);
+	}
+
+	private ProgramBlockEntity planNextProgramBlockIfNeeded(PlayoutSessionEntity session, ProgramBlockEntity currentBlock) {
+		ProgramBlockEntity latestBlock = programBlockRepository.findTopBySessionIdOrderByStartedAtDesc(session.getId()).orElse(currentBlock);
+		if (currentBlock == null) {
+			return latestBlock;
+		}
+		if (latestBlock != null && !latestBlock.getId().equals(currentBlock.getId())) {
+			return latestBlock;
+		}
+		long remainingSlotCount = programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(currentBlock.getId()).stream()
+				.filter(slot -> slot.getStatus() != ProgramBlockSlotStatus.DONE && slot.getStatus() != ProgramBlockSlotStatus.SKIPPED)
+				.count();
+		if (remainingSlotCount >= MIN_REMAINING_SLOT_COUNT) {
+			return latestBlock;
+		}
+		ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(session.getStationId(), OffsetDateTime.now());
+		ProgramBlockEntity nextBlock = createProgramBlock(session, plan, ProgramBlockStatus.PLANNED);
+		if (plan.fallbackApplied()) {
+			session.setState(PlayoutState.DEGRADED);
+			session.setDegradedReason("LEGACY_RATIO");
+		}
+		return nextBlock;
+	}
+
+	private ProgramBlockEntity resolveRefillBlock(ProgramBlockEntity currentBlock, ProgramBlockEntity latestBlock) {
+		if (currentBlock != null && hasPlannedSlots(currentBlock.getId())) {
+			return currentBlock;
+		}
+		if (latestBlock != null && hasPlannedSlots(latestBlock.getId())) {
+			return latestBlock;
+		}
+		return null;
+	}
+
+	private boolean hasPlannedSlots(String programBlockId) {
+		return programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(programBlockId).stream()
+				.anyMatch(slot -> slot.getStatus() == ProgramBlockSlotStatus.PLANNED);
+	}
+
+	private void completeAndAdvanceProgramBlock(
+			PlayoutSessionEntity session,
+			List<QueueItemEntity> items,
+			ProgramBlockEntity currentBlock,
+			ProgramBlockEntity latestBlock) {
+		if (currentBlock == null) {
+			return;
+		}
+		boolean currentBlockCompleted = programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(currentBlock.getId()).stream()
+				.allMatch(slot -> slot.getStatus() == ProgramBlockSlotStatus.DONE || slot.getStatus() == ProgramBlockSlotStatus.SKIPPED);
+		if (!currentBlockCompleted) {
+			return;
+		}
+		boolean hasOutstandingQueueItem = items.stream()
+				.filter(item -> currentBlock.getId().equals(item.getProgramBlockId()))
+				.anyMatch(item -> item.getStatus() != QueueItemStatus.DONE
+						&& item.getStatus() != QueueItemStatus.FAILED
+						&& item.getStatus() != QueueItemStatus.SKIPPED);
+		if (hasOutstandingQueueItem) {
+			return;
+		}
+		if (currentBlock.getStatus() != ProgramBlockStatus.DONE) {
+			currentBlock.setStatus(ProgramBlockStatus.DONE);
+			currentBlock.setEndedAt(Instant.now());
+			programBlockRepository.save(currentBlock);
+		}
+		if (latestBlock != null && !latestBlock.getId().equals(currentBlock.getId())) {
+			if (latestBlock.getStatus() != ProgramBlockStatus.ACTIVE) {
+				latestBlock.setStatus(ProgramBlockStatus.ACTIVE);
+				programBlockRepository.save(latestBlock);
+			}
+			session.setCurrentProgramBlockId(latestBlock.getId());
+		}
 	}
 
 	private void transitionToPlaying(PlayoutSessionEntity session, String itemId) {

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.seedshiftradio.common.correlation.CorrelationIdFilter;
+import com.seedshiftradio.settings.AssetService;
 
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,9 +22,11 @@ import jakarta.servlet.http.HttpServletRequest;
 public class RadioController {
 
 	private final RadioService radioService;
+	private final AssetService assetService;
 
-	public RadioController(RadioService radioService) {
+	public RadioController(RadioService radioService, AssetService assetService) {
 		this.radioService = radioService;
+		this.assetService = assetService;
 	}
 
 	@PostMapping("/clients/capabilities")
@@ -79,8 +82,10 @@ public class RadioController {
 		return ResponseEntity.accepted().build();
 	}
 
-	@GetMapping(value = "/assets/audio/{assetId}.wav", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
-	public byte[] placeholderAudio(@PathVariable("assetId") String assetId) {
-		return radioService.placeholderWav();
+	@GetMapping(value = "/assets/audio/{assetId}.wav", produces = "audio/wav")
+	public ResponseEntity<byte[]> placeholderAudio(@PathVariable("assetId") String assetId) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType("audio/wav"))
+				.body(assetService.loadAudio(assetId, radioService::placeholderWav));
 	}
 }

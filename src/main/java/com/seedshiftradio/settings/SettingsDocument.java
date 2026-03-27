@@ -1,0 +1,192 @@
+package com.seedshiftradio.settings;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+public record SettingsDocument(
+		Integer version,
+		Integer schemaVersion,
+		Instant updatedAt,
+		ServerSettings server,
+		PathSettings paths,
+		PlayoutSettings playout,
+		ProgrammingSettings programming,
+		ProviderCatalog providers,
+		SecuritySettings security,
+		FeatureSettings features) {
+
+	public SettingsDocument normalize() {
+		return new SettingsDocument(
+				version == null || version < 1 ? 1 : version,
+				schemaVersion == null || schemaVersion < 1 ? 1 : schemaVersion,
+				updatedAt == null ? Instant.now() : updatedAt,
+				server == null ? ServerSettings.defaults() : server.normalize(),
+				paths == null ? PathSettings.defaults() : paths.normalize(),
+				playout == null ? PlayoutSettings.defaults() : playout.normalize(),
+				programming == null ? ProgrammingSettings.defaults() : programming.normalize(),
+				providers == null ? ProviderCatalog.defaults() : providers.normalize(),
+				security == null ? SecuritySettings.defaults() : security.normalize(),
+				features == null ? FeatureSettings.defaults() : features.normalize());
+	}
+
+	public SettingsDocument withVersionAndTimestamp(int newVersion, Instant timestamp) {
+		return new SettingsDocument(
+				newVersion,
+				schemaVersion,
+				timestamp,
+				server,
+				paths,
+				playout,
+				programming,
+				providers,
+				security,
+				features);
+	}
+
+	public static SettingsDocument defaults() {
+		return new SettingsDocument(
+				1,
+				1,
+				Instant.now(),
+				ServerSettings.defaults(),
+				PathSettings.defaults(),
+				PlayoutSettings.defaults(),
+				ProgrammingSettings.defaults(),
+				ProviderCatalog.defaults(),
+				SecuritySettings.defaults(),
+				FeatureSettings.defaults());
+	}
+
+	public record ServerSettings(String bindHost, Integer port) {
+
+		public ServerSettings normalize() {
+			return new ServerSettings(
+					(bindHost == null || bindHost.isBlank()) ? "127.0.0.1" : bindHost,
+					(port == null || port < 1) ? 8080 : port);
+		}
+
+		static ServerSettings defaults() {
+			return new ServerSettings("127.0.0.1", 8080);
+		}
+	}
+
+	public record PathSettings(String dataRoot, String musicLibrary) {
+
+		public PathSettings normalize() {
+			return new PathSettings(
+					(dataRoot == null || dataRoot.isBlank()) ? "./data" : dataRoot,
+					(musicLibrary == null || musicLibrary.isBlank()) ? "./data/library/music" : musicLibrary);
+		}
+
+		static PathSettings defaults() {
+			return new PathSettings("./data", "./data/library/music");
+		}
+	}
+
+	public record PlayoutSettings(Integer targetReadyCount, Integer minReadyDurationMs) {
+
+		public PlayoutSettings normalize() {
+			return new PlayoutSettings(
+					targetReadyCount == null || targetReadyCount < 1 ? 3 : targetReadyCount,
+					minReadyDurationMs == null || minReadyDurationMs < 1 ? 90_000 : minReadyDurationMs);
+		}
+
+		static PlayoutSettings defaults() {
+			return new PlayoutSettings(3, 90_000);
+		}
+	}
+
+	public record ProgrammingSettings(Integer defaultPlanningHorizonMinutes, Boolean legacyRatioFallback, String seedImportRef) {
+
+		public ProgrammingSettings normalize() {
+			return new ProgrammingSettings(
+					defaultPlanningHorizonMinutes == null || defaultPlanningHorizonMinutes < 1 ? 20 : defaultPlanningHorizonMinutes,
+					legacyRatioFallback == null ? Boolean.TRUE : legacyRatioFallback,
+					(seedImportRef == null || seedImportRef.isBlank()) ? "file:./data/config/programming-seed.json" : seedImportRef);
+		}
+
+		static ProgrammingSettings defaults() {
+			return new ProgrammingSettings(20, true, "file:./data/config/programming-seed.json");
+		}
+	}
+
+	public record ProviderCatalog(ProviderGroup llm, ProviderGroup tts, ProviderGroup musicGen) {
+
+		public ProviderCatalog normalize() {
+			return new ProviderCatalog(
+					llm == null ? defaults().llm() : llm.normalize(),
+					tts == null ? defaults().tts() : tts.normalize(),
+					musicGen == null ? defaults().musicGen() : musicGen.normalize());
+		}
+
+		static ProviderCatalog defaults() {
+			return new ProviderCatalog(
+					new ProviderGroup(
+							"ollama",
+							Map.of("ollama", new ProviderEndpoint("http://127.0.0.1:11434", "/api/tags", 5_000, List.of("SCRIPT_GEN")))),
+					new ProviderGroup(
+							"voicevox",
+							Map.of("voicevox", new ProviderEndpoint("http://127.0.0.1:50021", "/version", 5_000, List.of("TTS_GEN")))),
+					new ProviderGroup(
+							"ace-step",
+							Map.of("ace-step", new ProviderEndpoint("http://127.0.0.1:8000", "/health", 5_000, List.of("MUSIC_GEN")))));
+		}
+	}
+
+	public record ProviderGroup(String defaultProvider, Map<String, ProviderEndpoint> providers) {
+
+		public ProviderGroup normalize() {
+			Map<String, ProviderEndpoint> normalizedProviders = providers == null || providers.isEmpty()
+					? Map.of()
+					: new LinkedHashMap<>(providers.entrySet().stream()
+							.collect(java.util.stream.Collectors.toMap(
+									Map.Entry::getKey,
+									entry -> entry.getValue() == null ? ProviderEndpoint.defaults() : entry.getValue().normalize(),
+									(left, right) -> right,
+									LinkedHashMap::new)));
+			return new ProviderGroup(
+					(defaultProvider == null || defaultProvider.isBlank()) ? normalizedProviders.keySet().stream().findFirst().orElse("default") : defaultProvider,
+					normalizedProviders);
+		}
+	}
+
+	public record ProviderEndpoint(String baseUrl, String healthPath, Integer timeoutMs, List<String> capabilities) {
+
+		public ProviderEndpoint normalize() {
+			return new ProviderEndpoint(
+					(baseUrl == null || baseUrl.isBlank()) ? "http://127.0.0.1" : baseUrl,
+					(healthPath == null || healthPath.isBlank()) ? "/health" : healthPath,
+					timeoutMs == null || timeoutMs < 100 ? 5_000 : timeoutMs,
+					capabilities == null ? List.of() : List.copyOf(capabilities));
+		}
+
+		static ProviderEndpoint defaults() {
+			return new ProviderEndpoint("http://127.0.0.1", "/health", 5_000, List.of());
+		}
+	}
+
+	public record SecuritySettings(String adminTokenRef) {
+
+		public SecuritySettings normalize() {
+			return new SecuritySettings(
+					(adminTokenRef == null || adminTokenRef.isBlank()) ? "env:SEEDSHIFT_ADMIN_TOKEN" : adminTokenRef);
+		}
+
+		static SecuritySettings defaults() {
+			return new SecuritySettings("env:SEEDSHIFT_ADMIN_TOKEN");
+		}
+	}
+
+	public record FeatureSettings(Boolean allowPlaceholderAudio) {
+
+		public FeatureSettings normalize() {
+			return new FeatureSettings(allowPlaceholderAudio == null ? Boolean.TRUE : allowPlaceholderAudio);
+		}
+
+		static FeatureSettings defaults() {
+			return new FeatureSettings(true);
+		}
+	}
+}

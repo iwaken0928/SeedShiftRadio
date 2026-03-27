@@ -1,6 +1,9 @@
 package com.seedshiftradio.radio;
 
 import java.time.Instant;
+import java.util.Map;
+
+import com.seedshiftradio.settings.SettingsDtos;
 
 public record HealthResponse(
 		String status,
@@ -9,5 +12,6 @@ public record HealthResponse(
 		long sessionCount,
 		long queueCount,
 		String latestEventId,
-		String currentSessionId) {
+		String currentSessionId,
+		Map<String, SettingsDtos.ProviderHealthPayload> providerHealth) {
 }

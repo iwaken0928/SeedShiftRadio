@@ -1,8 +1,11 @@
 package com.seedshiftradio.radio;
 
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,6 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -20,7 +24,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(properties = "seedshift.radio.security.admin-token=test-admin-token")
+@SpringBootTest(properties = {
+		"seedshift.radio.security.admin-token=test-admin-token",
+		"seedshift.radio.config.path=./build/test-settings/radio-config.json"
+})
 class RadioApiTests {
 
 	@Container
@@ -50,6 +57,13 @@ class RadioApiTests {
 	@Test
 	void adminTokenIsRequiredForLetterList() throws Exception {
 		mockMvc.perform(get("/api/letters"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("ADMIN_AUTH_REQUIRED"));
+	}
+
+	@Test
+	void adminTokenIsRequiredForSettings() throws Exception {
+		mockMvc.perform(get("/api/settings"))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("ADMIN_AUTH_REQUIRED"));
 	}
@@ -105,7 +119,27 @@ class RadioApiTests {
 
 		mockMvc.perform(get("/api/monitor/summary").header("X-Admin-Token", "test-admin-token"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.correlationId").exists())
-				.andExpect(jsonPath("$.readyQueueCount").value(greaterThanOrEqualTo(1)));
+				.andExpect(jsonPath("$.sessionId").exists())
+				.andExpect(jsonPath("$.bufferReadyCount").value(greaterThanOrEqualTo(1)))
+				.andExpect(jsonPath("$.providerHealth.llm.status").exists());
+	}
+
+	@Test
+	void settingsEndpointReturnsConfigDocument() throws Exception {
+		mockMvc.perform(get("/api/settings").header("X-Admin-Token", "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.version").value(greaterThanOrEqualTo(1)))
+				.andExpect(jsonPath("$.providers.llm.defaultProvider").exists())
+				.andExpect(jsonPath("$.features.allowPlaceholderAudio").value(true));
+	}
+
+	@Test
+	void assetEndpointReturnsAudioWav() throws Exception {
+		MvcResult result = mockMvc.perform(get("/api/assets/audio/{assetId}.wav", "queue-asset-123"))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Content-Type", startsWith("audio/wav")))
+				.andReturn();
+
+		assertTrue(result.getResponse().getContentLengthLong() > 0);
 	}
 }

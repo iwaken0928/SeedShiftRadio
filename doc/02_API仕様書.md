@@ -377,6 +377,82 @@ Response:
 }
 ```
 
+### 6.8 `GET /api/settings`
+
+`config.json` の現在値に `version` を付けて返し、Web/Native が同じ契約で設定を表示できるようにします。サーバーは起動時に `schemaVersion` も検証し、一致しない場合には `400` を返します。
+
+```json
+{
+  "version": 3,
+  "schemaVersion": "2026-03",
+  "server": {
+    "bindHost": "127.0.0.1",
+    "port": 8080
+  },
+  "paths": {
+    "dataRoot": "./data",
+    "musicLibrary": "./data/library/music"
+  },
+  "playout": {
+    "targetReadyCount": 3,
+    "minReadyDurationMs": 90000
+  },
+  "providers": {
+    "llm": { "defaultProvider": "ollama" },
+    "tts": { "defaultProvider": "voicevox" },
+    "musicGen": { "defaultProvider": "ace-step" }
+  },
+  "security": {
+    "adminTokenRef": "env:SEEDSHIFT_ADMIN_TOKEN"
+  }
+}
+```
+
+### 6.9 `PUT /api/settings`
+
+クライアントから送られた `version` と DB/ファイルの `version` を比べて楽観ロックをかけます。`paths`, `playout`, `providers`, `security` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。成功するとインクリメント済み `version` を返し、`correlationId` で変更元をトレースできます。
+
+```json
+{
+  "version": 3,
+  "paths": { ... },
+  "providers": { ... }
+}
+```
+
+### 6.10 `POST /api/settings/test-connections`
+
+Provider に対する接続テストを実行し、`status` には `UP/DEGRADED/DOWN` を返します。`providerFingerprint` で個別 Provider を指示でき、`message` には疎通結果 `responseTimeMs` には所要時間を含めます。
+
+```json
+{
+  "providerType": "tts",
+  "providerFingerprint": "voicevox",
+  "status": "UP",
+  "message": "VOICEVOX が 200 を返しました",
+  "responseTimeMs": 53
+}
+```
+
+### 6.11 `GET /api/assets/audio/{assetId}.wav`
+
+生成済み audio asset がある場合はそのファイルを `audio/wav` で返し、見つからない場合や `features.streaming.placeholder.enabled` が `true` のときは 1 秒無音 WAV （`placeholder`）を返します。リアル asset は `generated_asset` メタで管理され、`provider.health.changed` の `DEGRADED` のときも placeholder を使って再生継続します。
+
+### 6.12 Provider Health
+
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の `ProviderHealthPayload` を返します。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities` を含み、SSE `provider.health.changed` と同じフォーマットでクライアントが再利用しやすくなっています。
+
+```json
+{
+  "providerType": "musicGen",
+  "status": "DEGRADED",
+  "lastCheckedAt": "2026-03-20T09:12:00Z",
+  "responseTimeMs": 312,
+  "message": "FastAPI worker がタイムアウト",
+  "capabilities": ["ace-step:fast"]
+}
+```
+
 ## 7. SSE仕様
 
 Endpoint:

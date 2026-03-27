@@ -5,20 +5,19 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.seedshiftradio.radio.HealthResponse;
-import com.seedshiftradio.radio.RadioService;
 
 @RestController
 @RequestMapping("/api")
 public class HealthController {
 
-	private final RadioService radioService;
+	private final HealthService healthService;
 
-	public HealthController(RadioService radioService) {
-		this.radioService = radioService;
+	public HealthController(HealthService healthService) {
+		this.healthService = healthService;
 	}
 
 	@GetMapping("/health")
 	public HealthResponse health() {
-		return radioService.health();
+		return healthService.health();
 	}
 }

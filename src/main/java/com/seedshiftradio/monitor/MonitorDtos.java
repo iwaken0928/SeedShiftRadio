@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 
 import com.seedshiftradio.domain.PlayoutState;
+import com.seedshiftradio.settings.SettingsDtos;
 
 public final class MonitorDtos {
 
@@ -17,7 +18,7 @@ public final class MonitorDtos {
 			Integer bufferReadyCount,
 			long pendingLetterCount,
 			boolean degraded,
-			Map<String, String> providerHealth,
+			Map<String, SettingsDtos.ProviderHealthPayload> providerHealth,
 			Instant updatedAt) {
 	}
 }

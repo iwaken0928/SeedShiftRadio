@@ -1,24 +1,24 @@
 package com.seedshiftradio.monitor;
 
-import java.util.Map;
-
 import org.springframework.stereotype.Service;
 
-import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.letter.LetterService;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.radio.RadioStatusResponse;
 import com.seedshiftradio.radio.RadioService;
+import com.seedshiftradio.settings.ProviderHealthService;
 
 @Service
 public class MonitorService {
 
 	private final RadioService radioService;
 	private final LetterService letterService;
+	private final ProviderHealthService providerHealthService;
 
-	public MonitorService(RadioService radioService, LetterService letterService) {
+	public MonitorService(RadioService radioService, LetterService letterService, ProviderHealthService providerHealthService) {
 		this.radioService = radioService;
 		this.letterService = letterService;
+		this.providerHealthService = providerHealthService;
 	}
 
 	public MonitorSummaryResponse summary() {
@@ -31,7 +31,7 @@ public class MonitorService {
 				status.bufferReadyCount(),
 				pendingLetters,
 				status.degraded(),
-				Map.of("musicGen", "UP", "tts", "UP", "llm", "UP"),
+				providerHealthService.getLatestOrProbe(),
 				status.updatedAt());
 	}
 }

@@ -37,6 +37,7 @@ public interface MusicProvider {
 | station / program template 固有上書き | 可能 |
 | fallback Provider | 種別ごとに 1 件以上設定可能 |
 | 接続テスト | `/api/settings/test-connections` から実行 |
+- 設定更新 | `/api/settings` の `version`/`schemaVersion` で楽観ロックし、`features` で placeholder 制御を入れる |
 
 ## 5. 接続方式
 
@@ -98,6 +99,9 @@ Provider ごとに以下を持つ。
 - `responseTimeMs`
 - `message`
 - `capabilities`
+
+上記 Payload は `/api/monitor/summary` と `/api/health` で JSON 配列として返され、SSE `provider.health.changed` イベントでも同じ構造を送る。
+`status` は `UP` で正常、`DEGRADED` で代替 Provider へ切り替え中、`DOWN` で fallback に突入するシグナルとして解釈される。SSE の `Last-Event-ID` で再接続すると最新状態を受け取れる。
 
 Health は `/api/health` と `/api/monitor/summary` に集約する。
 

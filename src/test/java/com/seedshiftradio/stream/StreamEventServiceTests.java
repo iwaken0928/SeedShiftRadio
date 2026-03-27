@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -46,5 +47,18 @@ class StreamEventServiceTests {
 		assertEquals(1, replay.size());
 		assertEquals("letter.updated", replay.getFirst().eventType());
 		assertEquals(summary, replay.getFirst().payload());
+	}
+
+	@Test
+	void providerHealthChangedEventIsReplayable() {
+		StreamEventService service = new StreamEventService();
+		Map<String, String> payload = Map.of("status", "DEGRADED", "message", "tts unreachable");
+
+		service.publish("provider.health.changed", payload);
+
+		List<RadioEventRecord> replay = service.replayAfter("0");
+		assertEquals(1, replay.size());
+		assertEquals("provider.health.changed", replay.getFirst().eventType());
+		assertEquals(payload, replay.getFirst().payload());
 	}
 }

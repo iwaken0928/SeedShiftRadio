@@ -82,6 +82,9 @@ TTS 前の中立データとして以下を保持する。
 
 Web では主にデバッグ表示用、Native では実行用とする。
 
+- `SpeechDirectiveAssembler` は `queue item`, `Language Persona`, `Voice Persona`, 必要時 `client_capabilities` を使って `voiceHint` を決定する
+- `clientId` が与えられ、`preferredPlaybackMode=CLIENT_TTS` かつ `localVoiceProfiles` があれば、その候補を既定 `Voice Persona` より優先してよい
+
 ## 7. TTS Provider 方針
 
 | 候補 | 位置づけ |

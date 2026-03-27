@@ -34,6 +34,8 @@
 }
 ```
 
+Server は `clientId` ごとに最新の能力申告を保持し、`GET /api/radio/next-speech-directive?clientId=desktop-win-main` の `voiceHint` 解決に利用する。
+
 ## 4. 再生モード
 
 | モード | 説明 |
@@ -42,6 +44,8 @@
 | `CLIENT_TTS` | `SpeechDirective` を受け取り、クライアントが音声合成する |
 
 Native Client は `CLIENT_TTS` を優先するが、失敗時は `SERVER_AUDIO` へフォールバックする。
+
+- `next-speech-directive` 呼び出し時に `clientId` を渡すことで、Server は `localVoiceProfiles` に基づく `voiceHint` を返せる
 
 ## 5. Client Adapter 層
 

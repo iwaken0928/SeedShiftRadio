@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,8 +31,10 @@ public class RadioController {
 	}
 
 	@PostMapping("/clients/capabilities")
-	public ClientCapabilitiesResponse registerCapabilities(@Valid @RequestBody ClientCapabilitiesRequest request) {
-		return radioService.registerCapabilities(request);
+	public ClientCapabilitiesResponse registerCapabilities(
+			@Valid @RequestBody ClientCapabilitiesRequest request,
+			HttpServletRequest httpServletRequest) {
+		return radioService.registerCapabilities(request, CorrelationIdFilter.getCorrelationId(httpServletRequest));
 	}
 
 	@PostMapping("/radio/tune")
@@ -72,8 +75,8 @@ public class RadioController {
 	}
 
 	@GetMapping("/radio/next-speech-directive")
-	public SpeechDirectiveResponse nextSpeechDirective() {
-		return radioService.getNextSpeechDirective();
+	public SpeechDirectiveResponse nextSpeechDirective(@RequestParam(value = "clientId", required = false) String clientId) {
+		return radioService.getNextSpeechDirective(clientId);
 	}
 
 	@PostMapping("/radio/playback-events")

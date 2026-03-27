@@ -165,7 +165,7 @@
 | `GET` | `/api/radio/program` | 現在の番組 block 取得 |
 | `GET` | `/api/radio/queue` | 現在キュー取得 |
 | `GET` | `/api/radio/next-segment` | 次の再生候補取得 |
-| `GET` | `/api/radio/next-speech-directive` | Client-side TTS 用指示取得 |
+| `GET` | `/api/radio/next-speech-directive` | Client-side TTS 用指示取得。`clientId` 指定時は登録済み能力で `voiceHint` を最適化 |
 | `POST` | `/api/radio/playback-events` | クライアント再生イベント通知 |
 | `GET` | `/api/letters` | レター一覧取得 |
 | `POST` | `/api/letters` | レター投稿 |
@@ -203,6 +203,9 @@ Response:
 }
 ```
 
+- `resumePlayback=true` の場合でも初回応答は `PREPARING` を返し、その後の warmup 完了時に Server が自動で `PLAYING` へ進めてよい
+- `resumePlayback=false` の場合は `PREPARING` のまま返し、Client が `POST /api/radio/play` で開始する
+
 ### 6.2 `POST /clients/capabilities`
 
 ```json
@@ -214,6 +217,15 @@ Response:
   "preferredPlaybackMode": "SERVER_AUDIO"
 }
 ```
+
+- Server は `clientId` ごとに最新の能力申告を保持し、`GET /api/radio/next-speech-directive?clientId=...` の `voiceHint` 解決に利用する
+- `localVoiceProfiles` がある場合、Server は既定 `VoiceProfile` よりクライアント側のローカル音声候補を優先して `SpeechDirective` を組み立ててよい
+
+### 6.2.1 `GET /radio/next-speech-directive`
+
+- 既定では次の `READY` item に対する `SpeechDirective` を返す
+- `clientId` を指定した場合は、そのクライアントの最新 `client_capabilities` を参照し、`voiceHint` にローカル音声候補を反映する
+- 未登録の `clientId` では station の既定 `VoiceProfile` を使う
 
 ### 6.3 `POST /letters`
 

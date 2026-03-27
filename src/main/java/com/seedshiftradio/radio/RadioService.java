@@ -11,7 +11,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +47,10 @@ public class RadioService {
 	private final ProgramBlockSlotRepository programBlockSlotRepository;
 	private final QueueItemRepository queueItemRepository;
 	private final StreamEventService streamEventService;
-	private final Map<String, ClientCapabilitiesRequest> clientCapabilities = new ConcurrentHashMap<>();
+	private final ClientCapabilitiesService clientCapabilitiesService;
+	private final SpeechDirectiveAssembler speechDirectiveAssembler;
+	private final ApplicationEventPublisher eventPublisher;
+	private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
 	public RadioService(
 			StationRepository stationRepository,
@@ -54,7 +59,10 @@ public class RadioService {
 			ProgramBlockRepository programBlockRepository,
 			ProgramBlockSlotRepository programBlockSlotRepository,
 			QueueItemRepository queueItemRepository,
-			StreamEventService streamEventService) {
+			StreamEventService streamEventService,
+			ClientCapabilitiesService clientCapabilitiesService,
+			SpeechDirectiveAssembler speechDirectiveAssembler,
+			ApplicationEventPublisher eventPublisher) {
 		this.stationRepository = stationRepository;
 		this.programmingService = programmingService;
 		this.playoutSessionRepository = playoutSessionRepository;
@@ -62,20 +70,14 @@ public class RadioService {
 		this.programBlockSlotRepository = programBlockSlotRepository;
 		this.queueItemRepository = queueItemRepository;
 		this.streamEventService = streamEventService;
+		this.clientCapabilitiesService = clientCapabilitiesService;
+		this.speechDirectiveAssembler = speechDirectiveAssembler;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@Transactional
-	public ClientCapabilitiesResponse registerCapabilities(ClientCapabilitiesRequest request) {
-		clientCapabilities.put(request.clientId(), request);
-		return new ClientCapabilitiesResponse(
-				request.clientId(),
-				request.clientType(),
-				request.supportsClientSideTts(),
-				request.supportedVoiceEngines(),
-				request.preferredPlaybackMode(),
-				request.localVoiceProfiles(),
-				Instant.now(),
-				null);
+	public ClientCapabilitiesResponse registerCapabilities(ClientCapabilitiesRequest request, String correlationId) {
+		return clientCapabilitiesService.register(request, correlationId);
 	}
 
 	@Transactional
@@ -86,7 +88,6 @@ public class RadioService {
 			throw new ApiException(HttpStatus.CONFLICT, "CONFLICT", "指定された局は無効化されています。", Map.of("stationId", request.stationId()));
 		}
 
-		ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(request.stationId(), OffsetDateTime.now());
 		PlayoutSessionEntity session = new PlayoutSessionEntity();
 		session.setId(nextId("playout"));
 		session.setStationId(request.stationId());
@@ -94,14 +95,8 @@ public class RadioService {
 		session.setBufferReadyCount(0);
 		session.setCorrelationId(correlationId);
 		session = playoutSessionRepository.save(session);
-
-		ProgramBlockEntity block = createProgramBlock(session, plan, ProgramBlockStatus.ACTIVE);
-		session.setCurrentProgramBlockId(block.getId());
-		playoutSessionRepository.save(session);
-
-		materializeInitialQueue(session, block, plan);
-		refreshSessionState(session);
 		emitSessionEvents(session.getId());
+		requestQueueWarmup(session.getId());
 		return new TuneResponse(session.getId(), session.getStationId(), session.getState(), true, correlationId);
 	}
 
@@ -112,12 +107,20 @@ public class RadioService {
 		QueueItemEntity item = items.stream()
 				.filter(candidate -> candidate.getStatus() == QueueItemStatus.PLAYING)
 				.findFirst()
-				.orElseGet(() -> items.stream()
-						.filter(candidate -> candidate.getStatus() == QueueItemStatus.READY)
-						.findFirst()
-						.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "再生可能なセグメントがまだありません。", Map.of("sessionId", session.getId()))));
+				.orElse(null);
+		if (item == null) {
+			item = items.stream()
+					.filter(candidate -> candidate.getStatus() == QueueItemStatus.READY)
+					.findFirst()
+					.orElse(null);
+		}
+		if (item == null) {
+			requestQueueWarmup(session.getId());
+			throw new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "再生可能なセグメントがまだありません。", Map.of("sessionId", session.getId()));
+		}
 		transitionToPlaying(session, item.getId());
 		refreshSessionState(session);
+		requestQueueRefill(session.getId());
 		emitSessionEvents(session.getId());
 		return getStatus();
 	}
@@ -209,19 +212,11 @@ public class RadioService {
 	}
 
 	@Transactional(readOnly = true)
-	public SpeechDirectiveResponse getNextSpeechDirective() {
-		QueueItemResponse item = getNextSegment();
-		return new SpeechDirectiveResponse(
-				item.speechDirectiveId() == null ? "sd-" + item.id() : item.speechDirectiveId(),
-				item.title(),
-				item.title(),
-				List.of(),
-				"calm",
-				"medium",
-				List.of(),
-				"persona-night-main",
-				"voicevox:4",
-				getLatestSessionOrThrow().getCorrelationId());
+	public SpeechDirectiveResponse getNextSpeechDirective(String clientId) {
+		PlayoutSessionEntity session = getLatestSessionOrThrow();
+		QueueItemEntity item = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
+				.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "次のセグメントはまだ生成されていません。", Map.of("sessionId", session.getId())));
+		return speechDirectiveAssembler.assemble(session, item, clientId);
 	}
 
 	@Transactional
@@ -233,7 +228,10 @@ public class RadioService {
 		assertPlaybackEventTargetsSession(session, item);
 		assertPlaybackEventTransition(request, session, item);
 		switch (request.eventType()) {
-			case SEGMENT_STARTED -> transitionToPlaying(session, item.getId());
+			case SEGMENT_STARTED -> {
+				transitionToPlaying(session, item.getId());
+				requestQueueRefill(session.getId());
+			}
 			case SEGMENT_ENDED -> {
 				item.setStatus(QueueItemStatus.DONE);
 				if (item.getId().equals(session.getCurrentQueueItemId())) {
@@ -241,7 +239,7 @@ public class RadioService {
 				}
 				markSlotDone(item.getProgramSlotId());
 				queueItemRepository.save(item);
-				ensureBuffer(session);
+				requestQueueRefill(session.getId());
 			}
 			case SEGMENT_ERROR -> {
 				item.setStatus(QueueItemStatus.FAILED);
@@ -252,7 +250,7 @@ public class RadioService {
 				session.setState(PlayoutState.DEGRADED);
 				session.setDegradedReason("SEGMENT_ERROR");
 				queueItemRepository.save(item);
-				ensureBuffer(session);
+				requestQueueRefill(session.getId());
 			}
 			case PLAYBACK_STOPPED -> stopPlayback(session);
 			default -> throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "未対応の playback event です。", Map.of("eventType", request.eventType()));
@@ -299,6 +297,16 @@ public class RadioService {
 		return buffer.array();
 	}
 
+	@Transactional
+	public void warmupQueue(String sessionId) {
+		withSessionLock(sessionId, () -> maintainQueue(sessionId, true));
+	}
+
+	@Transactional
+	public void refillQueue(String sessionId) {
+		withSessionLock(sessionId, () -> maintainQueue(sessionId, false));
+	}
+
 	private ProgramBlockEntity createProgramBlock(PlayoutSessionEntity session, ResolvedProgramPlan plan, ProgramBlockStatus status) {
 		ProgramBlockEntity block = new ProgramBlockEntity();
 		block.setId(nextId("program"));
@@ -329,6 +337,29 @@ public class RadioService {
 		}
 		programBlockSlotRepository.saveAll(blockSlots);
 		return block;
+	}
+
+	private void maintainQueue(String sessionId, boolean allowInitialization) {
+		PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
+		if (session == null || shouldSkipQueueMaintenance(session)) {
+			return;
+		}
+		if (session.getCurrentProgramBlockId() == null) {
+			if (!allowInitialization) {
+				return;
+			}
+			ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(session.getStationId(), OffsetDateTime.now());
+			ProgramBlockEntity block = createProgramBlock(session, plan, ProgramBlockStatus.ACTIVE);
+			session.setCurrentProgramBlockId(block.getId());
+			if (plan.fallbackApplied()) {
+				session.setState(PlayoutState.DEGRADED);
+				session.setDegradedReason("LEGACY_RATIO");
+			}
+			playoutSessionRepository.save(session);
+		}
+		ensureBuffer(session);
+		refreshSessionState(session);
+		emitSessionEvents(sessionId);
 	}
 
 	private void materializeInitialQueue(PlayoutSessionEntity session, ProgramBlockEntity block, ResolvedProgramPlan plan) {
@@ -537,6 +568,14 @@ public class RadioService {
 		session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
 	}
 
+	private void requestQueueWarmup(String sessionId) {
+		eventPublisher.publishEvent(new QueueWarmupRequested(sessionId));
+	}
+
+	private void requestQueueRefill(String sessionId) {
+		eventPublisher.publishEvent(new QueueRefillRequested(sessionId));
+	}
+
 	private void stopPlayback(PlayoutSessionEntity session) {
 		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
 		List<QueueItemEntity> changedItems = new ArrayList<>();
@@ -635,6 +674,28 @@ public class RadioService {
 
 	private boolean isRecoveryCandidate(QueueItemEntity item) {
 		return item.getProgramSlotId() != null && !item.isAssetBanned();
+	}
+
+	private boolean shouldSkipQueueMaintenance(PlayoutSessionEntity session) {
+		if (session.getState() == PlayoutState.STOPPED || session.getState() == PlayoutState.ERROR) {
+			return true;
+		}
+		return playoutSessionRepository.findFirstByOrderByStartedAtDesc()
+				.map(latest -> !latest.getId().equals(session.getId()))
+				.orElse(false);
+	}
+
+	private void withSessionLock(String sessionId, Runnable action) {
+		ReentrantLock lock = sessionLocks.computeIfAbsent(sessionId, ignored -> new ReentrantLock());
+		lock.lock();
+		try {
+			action.run();
+		} finally {
+			lock.unlock();
+			if (!lock.hasQueuedThreads()) {
+				sessionLocks.remove(sessionId, lock);
+			}
+		}
 	}
 
 	private void refreshSessionState(PlayoutSessionEntity session) {

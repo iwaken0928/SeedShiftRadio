@@ -5,13 +5,6 @@ description: Use when working on SeedShiftRadio architecture, API contracts, mod
 
 # SeedShiftRadio Architecture
 
-## Use This Skill When
-
-- 変更が `API`, `DTO`, `SSE`, `Queue`, `Playout`, `Provider`, `DB`, `config.json`, `ディレクトリ構成` に触れる
-- 作業が `server`, `web`, `workers/musicgen`, `doc` のどこへ属するか判断したい
-- 機能追加時に、どの設計書を更新すべきか整理したい
-- 将来の `C# Native Client` を壊さないか確認したい
-
 ## 最初に見るドキュメント
 
 - 実装順序と全体入口: `doc/00_実装ドキュメント一覧.md`
@@ -24,14 +17,23 @@ description: Use when working on SeedShiftRadio architecture, API contracts, mod
 - MusicGen worker: `doc/09_MusicGen連携設計書.md`
 - C# Native Client 互換: `doc/10_CSharpネイティブクライアント連携設計書.md`
 - 運用とテスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
+- 局管理と番組編成: `doc/13_局管理・番組編成制御設計書.md`
+- レビュー対応と再試験順序: `doc/14_レビュー対応・再試験計画.md`
+
+## 現物確認の起点
+
+- 現在の実装は想定上の `/server`, `/web`, `/workers/musicgen` 分離前で、主な現物は `src/main/java/com/seedshiftradio/**` と `src/test/java/com/seedshiftradio/**` にある
+- Spring Boot サーバーの現物確認は `radio`, `letter`, `programming`, `settings`, `monitor`, `station`, `stream` を優先する
+- 複数領域にまたがるレビュー対応では `doc/14_レビュー対応・再試験計画.md` を起点に phase と担当を揃える
 
 ## ワークフロー
 
 1. 要求が触る境界を `server`, `web`, `worker`, `doc` に分解する
 2. 共有契約が絡むなら `doc/02_API仕様書.md` を必須参照にする
-3. 再生状態とキュー正本は `Server` に残し、`Web` は表示と操作に限定する
-4. MusicGen は高遅延な別ワーカー前提を崩さない
-5. 挙動変更がある場合は、対応する `doc/*.md` を同じ変更で更新する
+3. 複数領域やレビュー指摘の対応では `doc/14_レビュー対応・再試験計画.md` を参照し、実装順と再試験を先に固定する
+4. 再生状態とキュー正本は `Server` に残し、`Web` は表示と操作に限定する
+5. MusicGen は高遅延な別ワーカー前提を崩さない
+6. 挙動変更がある場合は、対応する `doc/*.md` を同じ変更で更新する
 
 ## ガードレール
 
@@ -47,6 +49,7 @@ description: Use when working on SeedShiftRadio architecture, API contracts, mod
 - 画面状態とプレイヤー挙動は `web`
 - DTO, REST, SSE, queue, playout, persistence は `server`
 - 音楽生成ジョブと外部推論ワーカーは `workers/musicgen`
+- 現在の Spring Boot 実装では `src/main/java/com/seedshiftradio/**` が `server` 相当の現物になる
 - 仕様更新と判断根拠は `doc`
 
 ## 完了前チェック

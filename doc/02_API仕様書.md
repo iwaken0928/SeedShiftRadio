@@ -205,6 +205,7 @@ Response:
 
 - `resumePlayback=true` の場合でも初回応答は `PREPARING` を返し、その後の warmup 完了時に Server が自動で `PLAYING` へ進めてよい
 - `resumePlayback=false` の場合は `PREPARING` のまま返し、Client が `POST /api/radio/play` で開始する
+- `requestedBy` は `playout_session.requested_by` に保存し、監査と相関確認に使う
 
 ### 6.2 `POST /clients/capabilities`
 

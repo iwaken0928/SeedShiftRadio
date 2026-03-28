@@ -41,6 +41,7 @@ import com.seedshiftradio.station.StationDtos.ProgrammingPreviewResponse;
 import com.seedshiftradio.station.StationDtos.ProgrammingRuleResponse;
 import com.seedshiftradio.station.StationRepository;
 import com.seedshiftradio.station.VoiceProfileRepository;
+import com.seedshiftradio.settings.ProviderHealthService;
 
 @Service
 public class ProgrammingService {
@@ -56,6 +57,7 @@ public class ProgrammingService {
 	private final ProgramTemplateRepository templateRepository;
 	private final ProgramTemplateSlotRepository slotRepository;
 	private final LetterRepository letterRepository;
+	private final ProviderHealthService providerHealthService;
 
 	public ProgrammingService(
 			StationRepository stationRepository,
@@ -65,7 +67,8 @@ public class ProgrammingService {
 			ProgramRuleRepository ruleRepository,
 			ProgramTemplateRepository templateRepository,
 			ProgramTemplateSlotRepository slotRepository,
-			LetterRepository letterRepository) {
+			LetterRepository letterRepository,
+			ProviderHealthService providerHealthService) {
 		this.stationRepository = stationRepository;
 		this.personalityRepository = personalityRepository;
 		this.voiceProfileRepository = voiceProfileRepository;
@@ -74,6 +77,7 @@ public class ProgrammingService {
 		this.templateRepository = templateRepository;
 		this.slotRepository = slotRepository;
 		this.letterRepository = letterRepository;
+		this.providerHealthService = providerHealthService;
 	}
 
 	@Transactional(readOnly = true)
@@ -155,7 +159,7 @@ public class ProgrammingService {
 	@Transactional(readOnly = true)
 	public ResolvedProgramPlan resolveCurrentPlan(String stationId, OffsetDateTime at) {
 		long pendingLetters = letterRepository.countByStationIdAndStatusIn(stationId, PENDING_LETTER_STATUSES);
-		return resolvePlan(stationId, at, Math.toIntExact(pendingLetters), Map.of("musicGen", "UP", "tts", "UP", "llm", "UP"));
+		return resolvePlan(stationId, at, Math.toIntExact(pendingLetters), currentProviderStates());
 	}
 
 	@Transactional(readOnly = true)
@@ -234,24 +238,36 @@ public class ProgrammingService {
 				.orElseGet(() -> defaultPolicy(stationId, station.getDefaultProgramTemplateId()));
 		List<String> warnings = new ArrayList<>();
 		ProgramRuleEntity selectedRule = selectRule(policy.getId(), at, pendingLetterCount, providerStates);
-		String templateId = selectedRule != null ? selectedRule.getTemplateId() : policy.getDefaultTemplateId();
-		boolean fallbackApplied = selectedRule == null;
-		if (templateId == null) {
-			return legacyFallbackPlan(warnings, true);
+		ProgramTemplateEntity template = null;
+		String selectedTemplateId = null;
+		boolean fallbackApplied = false;
+		if (selectedRule != null) {
+			template = templateRepository.findById(selectedRule.getTemplateId()).orElse(null);
+			if (template != null && template.isActive()) {
+				selectedTemplateId = template.getId();
+			}
 		}
-		ProgramTemplateEntity template = templateRepository.findById(templateId).orElse(null);
+		if (template == null || !template.isActive()) {
+			if (policy.getDefaultTemplateId() != null) {
+				ProgramTemplateEntity defaultTemplate = templateRepository.findById(policy.getDefaultTemplateId()).orElse(null);
+				if (defaultTemplate != null && defaultTemplate.isActive()) {
+					template = defaultTemplate;
+					selectedTemplateId = defaultTemplate.getId();
+				}
+			}
+		}
 		if (template == null || !template.isActive()) {
 			warnings.add("有効なテンプレートが見つからないため固定比率へ縮退しました。");
 			return legacyFallbackPlan(warnings, true);
 		}
-		List<ResolvedSlot> resolvedSlots = resolveSlots(template, providerStates, pendingLetterCount, warnings);
+		ResolvedSlotResolution resolvedSlots = resolveSlots(template, providerStates, pendingLetterCount, warnings);
 		return new ResolvedProgramPlan(
-				template.getId(),
+				selectedTemplateId,
 				template.getVersion(),
 				template.getName(),
 				template.getTargetDurationMinutes() * 60_000,
-				resolvedSlots,
-				fallbackApplied || !warnings.isEmpty(),
+				resolvedSlots.slots(),
+				fallbackApplied || resolvedSlots.fallbackApplied(),
 				warnings);
 	}
 
@@ -274,12 +290,13 @@ public class ProgrammingService {
 		return null;
 	}
 
-	private List<ResolvedSlot> resolveSlots(
+	private ResolvedSlotResolution resolveSlots(
 			ProgramTemplateEntity template,
 			Map<String, String> providerStates,
 			int pendingLetterCount,
 			List<String> warnings) {
 		List<ResolvedSlot> resolvedSlots = new ArrayList<>();
+		boolean fallbackApplied = false;
 		for (ProgramTemplateSlotEntity slot : slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc(template.getId())) {
 			SegmentType resolved = resolveSegmentType(slot, providerStates, pendingLetterCount);
 			boolean usedFallback = false;
@@ -293,11 +310,12 @@ public class ProgrammingService {
 				usedFallback = true;
 			}
 			if (usedFallback) {
+				fallbackApplied = true;
 				warnings.add("slot " + slot.getId() + " は fallback を適用しました。");
 			}
 			resolvedSlots.add(new ResolvedSlot(slot.getId(), slot.getRole(), slot.getConstraintMode(), slot.getTargetDurationMs(), resolved));
 		}
-		return resolvedSlots;
+		return new ResolvedSlotResolution(List.copyOf(resolvedSlots), fallbackApplied);
 	}
 
 	private SegmentType resolveSegmentType(ProgramTemplateSlotEntity slot, Map<String, String> providerStates, int pendingLetterCount) {
@@ -338,6 +356,19 @@ public class ProgrammingService {
 					|| "UP".equalsIgnoreCase(providerStates.getOrDefault("llm", "UP"));
 			default -> true;
 		};
+	}
+
+	private Map<String, String> currentProviderStates() {
+		Map<String, com.seedshiftradio.settings.SettingsDtos.ProviderHealthPayload> health = providerHealthService.getLatestOrProbe();
+		return Map.of(
+				"musicGen", providerStatus(health, "musicGen"),
+				"tts", providerStatus(health, "tts"),
+				"llm", providerStatus(health, "llm"));
+	}
+
+	private String providerStatus(Map<String, com.seedshiftradio.settings.SettingsDtos.ProviderHealthPayload> health, String key) {
+		com.seedshiftradio.settings.SettingsDtos.ProviderHealthPayload payload = health.get(key);
+		return payload == null || payload.status() == null ? "UNKNOWN" : payload.status();
 	}
 
 	private ResolvedProgramPlan legacyFallbackPlan(List<String> warnings, boolean fallbackApplied) {
@@ -559,5 +590,10 @@ public class ProgrammingService {
 			ConstraintMode constraintMode,
 			Integer targetDurationMs,
 			SegmentType resolvedSegmentType) {
+	}
+
+	private record ResolvedSlotResolution(
+			List<ResolvedSlot> slots,
+			boolean fallbackApplied) {
 	}
 }

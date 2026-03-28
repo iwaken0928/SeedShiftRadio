@@ -2,6 +2,7 @@ package com.seedshiftradio.radio;
 
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,6 +41,9 @@ class RadioApiTests {
 
 	@Autowired
 	WebApplicationContext webApplicationContext;
+
+	@Autowired
+	PlayoutSessionRepository playoutSessionRepository;
 
 	MockMvc mockMvc;
 
@@ -87,6 +91,10 @@ class RadioApiTests {
 				.andExpect(jsonPath("$.correlationId").exists());
 
 		awaitWarmup("station-night", "PLAYING");
+
+		PlayoutSessionEntity session = playoutSessionRepository.findFirstByOrderByStartedAtDesc().orElseThrow();
+		assertEquals("test", session.getRequestedBy());
+		assertTrue(session.isResumePlayback());
 
 		mockMvc.perform(post("/api/radio/play"))
 				.andExpect(status().isOk())

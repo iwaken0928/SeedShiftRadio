@@ -140,10 +140,10 @@ public class ProgrammingAdminService {
 		List<ProgramRuleEntity> rules = policy == null ? List.of() : ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId());
 		Map<String, String> providerStates = normalizeProviderStates(request.providerStates());
 		Optional<ProgramTemplateEntity> selectedTemplate = selectTemplate(policy, rules, request, providerStates, stationId);
-		boolean fallbackApplied = selectedTemplate.isEmpty();
 		ProgramTemplateEntity template = selectedTemplate.orElseGet(() -> policy != null && policy.getDefaultTemplateId() != null
 				? templateRepository.findById(policy.getDefaultTemplateId()).orElse(null)
 				: null);
+		boolean fallbackApplied = template == null;
 		List<ProgrammingDtos.PreviewSlot> slots = template != null
 				? slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc(template.getId()).stream().map(this::toPreviewSlot).toList()
 				: ProgrammingSupport.buildLegacyFallbackSlots();

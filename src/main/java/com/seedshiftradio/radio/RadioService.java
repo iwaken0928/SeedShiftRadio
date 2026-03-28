@@ -91,13 +91,15 @@ public class RadioService {
 		PlayoutSessionEntity session = new PlayoutSessionEntity();
 		session.setId(nextId("playout"));
 		session.setStationId(request.stationId());
+		session.setRequestedBy(request.requestedBy());
+		session.setResumePlayback(request.resumePlayback());
 		session.setState(PlayoutState.PREPARING);
 		session.setBufferReadyCount(0);
 		session.setCorrelationId(correlationId);
 		session = playoutSessionRepository.save(session);
 		emitSessionEvents(session.getId());
 		requestQueueWarmup(session.getId());
-		return new TuneResponse(session.getId(), session.getStationId(), session.getState(), true, correlationId);
+		return new TuneResponse(session.getId(), session.getStationId(), PlayoutState.PREPARING, true, correlationId);
 	}
 
 	@Transactional
@@ -358,6 +360,7 @@ public class RadioService {
 			playoutSessionRepository.save(session);
 		}
 		ensureBuffer(session);
+		autoStartPlaybackIfRequested(session);
 		refreshSessionState(session);
 		emitSessionEvents(sessionId);
 	}
@@ -574,6 +577,22 @@ public class RadioService {
 
 	private void requestQueueRefill(String sessionId) {
 		eventPublisher.publishEvent(new QueueRefillRequested(sessionId));
+	}
+
+	private void autoStartPlaybackIfRequested(PlayoutSessionEntity session) {
+		if (!session.isResumePlayback()
+				|| session.getCurrentQueueItemId() != null
+				|| session.getState() == PlayoutState.STOPPED
+				|| session.getState() == PlayoutState.ERROR) {
+			return;
+		}
+		QueueItemEntity readyItem = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
+				.orElse(null);
+		if (readyItem == null) {
+			return;
+		}
+		transitionToPlaying(session, readyItem.getId());
+		requestQueueRefill(session.getId());
 	}
 
 	private void stopPlayback(PlayoutSessionEntity session) {

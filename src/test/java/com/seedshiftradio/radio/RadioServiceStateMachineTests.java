@@ -159,7 +159,7 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
-	void tuneCreatesInitialWarmupQueueAndLeavesSessionPreparing() {
+	void tuneCreatesInitialWarmupQueueAndAutoStartsPlaybackWhenRequested() {
 		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
 				"tmpl-night-regular",
 				3,
@@ -240,14 +240,26 @@ class RadioServiceStateMachineTests {
 		assertTrue(response.queueWarmupStarted());
 
 		PlayoutSessionEntity session = savedSession.get();
-		assertEquals(PlayoutState.PREPARING, session.getState());
+		assertEquals("test", session.getRequestedBy());
+		assertTrue(session.isResumePlayback());
+		assertEquals(PlayoutState.PLAYING, session.getState());
 		assertEquals(3, queueItems.size());
-		assertEquals(3, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
-		assertEquals(3, session.getBufferReadyCount());
-		assertNull(session.getCurrentQueueItemId());
+		assertEquals(2, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
+		assertEquals(1, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.PLAYING).count());
+		assertEquals(2, session.getBufferReadyCount());
+		assertTrue(session.getCurrentQueueItemId() != null);
+		assertEquals(queueItems.stream()
+				.filter(item -> item.getStatus() == QueueItemStatus.PLAYING)
+				.findFirst()
+				.orElseThrow()
+				.getId(), session.getCurrentQueueItemId());
 		assertTrue(session.getCurrentProgramBlockId() != null && blocksById.containsKey(session.getCurrentProgramBlockId()));
 		assertEquals(3, slotsByBlockId.get(session.getCurrentProgramBlockId()).size());
 		assertTrue(queueItems.stream().map(QueueItemEntity::getProgramBlockId).distinct().count() == 1);
+		assertEquals(QueueItemStatus.PLAYING, queueItems.stream()
+				.min(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.orElseThrow()
+				.getStatus());
 	}
 
 	@Test

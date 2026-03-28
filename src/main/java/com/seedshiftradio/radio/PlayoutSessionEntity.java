@@ -30,6 +30,12 @@ public class PlayoutSessionEntity {
 	@Column(name = "station_id", nullable = false)
 	private String stationId;
 
+	@Column(name = "requested_by")
+	private String requestedBy;
+
+	@Column(name = "resume_playback", nullable = false)
+	private boolean resumePlayback;
+
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
 	private PlayoutState state;

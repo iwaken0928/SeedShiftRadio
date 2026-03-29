@@ -80,6 +80,8 @@ CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセ
 
 機密値は `env:` または `file:` 参照とする。
 
+Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。
+
 ## 9. 推奨 OSS と使い分け
 
 | 領域 | 第一候補 | 代替 |
@@ -115,5 +117,6 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 
 - Provider 抽象で差異を隠し過ぎず、`capabilities` を上位から参照できるようにする
 - 音声と音楽の生成物はファイル正本を Server が管理する
+- `provider_job.external_ref` は worker 側 `jobId` や Provider 側 request id を保持し、未接続時は placeholder 実装の識別子を入れてよい
 - 監視画面には生の provider error ではなく整形した分類を表示する
 - Provider request metadata には `stationId`, `programTemplateId`, `programSlotId` を含め、監査とキャッシュに利用できるようにする

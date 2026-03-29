@@ -89,6 +89,6 @@ public class RadioController {
 	public ResponseEntity<byte[]> placeholderAudio(@PathVariable("assetId") String assetId) {
 		return ResponseEntity.ok()
 				.contentType(MediaType.parseMediaType("audio/wav"))
-				.body(assetService.loadAudio(assetId, radioService::placeholderWav));
+				.body(assetService.loadAudio(assetId));
 	}
 }

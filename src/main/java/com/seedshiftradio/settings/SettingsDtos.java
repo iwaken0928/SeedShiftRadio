@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 public final class SettingsDtos {
@@ -16,7 +17,7 @@ public final class SettingsDtos {
 
 	public record SettingsResponse(
 			Integer version,
-			Integer schemaVersion,
+			String schemaVersion,
 			Instant updatedAt,
 			String configPath,
 			SettingsDocument.ServerSettings server,
@@ -45,6 +46,7 @@ public final class SettingsDtos {
 
 	public record SettingsUpdateRequest(
 			@NotNull Integer version,
+			@NotBlank String schemaVersion,
 			@Valid SettingsDocument.ServerSettings server,
 			@Valid SettingsDocument.PathSettings paths,
 			@Valid SettingsDocument.PlayoutSettings playout,

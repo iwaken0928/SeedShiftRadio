@@ -55,6 +55,7 @@ class SettingsServiceTests {
 
 		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
 				1,
+				"2026-03",
 				new SettingsDocument.ServerSettings("127.0.0.1", 18080),
 				new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
 				null,
@@ -75,8 +76,29 @@ class SettingsServiceTests {
 				ApiException.class,
 				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
 						1,
+						"2026-03",
 						null,
 						new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("outside").toString()),
+						null,
+						null,
+						null,
+						null,
+						null)));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
+	void updateSettingsRejectsSchemaVersionMismatch() {
+		settingsService.getSettings();
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						1,
+						"2026-02",
+						null,
+						null,
 						null,
 						null,
 						null,

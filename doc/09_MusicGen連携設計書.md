@@ -83,6 +83,8 @@ Response:
 - 完了後に `generated_asset` を作成し、該当 `queue_item` を `READY` に更新する
 - 長時間待機中は `MUSIC_LOCAL` を代替候補として残す
 
+現行サーバー実装では、`GenerateMusicJob` 自体は先行実装し、worker 未接続時は placeholder asset を作って queue を前進させられるようにする。`workers/musicgen` を追加した時点で `external_ref` と 실제 worker API 呼び出しへ差し替える。
+
 ## 7. キャッシュ方針
 
 キャッシュキー:

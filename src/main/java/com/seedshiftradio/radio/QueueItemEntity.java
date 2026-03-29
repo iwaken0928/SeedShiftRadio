@@ -64,6 +64,9 @@ public class QueueItemEntity {
 	@Column(name = "asset_url")
 	private String assetUrl;
 
+	@Column(name = "asset_id")
+	private String assetId;
+
 	@Column(name = "speech_directive_id")
 	private String speechDirectiveId;
 

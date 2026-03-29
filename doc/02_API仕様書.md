@@ -415,6 +415,11 @@ Response:
     "tts": { "defaultProvider": "voicevox" },
     "musicGen": { "defaultProvider": "ace-step" }
   },
+  "features": {
+    "streaming": {
+      "placeholderEnabled": true
+    }
+  },
   "security": {
     "adminTokenRef": "env:SEEDSHIFT_ADMIN_TOKEN"
   }
@@ -423,11 +428,12 @@ Response:
 
 ### 6.9 `PUT /api/settings`
 
-クライアントから送られた `version` と DB/ファイルの `version` を比べて楽観ロックをかけます。`paths`, `playout`, `providers`, `security` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。成功するとインクリメント済み `version` を返し、`correlationId` で変更元をトレースできます。
+クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`paths`, `playout`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。
 
 ```json
 {
   "version": 3,
+  "schemaVersion": "2026-03",
   "paths": { ... },
   "providers": { ... }
 }
@@ -435,21 +441,26 @@ Response:
 
 ### 6.10 `POST /api/settings/test-connections`
 
-Provider に対する接続テストを実行し、`status` には `UP/DEGRADED/DOWN` を返します。`providerFingerprint` で個別 Provider を指示でき、`message` には疎通結果 `responseTimeMs` には所要時間を含めます。
+Provider に対する接続テストを一括実行し、種別ごとの `status` を返します。レスポンスは `checkedAt` と `providers` map を持ち、各 payload は `/api/monitor/summary`, `/api/health`, SSE `provider.health.changed` と同一形式です。
 
 ```json
 {
-  "providerType": "tts",
-  "providerFingerprint": "voicevox",
-  "status": "UP",
-  "message": "VOICEVOX が 200 を返しました",
-  "responseTimeMs": 53
+  "checkedAt": "2026-03-29T10:15:00Z",
+  "providers": {
+    "tts": {
+      "providerType": "tts",
+      "providerKey": "voicevox",
+      "status": "UP",
+      "message": "接続成功",
+      "responseTimeMs": 53
+    }
+  }
 }
 ```
 
 ### 6.11 `GET /api/assets/audio/{assetId}.wav`
 
-生成済み audio asset がある場合はそのファイルを `audio/wav` で返し、見つからない場合や `features.streaming.placeholder.enabled` が `true` のときは 1 秒無音 WAV （`placeholder`）を返します。リアル asset は `generated_asset` メタで管理され、`provider.health.changed` の `DEGRADED` のときも placeholder を使って再生継続します。
+生成済み audio asset がある場合は `generated_asset.storage_path` を優先して `audio/wav` で返し、見つからない場合のみ `features.streaming.placeholderEnabled` に従って placeholder を返します。`queue_item.assetId` と `generated_asset` により、Server が file 正本と DB メタを追跡します。
 
 ### 6.12 Provider Health
 

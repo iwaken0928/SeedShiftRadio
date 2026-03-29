@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.PlaybackMode;
+import com.seedshiftradio.domain.PlayHistoryResultStatus;
 import com.seedshiftradio.domain.PlayoutState;
 import com.seedshiftradio.domain.ProgramBlockSlotStatus;
 import com.seedshiftradio.domain.ProgramBlockStatus;
@@ -29,6 +30,7 @@ import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.programming.ProgrammingService;
 import com.seedshiftradio.programming.ProgrammingService.ResolvedProgramPlan;
 import com.seedshiftradio.programming.ProgrammingService.ResolvedSlot;
+import com.seedshiftradio.settings.AssetService;
 import com.seedshiftradio.station.StationRepository;
 import com.seedshiftradio.stream.StreamEventService;
 
@@ -47,8 +49,10 @@ public class RadioService {
 	private final ProgramBlockSlotRepository programBlockSlotRepository;
 	private final QueueItemRepository queueItemRepository;
 	private final StreamEventService streamEventService;
+	private final AssetService assetService;
 	private final ClientCapabilitiesService clientCapabilitiesService;
 	private final SpeechDirectiveAssembler speechDirectiveAssembler;
+	private final PlayHistoryService playHistoryService;
 	private final ApplicationEventPublisher eventPublisher;
 	private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
@@ -60,8 +64,10 @@ public class RadioService {
 			ProgramBlockSlotRepository programBlockSlotRepository,
 			QueueItemRepository queueItemRepository,
 			StreamEventService streamEventService,
+			AssetService assetService,
 			ClientCapabilitiesService clientCapabilitiesService,
 			SpeechDirectiveAssembler speechDirectiveAssembler,
+			PlayHistoryService playHistoryService,
 			ApplicationEventPublisher eventPublisher) {
 		this.stationRepository = stationRepository;
 		this.programmingService = programmingService;
@@ -70,8 +76,10 @@ public class RadioService {
 		this.programBlockSlotRepository = programBlockSlotRepository;
 		this.queueItemRepository = queueItemRepository;
 		this.streamEventService = streamEventService;
+		this.assetService = assetService;
 		this.clientCapabilitiesService = clientCapabilitiesService;
 		this.speechDirectiveAssembler = speechDirectiveAssembler;
+		this.playHistoryService = playHistoryService;
 		this.eventPublisher = eventPublisher;
 	}
 
@@ -87,6 +95,7 @@ public class RadioService {
 		if (!station.isActive()) {
 			throw new ApiException(HttpStatus.CONFLICT, "CONFLICT", "指定された局は無効化されています。", Map.of("stationId", request.stationId()));
 		}
+		stopActiveSessionBeforeRetune();
 
 		PlayoutSessionEntity session = new PlayoutSessionEntity();
 		session.setId(nextId("playout"));
@@ -134,7 +143,11 @@ public class RadioService {
 	@Transactional
 	public RadioStatusResponse stop() {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
+		QueueItemEntity currentItem = getCurrentQueueItem(session);
 		stopPlayback(session);
+		if (currentItem != null) {
+			playHistoryService.record(session, currentItem, PlayHistoryResultStatus.STOPPED);
+		}
 		refreshSessionState(session);
 		emitSessionEvents(session.getId());
 		return getStatus();
@@ -245,6 +258,7 @@ public class RadioService {
 				}
 				markSlotDone(item.getProgramSlotId());
 				queueItemRepository.save(item);
+				playHistoryService.record(session, item, PlayHistoryResultStatus.DONE);
 				requestQueueRefill(session.getId());
 			}
 			case SEGMENT_ERROR -> {
@@ -256,9 +270,13 @@ public class RadioService {
 				session.setState(PlayoutState.DEGRADED);
 				session.setDegradedReason("SEGMENT_ERROR");
 				queueItemRepository.save(item);
+				playHistoryService.record(session, item, PlayHistoryResultStatus.FAILED);
 				requestQueueRefill(session.getId());
 			}
-			case PLAYBACK_STOPPED -> stopPlayback(session);
+			case PLAYBACK_STOPPED -> {
+				stopPlayback(session);
+				playHistoryService.record(session, item, PlayHistoryResultStatus.STOPPED);
+			}
 			default -> throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "未対応の playback event です。", Map.of("eventType", request.eventType()));
 		}
 		refreshSessionState(session);
@@ -268,14 +286,13 @@ public class RadioService {
 	@Transactional(readOnly = true)
 	public HealthResponse health() {
 		Optional<PlayoutSessionEntity> latest = playoutSessionRepository.findFirstByOrderByStartedAtDesc();
-		String latestEventId = latest.map(PlayoutSessionEntity::getCorrelationId).orElse(null);
 		return new HealthResponse(
 				"UP",
 				Instant.now(),
 				stationRepository.count(),
 				playoutSessionRepository.count(),
 				queueItemRepository.count(),
-				latestEventId,
+				streamEventService.latestEventId(),
 				latest.map(PlayoutSessionEntity::getId).orElse(null),
 				Map.of());
 	}
@@ -311,6 +328,19 @@ public class RadioService {
 	@Transactional
 	public void refillQueue(String sessionId) {
 		withSessionLock(sessionId, () -> maintainQueue(sessionId, false));
+	}
+
+	@Transactional
+	public void synchronizeSessionAfterAsyncUpdate(String sessionId) {
+		withSessionLock(sessionId, () -> {
+			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
+			if (session == null) {
+				return;
+			}
+			autoStartPlaybackIfRequested(session);
+			refreshSessionState(session);
+			emitSessionEvents(sessionId);
+		});
 	}
 
 	private ProgramBlockEntity createProgramBlock(PlayoutSessionEntity session, ResolvedProgramPlan plan, ProgramBlockStatus status) {
@@ -379,6 +409,8 @@ public class RadioService {
 			blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
 		}
 		queueItemRepository.saveAll(queueItems);
+		queueItemRepository.flush();
+		materializeQueueAssets(queueItems);
 		programBlockSlotRepository.saveAll(blockSlots);
 		if (plan.fallbackApplied()) {
 			session.setState(PlayoutState.DEGRADED);
@@ -392,13 +424,12 @@ public class RadioService {
 		entity.setSessionId(session.getId());
 		entity.setSequenceNo(sequenceNo);
 		entity.setSegmentType(blockSlot.getResolvedSegmentType());
-		entity.setStatus(QueueItemStatus.READY);
+		entity.setStatus(blockSlot.getResolvedSegmentType() == SegmentType.MUSIC_AI ? QueueItemStatus.GENERATING : QueueItemStatus.READY);
 		entity.setProgramBlockId(block.getId());
 		entity.setProgramSlotId(blockSlot.getId());
 		entity.setSlotRole(blockSlot.getRole());
 		entity.setTitle(buildTitle(blockSlot));
 		entity.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
-		entity.setAssetUrl("/api/assets/audio/" + entity.getId() + ".wav");
 		entity.setSpeechDirectiveId("sd-" + entity.getId());
 		entity.setDurationMs(blockSlot.getTargetDurationMs());
 		entity.setCorrelationId(session.getCorrelationId());
@@ -437,11 +468,14 @@ public class RadioService {
 		List<ProgramBlockSlotEntity> changedSlots = new ArrayList<>();
 		for (ProgramBlockSlotEntity blockSlot : blockSlots) {
 			if (blockSlot.getStatus() == ProgramBlockSlotStatus.PLANNED) {
-				additions.add(createQueueItem(session, refillBlock, blockSlot, nextSequence++));
+				QueueItemEntity item = createQueueItem(session, refillBlock, blockSlot, nextSequence++);
+				additions.add(item);
 				blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
 				changedSlots.add(blockSlot);
-				readyCount++;
-				readyDuration += blockSlot.getTargetDurationMs();
+				if (item.getStatus() == QueueItemStatus.READY) {
+					readyCount++;
+					readyDuration += blockSlot.getTargetDurationMs();
+				}
 			}
 			if (readyCount >= TARGET_READY_COUNT && readyDuration >= MIN_READY_DURATION_MS) {
 				break;
@@ -454,6 +488,8 @@ public class RadioService {
 			streamEventService.publish("buffer.warning", Map.of("sessionId", session.getId(), "readyCount", readyCount));
 		}
 		queueItemRepository.saveAll(additions);
+		queueItemRepository.flush();
+		materializeQueueAssets(additions);
 		if (!changedSlots.isEmpty()) {
 			programBlockSlotRepository.saveAll(changedSlots);
 		}
@@ -625,7 +661,6 @@ public class RadioService {
 		entity.setSlotRole(SlotRole.ENDING);
 		entity.setTitle("フォールバックジングル");
 		entity.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
-		entity.setAssetUrl("/api/assets/audio/" + entity.getId() + ".wav");
 		entity.setSpeechDirectiveId("sd-" + entity.getId());
 		entity.setDurationMs(15_000);
 		entity.setCorrelationId(session.getCorrelationId());
@@ -640,6 +675,24 @@ public class RadioService {
 		if (blockSlot != null) {
 			blockSlot.setStatus(ProgramBlockSlotStatus.DONE);
 			programBlockSlotRepository.save(blockSlot);
+		}
+	}
+
+	private void materializeQueueAssets(List<QueueItemEntity> items) {
+		if (items.isEmpty()) {
+			return;
+		}
+		List<QueueItemEntity> changedItems = new ArrayList<>();
+		for (QueueItemEntity item : items) {
+			if (item.getSegmentType() == SegmentType.MUSIC_AI) {
+				requestGenerateMusic(item);
+				continue;
+			}
+				assetService.ensureQueueAudioAsset(item);
+				changedItems.add(item);
+			}
+		if (!changedItems.isEmpty()) {
+			queueItemRepository.saveAll(changedItems);
 		}
 	}
 
@@ -699,6 +752,18 @@ public class RadioService {
 		return item.getProgramSlotId() != null && !item.isAssetBanned();
 	}
 
+	private void stopActiveSessionBeforeRetune() {
+		playoutSessionRepository.findFirstByOrderByStartedAtDesc().ifPresent(previousSession -> {
+			QueueItemEntity currentItem = getCurrentQueueItem(previousSession);
+			stopPlayback(previousSession);
+			if (currentItem != null) {
+				playHistoryService.record(previousSession, currentItem, PlayHistoryResultStatus.STOPPED);
+			}
+			refreshSessionState(previousSession);
+			emitSessionEvents(previousSession.getId());
+		});
+	}
+
 	private boolean shouldSkipQueueMaintenance(PlayoutSessionEntity session) {
 		if (session.getState() == PlayoutState.STOPPED || session.getState() == PlayoutState.ERROR) {
 			return true;
@@ -722,8 +787,17 @@ public class RadioService {
 	}
 
 	private void refreshSessionState(PlayoutSessionEntity session) {
-		long readyCount = queueItemRepository.countBySessionIdAndStatus(session.getId(), QueueItemStatus.READY);
+		long readyCount = countReadyItems(session.getId());
 		session.setBufferReadyCount((int) readyCount);
+		if (session.getState() != PlayoutState.STOPPED && session.getState() != PlayoutState.ERROR) {
+			if (session.getCurrentQueueItemId() != null) {
+				session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
+			} else if (session.getDegradedReason() != null) {
+				session.setState(PlayoutState.DEGRADED);
+			} else {
+				session.setState(PlayoutState.PREPARING);
+			}
+		}
 		playoutSessionRepository.save(session);
 	}
 
@@ -740,6 +814,21 @@ public class RadioService {
 		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(sessionId);
 		PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElseThrow();
 		return new QueueSnapshotResponse(sessionId, session.getStationId(), items.stream().map(this::toQueueItem).toList(), session.getCorrelationId());
+	}
+
+	private long countReadyItems(String sessionId) {
+		return queueItemRepository.countBySessionIdAndStatus(sessionId, QueueItemStatus.READY);
+	}
+
+	private QueueItemEntity getCurrentQueueItem(PlayoutSessionEntity session) {
+		if (session.getCurrentQueueItemId() == null) {
+			return null;
+		}
+		return queueItemRepository.findById(session.getCurrentQueueItemId()).orElse(null);
+	}
+
+	private void requestGenerateMusic(QueueItemEntity item) {
+		eventPublisher.publishEvent(new GenerateMusicRequested(item.getId(), item.getCorrelationId()));
 	}
 
 	private QueueItemResponse toQueueItem(QueueItemEntity item) {

@@ -11,15 +11,21 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class RadioQueueJobCoordinator {
 
 	private final ObjectProvider<JobScheduler> jobSchedulerProvider;
-	private final RadioService radioService;
+	private final WarmupQueueJob warmupQueueJob;
+	private final QueueRefillJob queueRefillJob;
+	private final GenerateMusicJob generateMusicJob;
 	private final boolean backgroundJobServerEnabled;
 
 	public RadioQueueJobCoordinator(
 			ObjectProvider<JobScheduler> jobSchedulerProvider,
-			RadioService radioService,
+			WarmupQueueJob warmupQueueJob,
+			QueueRefillJob queueRefillJob,
+			GenerateMusicJob generateMusicJob,
 			@Value("${jobrunr.background-job-server.enabled:false}") boolean backgroundJobServerEnabled) {
 		this.jobSchedulerProvider = jobSchedulerProvider;
-		this.radioService = radioService;
+		this.warmupQueueJob = warmupQueueJob;
+		this.queueRefillJob = queueRefillJob;
+		this.generateMusicJob = generateMusicJob;
 		this.backgroundJobServerEnabled = backgroundJobServerEnabled;
 	}
 
@@ -27,19 +33,29 @@ public class RadioQueueJobCoordinator {
 	public void onWarmupRequested(QueueWarmupRequested event) {
 		JobScheduler jobScheduler = jobSchedulerProvider.getIfAvailable();
 		if (backgroundJobServerEnabled && jobScheduler != null) {
-			jobScheduler.enqueue(() -> radioService.warmupQueue(event.sessionId()));
+			jobScheduler.enqueue(() -> warmupQueueJob.run(event.sessionId()));
 			return;
 		}
-		radioService.warmupQueue(event.sessionId());
+		warmupQueueJob.run(event.sessionId());
 	}
 
 	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
 	public void onRefillRequested(QueueRefillRequested event) {
 		JobScheduler jobScheduler = jobSchedulerProvider.getIfAvailable();
 		if (backgroundJobServerEnabled && jobScheduler != null) {
-			jobScheduler.enqueue(() -> radioService.refillQueue(event.sessionId()));
+			jobScheduler.enqueue(() -> queueRefillJob.run(event.sessionId()));
 			return;
 		}
-		radioService.refillQueue(event.sessionId());
+		queueRefillJob.run(event.sessionId());
+	}
+
+	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+	public void onGenerateMusicRequested(GenerateMusicRequested event) {
+		JobScheduler jobScheduler = jobSchedulerProvider.getIfAvailable();
+		if (backgroundJobServerEnabled && jobScheduler != null) {
+			jobScheduler.enqueue(() -> generateMusicJob.run(event.queueItemId(), event.correlationId()));
+			return;
+		}
+		generateMusicJob.run(event.queueItemId(), event.correlationId());
 	}
 }

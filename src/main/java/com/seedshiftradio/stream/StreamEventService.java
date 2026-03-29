@@ -81,6 +81,11 @@ public class StreamEventService {
 		}
 	}
 
+	public String latestEventId() {
+		long latest = sequence.get();
+		return latest == 0 ? null : Long.toString(latest);
+	}
+
 	private void sendReplay(SseEmitter emitter, String lastEventId) {
 		for (RadioEventRecord event : replayAfter(lastEventId)) {
 			try {

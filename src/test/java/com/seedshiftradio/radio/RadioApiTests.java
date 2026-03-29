@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,7 +26,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.seedshiftradio.settings.GeneratedAssetRepository;
+
 @Testcontainers(disabledWithoutDocker = true)
+@Tag("docker")
 @SpringBootTest(properties = {
 		"seedshift.radio.security.admin-token=test-admin-token",
 		"seedshift.radio.config.path=./build/test-settings/radio-config.json"
@@ -44,6 +48,15 @@ class RadioApiTests {
 
 	@Autowired
 	PlayoutSessionRepository playoutSessionRepository;
+
+	@Autowired
+	QueueItemRepository queueItemRepository;
+
+	@Autowired
+	GeneratedAssetRepository generatedAssetRepository;
+
+	@Autowired
+	PlayHistoryRepository playHistoryRepository;
 
 	MockMvc mockMvc;
 
@@ -95,6 +108,9 @@ class RadioApiTests {
 		PlayoutSessionEntity session = playoutSessionRepository.findFirstByOrderByStartedAtDesc().orElseThrow();
 		assertEquals("test", session.getRequestedBy());
 		assertTrue(session.isResumePlayback());
+		assertTrue(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()).stream()
+				.filter(item -> item.getSegmentType() != com.seedshiftradio.domain.SegmentType.MUSIC_AI)
+				.allMatch(item -> item.getAssetId() != null && generatedAssetRepository.findById(item.getAssetId()).isPresent()));
 
 		mockMvc.perform(post("/api/radio/play"))
 				.andExpect(status().isOk())
@@ -133,8 +149,9 @@ class RadioApiTests {
 		mockMvc.perform(get("/api/settings").header("X-Admin-Token", "test-admin-token"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.version").value(greaterThanOrEqualTo(1)))
+				.andExpect(jsonPath("$.schemaVersion").value("2026-03"))
 				.andExpect(jsonPath("$.providers.llm.defaultProvider").exists())
-				.andExpect(jsonPath("$.features.allowPlaceholderAudio").value(true));
+				.andExpect(jsonPath("$.features.streaming.placeholderEnabled").value(true));
 	}
 
 	@Test
@@ -204,6 +221,58 @@ class RadioApiTests {
 				.andExpect(jsonPath("$.personaRef").value("persona-night-main"))
 				.andExpect(jsonPath("$.voiceHint").value("VOICEROID:yukari-main"))
 				.andExpect(jsonPath("$.text").exists());
+	}
+
+	@Test
+	void playbackEventCreatesPlayHistory() throws Exception {
+		mockMvc.perform(post("/api/radio/tune")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "stationId": "station-night",
+								  "requestedBy": "test",
+								  "resumePlayback": false
+								}
+								"""))
+				.andExpect(status().isOk());
+
+		awaitWarmup("station-night", "PREPARING");
+
+		PlayoutSessionEntity session = playoutSessionRepository.findFirstByOrderByStartedAtDesc().orElseThrow();
+		QueueItemEntity item = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()).stream()
+				.filter(queueItem -> queueItem.getStatus() == com.seedshiftradio.domain.QueueItemStatus.READY)
+				.findFirst()
+				.orElseThrow();
+
+		mockMvc.perform(post("/api/radio/playback-events")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "clientId": "web-client",
+								  "sessionId": "%s",
+								  "itemId": "%s",
+								  "eventType": "SEGMENT_STARTED",
+								  "occurredAt": "2026-03-29T10:00:00Z"
+								}
+								""".formatted(session.getId(), item.getId())))
+				.andExpect(status().isAccepted());
+
+		mockMvc.perform(post("/api/radio/playback-events")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "clientId": "web-client",
+								  "sessionId": "%s",
+								  "itemId": "%s",
+								  "eventType": "SEGMENT_ENDED",
+								  "occurredAt": "2026-03-29T10:00:05Z"
+								}
+								""".formatted(session.getId(), item.getId())))
+				.andExpect(status().isAccepted());
+
+		assertTrue(playHistoryRepository.findBySessionIdOrderByPlayedAtDesc(session.getId()).stream()
+				.anyMatch(history -> history.getQueueItemId().equals(item.getId())
+						&& history.getResultStatus() == com.seedshiftradio.domain.PlayHistoryResultStatus.DONE));
 	}
 
 	private void awaitWarmup(String stationId, String expectedState) throws Exception {

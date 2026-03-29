@@ -30,10 +30,13 @@ public class SettingsService {
 		if (!current.version().equals(request.version())) {
 			throw new ApiException(HttpStatus.CONFLICT, "CONFLICT", "設定が他で更新されています。", Map.of("field", "version"));
 		}
+		if (!current.schemaVersion().equals(request.schemaVersion())) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "schemaVersion が現在の設定と一致しません。", Map.of("field", "schemaVersion"));
+		}
 
 		SettingsDocument merged = new SettingsDocument(
 				current.version(),
-				current.schemaVersion(),
+				request.schemaVersion(),
 				current.updatedAt(),
 				request.server() == null ? current.server() : request.server(),
 				request.paths() == null ? current.paths() : request.paths(),

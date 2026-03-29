@@ -7,7 +7,7 @@ import java.util.Map;
 
 public record SettingsDocument(
 		Integer version,
-		Integer schemaVersion,
+		String schemaVersion,
 		Instant updatedAt,
 		ServerSettings server,
 		PathSettings paths,
@@ -20,7 +20,7 @@ public record SettingsDocument(
 	public SettingsDocument normalize() {
 		return new SettingsDocument(
 				version == null || version < 1 ? 1 : version,
-				schemaVersion == null || schemaVersion < 1 ? 1 : schemaVersion,
+				(schemaVersion == null || schemaVersion.isBlank()) ? "2026-03" : schemaVersion,
 				updatedAt == null ? Instant.now() : updatedAt,
 				server == null ? ServerSettings.defaults() : server.normalize(),
 				paths == null ? PathSettings.defaults() : paths.normalize(),
@@ -48,7 +48,7 @@ public record SettingsDocument(
 	public static SettingsDocument defaults() {
 		return new SettingsDocument(
 				1,
-				1,
+				"2026-03",
 				Instant.now(),
 				ServerSettings.defaults(),
 				PathSettings.defaults(),
@@ -179,14 +179,25 @@ public record SettingsDocument(
 		}
 	}
 
-	public record FeatureSettings(Boolean allowPlaceholderAudio) {
+	public record FeatureSettings(StreamingFeatureSettings streaming) {
 
 		public FeatureSettings normalize() {
-			return new FeatureSettings(allowPlaceholderAudio == null ? Boolean.TRUE : allowPlaceholderAudio);
+			return new FeatureSettings(streaming == null ? StreamingFeatureSettings.defaults() : streaming.normalize());
 		}
 
 		static FeatureSettings defaults() {
-			return new FeatureSettings(true);
+			return new FeatureSettings(StreamingFeatureSettings.defaults());
+		}
+	}
+
+	public record StreamingFeatureSettings(Boolean placeholderEnabled) {
+
+		public StreamingFeatureSettings normalize() {
+			return new StreamingFeatureSettings(placeholderEnabled == null ? Boolean.TRUE : placeholderEnabled);
+		}
+
+		static StreamingFeatureSettings defaults() {
+			return new StreamingFeatureSettings(true);
 		}
 	}
 }

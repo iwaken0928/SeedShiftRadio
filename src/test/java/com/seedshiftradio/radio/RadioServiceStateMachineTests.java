@@ -38,6 +38,7 @@ import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.programming.ProgrammingService;
+import com.seedshiftradio.settings.AssetService;
 import com.seedshiftradio.station.StationRepository;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.stream.StreamEventService;
@@ -68,10 +69,16 @@ class RadioServiceStateMachineTests {
 	StreamEventService streamEventService;
 
 	@Mock
+	AssetService assetService;
+
+	@Mock
 	ClientCapabilitiesService clientCapabilitiesService;
 
 	@Mock
 	SpeechDirectiveAssembler speechDirectiveAssembler;
+
+	@Mock
+	PlayHistoryService playHistoryService;
 
 	@Mock
 	ApplicationEventPublisher eventPublisher;
@@ -88,8 +95,10 @@ class RadioServiceStateMachineTests {
 				programBlockSlotRepository,
 				queueItemRepository,
 				streamEventService,
+				assetService,
 				clientCapabilitiesService,
 				speechDirectiveAssembler,
+				playHistoryService,
 				eventPublisher);
 		doAnswer(invocation -> {
 			Object event = invocation.getArgument(0);
@@ -159,6 +168,55 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void tuneStopsPreviousSessionBeforeCreatingNewOne() {
+		PlayoutSessionEntity previousSession = session("playout-old", PlayoutState.PLAYING, "queue-old");
+		QueueItemEntity previousItem = queueItem("queue-old", "playout-old", QueueItemStatus.PLAYING);
+		AtomicReference<PlayoutSessionEntity> latestSession = new AtomicReference<>(previousSession);
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station()));
+		when(playoutSessionRepository.findFirstByOrderByStartedAtDesc()).thenAnswer(invocation -> Optional.ofNullable(latestSession.get()));
+		when(playoutSessionRepository.findById(anyString())).thenAnswer(invocation -> {
+			String sessionId = invocation.getArgument(0);
+			PlayoutSessionEntity session = latestSession.get();
+			if (session != null && session.getId().equals(sessionId)) {
+				return Optional.of(session);
+			}
+			if (previousSession.getId().equals(sessionId)) {
+				return Optional.of(previousSession);
+			}
+			return Optional.empty();
+		});
+		when(playoutSessionRepository.save(any(PlayoutSessionEntity.class))).thenAnswer(invocation -> {
+			PlayoutSessionEntity session = invocation.getArgument(0);
+			latestSession.set(session);
+			return session;
+		});
+		when(queueItemRepository.findById("queue-old")).thenReturn(Optional.of(previousItem));
+		when(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> {
+			String sessionId = invocation.getArgument(0);
+			if ("playout-old".equals(sessionId)) {
+				return List.of(previousItem);
+			}
+			return List.of();
+		});
+		when(queueItemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(queueItemRepository.countBySessionIdAndStatus(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> {
+			String sessionId = invocation.getArgument(0);
+			QueueItemStatus status = invocation.getArgument(1);
+			if ("playout-old".equals(sessionId) && status == QueueItemStatus.READY) {
+				return 1L;
+			}
+			return 0L;
+		});
+		doAnswer(invocation -> null).when(eventPublisher).publishEvent(any(Object.class));
+
+		radioService.tune(new TuneRequest("station-night", "tester", false), "corr-new");
+
+		assertEquals(PlayoutState.STOPPED, previousSession.getState());
+		assertNull(previousSession.getCurrentQueueItemId());
+		assertEquals(QueueItemStatus.READY, previousItem.getStatus());
+	}
+
+	@Test
 	void playFromStoppedSessionWarmsQueueSoRetryCanResumePlayback() {
 		PlayoutSessionEntity session = session("playout-001", PlayoutState.STOPPED, null);
 		session.setResumePlayback(false);
@@ -189,6 +247,31 @@ class RadioServiceStateMachineTests {
 		assertEquals(1L, queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").stream()
 				.filter(item -> item.getStatus() == QueueItemStatus.PLAYING)
 				.count());
+	}
+
+	@Test
+	void recordPlaybackEventEndedReturnsSessionToPreparingWhenNoItemIsPlaying() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
+		QueueItemEntity item = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(playoutSessionRepository.findFirstByOrderByStartedAtDesc()).thenReturn(Optional.of(session));
+		when(playoutSessionRepository.save(any(PlayoutSessionEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(queueItemRepository.findById("queue-001")).thenReturn(Optional.of(item));
+		when(queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001")).thenReturn(List.of(item));
+		when(queueItemRepository.save(any(QueueItemEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(queueItemRepository.countBySessionIdAndStatus("playout-001", QueueItemStatus.READY)).thenReturn(0L);
+		doAnswer(invocation -> null).when(eventPublisher).publishEvent(any(Object.class));
+
+		radioService.recordPlaybackEvent(new PlaybackEventRequest(
+				"web-client",
+				"playout-001",
+				"queue-001",
+				PlaybackEventType.SEGMENT_ENDED,
+				Instant.now()));
+
+		assertEquals(QueueItemStatus.DONE, item.getStatus());
+		assertNull(session.getCurrentQueueItemId());
+		assertEquals(PlayoutState.PREPARING, session.getState());
 	}
 
 	@Test

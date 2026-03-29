@@ -40,7 +40,7 @@ class ProviderHealthServiceTests {
 		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort();
 		SettingsDocument settings = new SettingsDocument(
 				1,
-				1,
+				"2026-03",
 				Instant.parse("2026-03-20T09:00:00Z"),
 				SettingsDocument.ServerSettings.defaults(),
 				new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),

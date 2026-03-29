@@ -60,5 +60,24 @@ dependencies {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		excludeTags 'docker'
+	}
+}
+
+tasks.register('dockerTest', Test) {
+	group = 'verification'
+	description = 'Runs Docker/Testcontainers backed test suites.'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'docker'
+	}
+	shouldRunAfter tasks.test
+}
+
+tasks.register('ciTest') {
+	group = 'verification'
+	description = 'Runs both local and Docker-backed verification suites.'
+	dependsOn tasks.test, tasks.named('dockerTest')
 }

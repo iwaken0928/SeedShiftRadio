@@ -53,6 +53,7 @@ public class RadioService {
 	private final ClientCapabilitiesService clientCapabilitiesService;
 	private final SpeechDirectiveAssembler speechDirectiveAssembler;
 	private final PlayHistoryService playHistoryService;
+	private final LetterSegmentBinder letterSegmentBinder;
 	private final ApplicationEventPublisher eventPublisher;
 	private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
@@ -68,6 +69,7 @@ public class RadioService {
 			ClientCapabilitiesService clientCapabilitiesService,
 			SpeechDirectiveAssembler speechDirectiveAssembler,
 			PlayHistoryService playHistoryService,
+			LetterSegmentBinder letterSegmentBinder,
 			ApplicationEventPublisher eventPublisher) {
 		this.stationRepository = stationRepository;
 		this.programmingService = programmingService;
@@ -80,6 +82,7 @@ public class RadioService {
 		this.clientCapabilitiesService = clientCapabilitiesService;
 		this.speechDirectiveAssembler = speechDirectiveAssembler;
 		this.playHistoryService = playHistoryService;
+		this.letterSegmentBinder = letterSegmentBinder;
 		this.eventPublisher = eventPublisher;
 	}
 
@@ -343,6 +346,21 @@ public class RadioService {
 		});
 	}
 
+	@Transactional
+	public void handleAsyncGenerationFailure(String sessionId, String degradedReason) {
+		withSessionLock(sessionId, () -> {
+			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
+			if (session == null) {
+				return;
+			}
+			session.setDegradedReason(degradedReason);
+			requestQueueRefill(sessionId);
+			autoStartPlaybackIfRequested(session);
+			refreshSessionState(session);
+			emitSessionEvents(sessionId);
+		});
+	}
+
 	private ProgramBlockEntity createProgramBlock(PlayoutSessionEntity session, ResolvedProgramPlan plan, ProgramBlockStatus status) {
 		ProgramBlockEntity block = new ProgramBlockEntity();
 		block.setId(nextId("program"));
@@ -410,6 +428,7 @@ public class RadioService {
 		}
 		queueItemRepository.saveAll(queueItems);
 		queueItemRepository.flush();
+		letterSegmentBinder.bindPendingSegments(session.getId());
 		materializeQueueAssets(queueItems);
 		programBlockSlotRepository.saveAll(blockSlots);
 		if (plan.fallbackApplied()) {
@@ -489,6 +508,7 @@ public class RadioService {
 		}
 		queueItemRepository.saveAll(additions);
 		queueItemRepository.flush();
+		letterSegmentBinder.bindPendingSegments(session.getId());
 		materializeQueueAssets(additions);
 		if (!changedSlots.isEmpty()) {
 			programBlockSlotRepository.saveAll(changedSlots);

@@ -1,45 +1,66 @@
 package com.seedshiftradio.radio;
 
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.domain.QueueItemStatus;
-import com.seedshiftradio.settings.AssetService;
+import com.seedshiftradio.settings.MusicGenWorkerException;
+import com.seedshiftradio.settings.MusicGenerationRuntimeService;
 
 @Component
 public class GenerateMusicJob {
 
 	private final QueueItemRepository queueItemRepository;
-	private final AssetService assetService;
+	private final PlayoutSessionRepository playoutSessionRepository;
+	private final MusicGenerationRuntimeService musicGenerationRuntimeService;
 	private final RadioService radioService;
 
 	public GenerateMusicJob(
 			QueueItemRepository queueItemRepository,
-			AssetService assetService,
+			PlayoutSessionRepository playoutSessionRepository,
+			MusicGenerationRuntimeService musicGenerationRuntimeService,
 			RadioService radioService) {
 		this.queueItemRepository = queueItemRepository;
-		this.assetService = assetService;
+		this.playoutSessionRepository = playoutSessionRepository;
+		this.musicGenerationRuntimeService = musicGenerationRuntimeService;
 		this.radioService = radioService;
 	}
 
-	@Transactional
 	public void run(String queueItemId, String correlationId) {
 		QueueItemEntity item = queueItemRepository.findById(queueItemId).orElse(null);
 		if (item == null || item.getStatus() != QueueItemStatus.GENERATING) {
 			return;
 		}
+		PlayoutSessionEntity session = playoutSessionRepository.findById(item.getSessionId()).orElse(null);
+		if (session == null) {
+			return;
+		}
 
 		try {
-			assetService.ensureQueueAudioAsset(item);
-			item.setStatus(QueueItemStatus.READY);
-			queueItemRepository.save(item);
-			radioService.synchronizeSessionAfterAsyncUpdate(item.getSessionId());
+			MusicGenerationRuntimeService.GeneratedMusicAsset generatedAsset = musicGenerationRuntimeService.generate(session.getStationId(), item);
+			QueueItemEntity latestItem = queueItemRepository.findById(queueItemId).orElse(item);
+			if (latestItem.getStatus() != QueueItemStatus.GENERATING) {
+				return;
+			}
+			latestItem.setAssetId(generatedAsset.assetId());
+			latestItem.setAssetUrl(generatedAsset.assetUrl());
+			latestItem.setStatus(QueueItemStatus.READY);
+			queueItemRepository.save(latestItem);
+			radioService.synchronizeSessionAfterAsyncUpdate(latestItem.getSessionId());
+		} catch (MusicGenWorkerException exception) {
+			handleFailure(queueItemId, item.getSessionId(), exception.errorCode());
 		} catch (RuntimeException exception) {
-			item.setStatus(QueueItemStatus.FAILED);
-			item.setAssetBanned(true);
-			queueItemRepository.save(item);
-			radioService.synchronizeSessionAfterAsyncUpdate(item.getSessionId());
-			throw exception;
+			handleFailure(queueItemId, item.getSessionId(), "PROVIDER_BAD_RESPONSE");
 		}
+	}
+
+	private void handleFailure(String queueItemId, String sessionId, String errorCode) {
+		QueueItemEntity latestItem = queueItemRepository.findById(queueItemId).orElse(null);
+		if (latestItem == null) {
+			return;
+		}
+		latestItem.setStatus(QueueItemStatus.FAILED);
+		latestItem.setAssetBanned(true);
+		queueItemRepository.save(latestItem);
+		radioService.handleAsyncGenerationFailure(sessionId, errorCode);
 	}
 }

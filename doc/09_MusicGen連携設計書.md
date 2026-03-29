@@ -62,7 +62,9 @@ Response:
   "assetPath": "/data/assets/music/music-001.wav",
   "durationSec": 45,
   "providerFingerprint": "ace-step:1.0",
-  "promptHash": "abc123"
+  "promptHash": "abc123",
+  "errorCode": null,
+  "message": "generated"
 }
 ```
 
@@ -85,6 +87,13 @@ Response:
 
 現行サーバー実装では、`GenerateMusicJob` 自体は先行実装し、worker 未接続時は placeholder asset を作って queue を前進させられるようにする。`workers/musicgen` を追加した時点で `external_ref` と 실제 worker API 呼び出しへ差し替える。
 
+2026-03-29 時点の実装メモ:
+
+- `workers/musicgen` に FastAPI worker を追加し、`POST /music/jobs`, `GET /music/jobs/{jobId}`, `GET /health` を実装した
+- worker 内部の生成器は実モデル未接続のため deterministic な WAV 生成を行い、Server と Worker の非同期契約を先に成立させる
+- Server は `GenerateMusicJob -> MusicGenWorkerGateway -> generated_asset/provider_job` の経路で `submit -> poll -> asset 登録 -> READY` を実行する
+- worker 失敗時は `provider_job.error_code` を更新し、session を `DEGRADED` として queue refill を再要求する
+
 ## 7. キャッシュ方針
 
 キャッシュキー:
@@ -106,7 +115,7 @@ Response:
 3. ジングル
 4. TALK 置換
 
-MusicGen の失敗は `DEGRADED` として扱うが、セッション自体は継続する。
+MusicGen の失敗は `DEGRADED` として扱うが、セッション自体は継続する。現行実装では `GenerateMusicJob` が失敗 item を `FAILED` にし、queue refill を再要求して代替セグメントへ進める。
 
 ## 9. 監視項目
 

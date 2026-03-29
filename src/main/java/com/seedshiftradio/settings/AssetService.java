@@ -48,6 +48,8 @@ public class AssetService {
 		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
 				placeholderAudioFactory.createSilentWav(item.getDurationMs()),
 				resolveProviderFingerprint(item),
+				item.getId(),
+				providerJob.getId(),
 				Map.of(
 						"queueItemId", item.getId(),
 						"segmentType", item.getSegmentType().name(),

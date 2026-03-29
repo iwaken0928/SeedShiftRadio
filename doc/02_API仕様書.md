@@ -17,7 +17,7 @@
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
 - 設定更新、局管理、番組編成管理、監視 API は `X-Admin-Token` による最小保護を推奨する
 - `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/playback-events`, `GET /api/health` は一般操作 API として扱う
-- `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/monitor/summary` は `X-Admin-Token` 前提とする
+- `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `GET /api/letters/{id}`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/play-history`, `GET /api/play-history/{id}`, `GET /api/monitor/summary` は `X-Admin-Token` 前提とする
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
 ## 4. 主要DTO
@@ -87,12 +87,69 @@
   "playbackMode": "SERVER_AUDIO",
   "assetUrl": "/api/assets/audio/queue-0012.wav",
   "speechDirectiveId": null,
+  "letterId": "letter-0001",
   "durationMs": 28000,
   "status": "READY"
 }
 ```
 
-### 4.5 ProgramBlockSummary
+### 4.5 LetterDetail
+
+```json
+{
+  "id": "letter-0001",
+  "stationId": "station-night",
+  "radioName": "夜更かしペンギン",
+  "subject": "最近の作業BGM",
+  "body": "深夜作業でおすすめの音を教えてください。",
+  "status": "ADOPTED",
+  "adoptedInSessionId": "playout-20260320-001",
+  "createdAt": "2026-03-20T09:00:00Z",
+  "replies": [
+    {
+      "id": "reply-0001",
+      "replyText": "今夜は静かなアンビエントを中心に流します。",
+      "createdAt": "2026-03-20T09:10:00Z"
+    }
+  ],
+  "playHistory": [
+    {
+      "id": "play-history-0001",
+      "sessionId": "playout-20260320-001",
+      "queueItemId": "queue-0012",
+      "programBlockId": "program-20260320-01",
+      "programSlotId": "slot-letter-1",
+      "segmentType": "LETTER",
+      "title": "レター",
+      "playbackMode": "SERVER_AUDIO",
+      "resultStatus": "DONE",
+      "playedAt": "2026-03-20T09:15:00Z"
+    }
+  ]
+}
+```
+
+### 4.6 PlayHistoryItem
+
+```json
+{
+  "id": "play-history-0001",
+  "sessionId": "playout-20260320-001",
+  "stationId": "station-night",
+  "queueItemId": "queue-0012",
+  "letterId": "letter-0001",
+  "programBlockId": "program-20260320-01",
+  "programSlotId": "slot-letter-1",
+  "segmentType": "LETTER",
+  "title": "レター",
+  "playbackMode": "SERVER_AUDIO",
+  "resultStatus": "DONE",
+  "correlationId": "corr-abc123",
+  "playedAt": "2026-03-20T09:15:00Z"
+}
+```
+
+### 4.7 ProgramBlockSummary
 
 ```json
 {
@@ -108,7 +165,7 @@
 }
 ```
 
-### 4.6 SpeechDirective
+### 4.8 SpeechDirective
 
 ```json
 {
@@ -128,7 +185,7 @@
 }
 ```
 
-### 4.7 ErrorResponse
+### 4.9 ErrorResponse
 
 ```json
 {
@@ -168,9 +225,12 @@
 | `GET` | `/api/radio/next-speech-directive` | Client-side TTS 用指示取得。`clientId` 指定時は登録済み能力で `voiceHint` を最適化 |
 | `POST` | `/api/radio/playback-events` | クライアント再生イベント通知 |
 | `GET` | `/api/letters` | レター一覧取得 |
+| `GET` | `/api/letters/{id}` | レター詳細取得 |
 | `POST` | `/api/letters` | レター投稿 |
 | `POST` | `/api/letters/{id}/status` | レター状態更新 |
 | `POST` | `/api/letters/{id}/reply` | レター返信追加 |
+| `GET` | `/api/play-history` | 放送履歴一覧取得 |
+| `GET` | `/api/play-history/{id}` | 放送履歴詳細取得 |
 | `GET` | `/api/settings` | 設定取得 |
 | `PUT` | `/api/settings` | 設定更新 |
 | `POST` | `/api/settings/test-connections` | Provider 接続テスト |
@@ -249,7 +309,53 @@ Response:
 }
 ```
 
-### 6.3.1 `POST /letters/{id}/status`
+### 6.3.1 `GET /letters/{id}`
+
+管理者向けの詳細取得 API とする。`X-Admin-Token` が必要。
+
+Response:
+
+```json
+{
+  "id": "letter-0001",
+  "stationId": "station-night",
+  "radioName": "夜更かしペンギン",
+  "subject": "最近の作業BGM",
+  "body": "深夜作業でおすすめの音を教えてください。",
+  "status": "ADOPTED",
+  "adoptedInSessionId": "playout-20260320-001",
+  "createdAt": "2026-03-20T09:00:00Z",
+  "replies": [],
+  "playHistory": [
+    {
+      "id": "play-history-0001",
+      "sessionId": "playout-20260320-001",
+      "stationId": "station-night",
+      "queueItemId": "queue-0012",
+      "programBlockId": "program-20260320-01",
+      "programSlotId": "slot-letter-1",
+      "segmentType": "LETTER",
+      "title": "レター: 最近の作業BGM",
+      "playbackMode": "SERVER_AUDIO",
+      "resultStatus": "DONE",
+      "correlationId": "corr-abc123",
+      "playedAt": "2026-03-20T09:15:00Z",
+      "letter": {
+        "letterId": "letter-0001",
+        "radioName": "夜更かしペンギン",
+        "subject": "最近の作業BGM",
+        "adoptedInSessionId": "playout-20260320-001"
+      }
+    }
+  ]
+}
+```
+
+- `replies` は `letter_reply` の作成順で返す
+- `playHistory` はこのレターに紐づく放送履歴を新しい順で返す
+- レター紐付けの正本は `queue_item.letter_id` と `play_history.letter_id` とし、`program_block_slot.slot_context` は件名など補助メタに使う
+
+### 6.3.2 `POST /letters/{id}/status`
 
 `ADOPTED` へ更新する場合は採用先 `sessionId` を必須とする。
 
@@ -259,6 +365,60 @@ Response:
   "sessionId": "playout-20260320-001"
 }
 ```
+
+### 6.3.3 `POST /letters/{id}/reply`
+
+`X-Admin-Token` が必要。
+
+```json
+{
+  "replyText": "今夜は静かなアンビエントを中心に流します。"
+}
+```
+
+### 6.3.4 `GET /play-history`
+
+管理者向けの放送履歴一覧 API とする。`X-Admin-Token` が必要。
+
+Query:
+
+- `stationId` 任意
+- `sessionId` 任意
+- `letterId` 任意
+- `limit` 任意。既定は最新 50 件
+
+Response:
+
+```json
+[
+  {
+    "id": "play-history-0001",
+    "sessionId": "playout-20260320-001",
+    "stationId": "station-night",
+    "queueItemId": "queue-0012",
+    "programBlockId": "program-20260320-01",
+    "programSlotId": "slot-letter-1",
+    "segmentType": "LETTER",
+    "title": "レター: 最近の作業BGM",
+    "playbackMode": "SERVER_AUDIO",
+    "resultStatus": "DONE",
+    "correlationId": "corr-abc123",
+    "playedAt": "2026-03-20T09:15:00Z",
+    "letter": {
+      "letterId": "letter-0001",
+      "radioName": "夜更かしペンギン",
+      "subject": "最近の作業BGM",
+      "adoptedInSessionId": "playout-20260320-001"
+    }
+  }
+]
+```
+
+### 6.3.5 `GET /play-history/{id}`
+
+管理者向けの放送履歴詳細 API とする。`X-Admin-Token` が必要。
+
+Response は `GET /play-history` の各要素と同じ DTO を返す。
 
 ### 6.4 `POST /radio/playback-events`
 

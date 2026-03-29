@@ -31,19 +31,49 @@ public class GeneratedAssetService {
 
 	@Transactional
 	public GeneratedAssetEntity createAudioAsset(byte[] bytes, String providerFingerprint, Map<String, Object> metadata) {
+		return createAudioAsset(bytes, providerFingerprint, null, null, metadata);
+	}
+
+	@Transactional
+	public GeneratedAssetEntity createAudioAsset(
+			byte[] bytes,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			Map<String, Object> metadata) {
 		String assetId = nextId();
 		Path assetPath = resolveAudioPath(assetId);
 		write(assetPath, bytes);
+		return persistAsset(
+				assetId,
+				GeneratedAssetType.AUDIO,
+				assetPath,
+				bytes,
+				providerFingerprint,
+				queueItemId,
+				providerJobId,
+				metadata);
+	}
 
-		GeneratedAssetEntity entity = new GeneratedAssetEntity();
-		entity.setId(assetId);
-		entity.setAssetType(GeneratedAssetType.AUDIO);
-		entity.setStoragePath(assetPath.toString());
-		entity.setContentHash(sha256(bytes));
-		entity.setProviderFingerprint(providerFingerprint == null || providerFingerprint.isBlank() ? "server:placeholder" : providerFingerprint);
-		entity.setMetadata(metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata));
-		entity.setUpdatedAt(Instant.now());
-		return generatedAssetRepository.save(entity);
+	@Transactional
+	public GeneratedAssetEntity registerExistingAsset(
+			GeneratedAssetType assetType,
+			Path assetPath,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			Map<String, Object> metadata) {
+		Path normalizedPath = assetPath.toAbsolutePath().normalize();
+		byte[] bytes = read(normalizedPath);
+		return persistAsset(
+				nextId(),
+				assetType,
+				normalizedPath,
+				bytes,
+				providerFingerprint,
+				queueItemId,
+				providerJobId,
+				metadata);
 	}
 
 	public Optional<Path> resolveAudioAssetPath(String assetId) {
@@ -76,6 +106,40 @@ public class GeneratedAssetService {
 					"generated asset の保存に失敗しました。",
 					Map.of("assetPath", assetPath.toString()));
 		}
+	}
+
+	private byte[] read(Path assetPath) {
+		try {
+			return Files.readAllBytes(assetPath);
+		} catch (IOException exception) {
+			throw new ApiException(
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"INTERNAL_ERROR",
+					"generated asset の読み込みに失敗しました。",
+					Map.of("assetPath", assetPath.toString()));
+		}
+	}
+
+	private GeneratedAssetEntity persistAsset(
+			String assetId,
+			GeneratedAssetType assetType,
+			Path assetPath,
+			byte[] bytes,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			Map<String, Object> metadata) {
+		GeneratedAssetEntity entity = new GeneratedAssetEntity();
+		entity.setId(assetId);
+		entity.setAssetType(assetType);
+		entity.setStoragePath(assetPath.toString());
+		entity.setContentHash(sha256(bytes));
+		entity.setProviderFingerprint(providerFingerprint == null || providerFingerprint.isBlank() ? "server:placeholder" : providerFingerprint);
+		entity.setQueueItemId(queueItemId);
+		entity.setProviderJobId(providerJobId);
+		entity.setMetadata(metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata));
+		entity.setUpdatedAt(Instant.now());
+		return generatedAssetRepository.save(entity);
 	}
 
 	private String sha256(byte[] bytes) {

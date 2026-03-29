@@ -22,7 +22,9 @@ import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterStatusUpdateRequest;
+import com.seedshiftradio.radio.LetterSegmentBinder;
 import com.seedshiftradio.radio.PlayoutSessionRepository;
+import com.seedshiftradio.radio.PlayHistoryQueryService;
 import com.seedshiftradio.station.StationRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,13 +43,26 @@ class LetterServiceTests {
 	StationRepository stationRepository;
 
 	@Mock
+	PlayHistoryQueryService playHistoryQueryService;
+
+	@Mock
+	LetterSegmentBinder letterSegmentBinder;
+
+	@Mock
 	ApplicationEventPublisher applicationEventPublisher;
 
 	LetterService letterService;
 
 	@BeforeEach
 	void setUp() {
-		letterService = new LetterService(letterRepository, letterReplyRepository, playoutSessionRepository, stationRepository, applicationEventPublisher);
+		letterService = new LetterService(
+				letterRepository,
+				letterReplyRepository,
+				playoutSessionRepository,
+				stationRepository,
+				playHistoryQueryService,
+				letterSegmentBinder,
+				applicationEventPublisher);
 	}
 
 	@Test
@@ -128,5 +143,6 @@ class LetterServiceTests {
 
 		assertEquals(LetterStatus.ADOPTED, response.status());
 		assertEquals("playout-001", response.adoptedInSessionId());
+		verify(letterSegmentBinder).bindPendingSegments("playout-001");
 	}
 }

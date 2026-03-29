@@ -19,12 +19,15 @@ import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateResponse;
+import com.seedshiftradio.letter.LetterDtos.LetterDetailResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterReplyRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterReplyResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterReplySummary;
 import com.seedshiftradio.letter.LetterDtos.LetterStatusUpdateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterSummaryResponse;
+import com.seedshiftradio.radio.LetterSegmentBinder;
 import com.seedshiftradio.radio.PlayoutSessionRepository;
+import com.seedshiftradio.radio.PlayHistoryQueryService;
 import com.seedshiftradio.station.StationRepository;
 
 @Service
@@ -36,6 +39,8 @@ public class LetterService {
 	private final LetterReplyRepository letterReplyRepository;
 	private final PlayoutSessionRepository playoutSessionRepository;
 	private final StationRepository stationRepository;
+	private final PlayHistoryQueryService playHistoryQueryService;
+	private final LetterSegmentBinder letterSegmentBinder;
 	private final ApplicationEventPublisher eventPublisher;
 
 	public LetterService(
@@ -43,11 +48,15 @@ public class LetterService {
 			LetterReplyRepository letterReplyRepository,
 			PlayoutSessionRepository playoutSessionRepository,
 			StationRepository stationRepository,
+			PlayHistoryQueryService playHistoryQueryService,
+			LetterSegmentBinder letterSegmentBinder,
 			ApplicationEventPublisher eventPublisher) {
 		this.letterRepository = letterRepository;
 		this.letterReplyRepository = letterReplyRepository;
 		this.playoutSessionRepository = playoutSessionRepository;
 		this.stationRepository = stationRepository;
+		this.playHistoryQueryService = playHistoryQueryService;
+		this.letterSegmentBinder = letterSegmentBinder;
 		this.eventPublisher = eventPublisher;
 	}
 
@@ -83,6 +92,22 @@ public class LetterService {
 		return saveNewLetter(request, null);
 	}
 
+	@Transactional(readOnly = true)
+	public LetterDetailResponse get(String letterId) {
+		LetterEntity letter = getLetter(letterId);
+		return new LetterDetailResponse(
+				letter.getId(),
+				letter.getStationId(),
+				letter.getRadioName(),
+				letter.getSubject(),
+				letter.getBody(),
+				letter.getStatus(),
+				letter.getAdoptedInSessionId(),
+				letter.getCreatedAt(),
+				loadReplies(letter.getId()),
+				playHistoryQueryService.list(null, null, letter.getId(), null, 50));
+	}
+
 	@Transactional
 	public LetterSummaryResponse updateStatus(String letterId, LetterStatusUpdateRequest request) {
 		LetterEntity letter = getLetter(letterId);
@@ -112,6 +137,9 @@ public class LetterService {
 					Map.of("letterId", letterId));
 		}
 		LetterEntity saved = letterRepository.save(letter);
+		if (saved.getStatus() == LetterStatus.ADOPTED && saved.getAdoptedInSessionId() != null) {
+			letterSegmentBinder.bindPendingSegments(saved.getAdoptedInSessionId());
+		}
 		LetterSummaryResponse summary = toSummary(saved, loadReplies(saved.getId()));
 		eventPublisher.publishEvent(new LetterChangedEvent(summary));
 		return summary;

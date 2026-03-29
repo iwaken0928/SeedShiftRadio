@@ -81,6 +81,9 @@ class RadioServiceStateMachineTests {
 	PlayHistoryService playHistoryService;
 
 	@Mock
+	LetterSegmentBinder letterSegmentBinder;
+
+	@Mock
 	ApplicationEventPublisher eventPublisher;
 
 	RadioService radioService;
@@ -99,6 +102,7 @@ class RadioServiceStateMachineTests {
 				clientCapabilitiesService,
 				speechDirectiveAssembler,
 				playHistoryService,
+				letterSegmentBinder,
 				eventPublisher);
 		doAnswer(invocation -> {
 			Object event = invocation.getArgument(0);

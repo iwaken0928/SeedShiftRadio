@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 import com.seedshiftradio.domain.LetterStatus;
+import com.seedshiftradio.radio.PlayHistoryDtos.PlayHistoryResponse;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -43,6 +44,19 @@ public final class LetterDtos {
 			String adoptedInSessionId,
 			Instant createdAt,
 			List<LetterReplySummary> replies) {
+	}
+
+	public record LetterDetailResponse(
+			String id,
+			String stationId,
+			String radioName,
+			String subject,
+			String body,
+			LetterStatus status,
+			String adoptedInSessionId,
+			Instant createdAt,
+			List<LetterReplySummary> replies,
+			List<PlayHistoryResponse> playHistory) {
 	}
 
 	public record LetterReplySummary(String id, String replyText, Instant createdAt) {

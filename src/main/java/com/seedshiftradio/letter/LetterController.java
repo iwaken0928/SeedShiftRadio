@@ -16,6 +16,7 @@ import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateResponse;
+import com.seedshiftradio.letter.LetterDtos.LetterDetailResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterReplyRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterReplyResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterStatusUpdateRequest;
@@ -50,6 +51,14 @@ public class LetterController {
 			@Valid @RequestBody LetterCreateRequest request,
 			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
 		return letterService.create(request, idempotencyKey);
+	}
+
+	@GetMapping("/{id}")
+	public LetterDetailResponse get(
+			@PathVariable("id") String letterId,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
+		adminApiGuard.require(adminToken);
+		return letterService.get(letterId);
 	}
 
 	@PostMapping("/{id}/status")

@@ -38,6 +38,9 @@ public class PlayHistoryEntity {
 	@Column(name = "queue_item_id", nullable = false)
 	private String queueItemId;
 
+	@Column(name = "letter_id")
+	private String letterId;
+
 	@Column(name = "program_block_id")
 	private String programBlockId;
 

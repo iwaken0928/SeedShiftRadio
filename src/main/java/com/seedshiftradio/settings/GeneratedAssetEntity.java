@@ -49,6 +49,12 @@ public class GeneratedAssetEntity {
 	@Column(nullable = false, columnDefinition = "jsonb")
 	private Map<String, Object> metadata = new LinkedHashMap<>();
 
+	@Column(name = "queue_item_id")
+	private String queueItemId;
+
+	@Column(name = "provider_job_id")
+	private String providerJobId;
+
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
 

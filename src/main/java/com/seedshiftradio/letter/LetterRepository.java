@@ -14,5 +14,7 @@ public interface LetterRepository extends JpaRepository<LetterEntity, String> {
 
 	List<LetterEntity> findByStationIdOrderByCreatedAtDesc(String stationId);
 
+	List<LetterEntity> findByAdoptedInSessionIdAndStatusOrderByCreatedAtAsc(String adoptedInSessionId, LetterStatus status);
+
 	Optional<LetterEntity> findByIdempotencyKey(String idempotencyKey);
 }

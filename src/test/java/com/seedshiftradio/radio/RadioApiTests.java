@@ -27,6 +27,13 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.seedshiftradio.settings.GeneratedAssetRepository;
+import com.seedshiftradio.domain.LetterStatus;
+import com.seedshiftradio.domain.PlayHistoryResultStatus;
+import com.seedshiftradio.domain.PlaybackMode;
+import com.seedshiftradio.domain.SegmentType;
+import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.letter.LetterEntity;
+import com.seedshiftradio.letter.LetterRepository;
 
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("docker")
@@ -58,6 +65,15 @@ class RadioApiTests {
 	@Autowired
 	PlayHistoryRepository playHistoryRepository;
 
+	@Autowired
+	ProgramBlockRepository programBlockRepository;
+
+	@Autowired
+	ProgramBlockSlotRepository programBlockSlotRepository;
+
+	@Autowired
+	LetterRepository letterRepository;
+
 	MockMvc mockMvc;
 
 	@BeforeEach
@@ -82,6 +98,13 @@ class RadioApiTests {
 	@Test
 	void adminTokenIsRequiredForSettings() throws Exception {
 		mockMvc.perform(get("/api/settings"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("ADMIN_AUTH_REQUIRED"));
+	}
+
+	@Test
+	void adminTokenIsRequiredForPlayHistory() throws Exception {
+		mockMvc.perform(get("/api/play-history"))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("ADMIN_AUTH_REQUIRED"));
 	}
@@ -272,7 +295,106 @@ class RadioApiTests {
 
 		assertTrue(playHistoryRepository.findBySessionIdOrderByPlayedAtDesc(session.getId()).stream()
 				.anyMatch(history -> history.getQueueItemId().equals(item.getId())
-						&& history.getResultStatus() == com.seedshiftradio.domain.PlayHistoryResultStatus.DONE));
+						&& history.getResultStatus() == PlayHistoryResultStatus.DONE));
+	}
+
+	@Test
+	void playHistoryApiResolvesLetterReference() throws Exception {
+		PlayoutSessionEntity session = new PlayoutSessionEntity();
+		session.setId("playout-history-001");
+		session.setStationId("station-night");
+		session.setState(com.seedshiftradio.domain.PlayoutState.PLAYING);
+		session.setCorrelationId("corr-history-001");
+		playoutSessionRepository.save(session);
+
+		LetterEntity letter = new LetterEntity(
+				"letter-history-001",
+				"station-night",
+				"夜更かしペンギン",
+				"今夜のおすすめ曲",
+				"本文",
+				LetterStatus.ADOPTED,
+				null);
+		letter.setAdoptedInSessionId(session.getId());
+		letterRepository.save(letter);
+
+		ProgramBlockEntity block = new ProgramBlockEntity();
+		block.setId("program-history-001");
+		block.setStationId("station-night");
+		block.setSessionId(session.getId());
+		block.setTitle("レター特集");
+		block.setStatus(com.seedshiftradio.domain.ProgramBlockStatus.ACTIVE);
+		block.setPlannedDurationMs(120_000);
+		programBlockRepository.save(block);
+
+		ProgramBlockSlotEntity slot = new ProgramBlockSlotEntity();
+		slot.setId("slot-history-001");
+		slot.setProgramBlockId(block.getId());
+		slot.setSequenceNo(1);
+		slot.setRole(SlotRole.LETTER);
+		slot.setConstraintMode(com.seedshiftradio.domain.ConstraintMode.HARD);
+		slot.setResolvedSegmentType(SegmentType.LETTER);
+		slot.setStatus(com.seedshiftradio.domain.ProgramBlockSlotStatus.DONE);
+		slot.setTargetDurationMs(120_000);
+		slot.setSlotContext(new java.util.LinkedHashMap<>(java.util.Map.of(
+				"letterId", letter.getId(),
+				"letterRadioName", letter.getRadioName(),
+				"letterSubject", letter.getSubject())));
+		programBlockSlotRepository.save(slot);
+
+		QueueItemEntity item = new QueueItemEntity();
+		item.setId("queue-history-001");
+		item.setSessionId(session.getId());
+		item.setSequenceNo(1);
+		item.setSegmentType(SegmentType.LETTER);
+		item.setStatus(com.seedshiftradio.domain.QueueItemStatus.DONE);
+		item.setProgramBlockId(block.getId());
+		item.setProgramSlotId(slot.getId());
+		item.setSlotRole(SlotRole.LETTER);
+		item.setTitle("レター: 今夜のおすすめ曲");
+		item.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
+		item.setLetterId(letter.getId());
+		item.setDurationMs(120_000);
+		item.setCorrelationId(session.getCorrelationId());
+		queueItemRepository.save(item);
+
+		PlayHistoryEntity history = new PlayHistoryEntity();
+		history.setId("play-history-001");
+		history.setSessionId(session.getId());
+		history.setStationId("station-night");
+		history.setQueueItemId(item.getId());
+		history.setLetterId(letter.getId());
+		history.setProgramBlockId(block.getId());
+		history.setProgramSlotId(slot.getId());
+		history.setSegmentType(SegmentType.LETTER);
+		history.setTitle(item.getTitle());
+		history.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
+		history.setResultStatus(PlayHistoryResultStatus.DONE);
+		history.setCorrelationId(session.getCorrelationId());
+		history.setPlayedAt(java.time.Instant.parse("2026-03-29T10:00:05Z"));
+		playHistoryRepository.save(history);
+
+		mockMvc.perform(get("/api/play-history")
+						.header("X-Admin-Token", "test-admin-token")
+						.param("letterId", letter.getId()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(history.getId()))
+				.andExpect(jsonPath("$[0].letter.letterId").value(letter.getId()))
+				.andExpect(jsonPath("$[0].letter.subject").value("今夜のおすすめ曲"))
+				.andExpect(jsonPath("$[0].resultStatus").value("DONE"));
+
+		mockMvc.perform(get("/api/play-history/{id}", history.getId())
+						.header("X-Admin-Token", "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.programSlotId").value(slot.getId()))
+				.andExpect(jsonPath("$.letter.radioName").value("夜更かしペンギン"));
+
+		mockMvc.perform(get("/api/letters/{id}", letter.getId())
+						.header("X-Admin-Token", "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.body").value("本文"))
+				.andExpect(jsonPath("$.playHistory[0].id").value(history.getId()))
+				.andExpect(jsonPath("$.playHistory[0].letter.subject").value("今夜のおすすめ曲"));
 	}
 
 	private void awaitWarmup(String stationId, String expectedState) throws Exception {

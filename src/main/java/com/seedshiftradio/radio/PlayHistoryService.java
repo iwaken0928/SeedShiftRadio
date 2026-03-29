@@ -24,6 +24,7 @@ public class PlayHistoryService {
 		entity.setSessionId(session.getId());
 		entity.setStationId(session.getStationId());
 		entity.setQueueItemId(item.getId());
+		entity.setLetterId(item.getLetterId());
 		entity.setProgramBlockId(item.getProgramBlockId());
 		entity.setProgramSlotId(item.getProgramSlotId());
 		entity.setSegmentType(item.getSegmentType());

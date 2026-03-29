@@ -159,6 +159,39 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void playFromStoppedSessionWarmsQueueSoRetryCanResumePlayback() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.STOPPED, null);
+		session.setResumePlayback(false);
+		wireRepositoryState(session, List.of(), Map.of(), new ArrayList<>());
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(programmingService.resolveCurrentPlan(anyString(), any(OffsetDateTime.class))).thenReturn(new ProgrammingService.ResolvedProgramPlan(
+				"tmpl-night-regular",
+				3,
+				"深夜の作業ノート",
+				120_000,
+				List.of(
+						new ProgrammingService.ResolvedSlot("slot-1", SlotRole.OPENING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-2", SlotRole.TOPIC, com.seedshiftradio.domain.ConstraintMode.SOFT, 60_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-3", SlotRole.ENDING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.JINGLE)),
+				false,
+				List.of()));
+
+		ApiException exception = assertThrows(ApiException.class, () -> radioService.play());
+
+		assertEquals("QUEUE_NOT_READY", exception.getCode());
+		assertEquals(PlayoutState.PREPARING, session.getState());
+		assertEquals(3, queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").size());
+		assertEquals(3, session.getBufferReadyCount());
+
+		RadioStatusResponse response = radioService.play();
+
+		assertEquals(PlayoutState.PLAYING, response.state());
+		assertEquals(1L, queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").stream()
+				.filter(item -> item.getStatus() == QueueItemStatus.PLAYING)
+				.count());
+	}
+
+	@Test
 	void tuneCreatesInitialWarmupQueueAndAutoStartsPlaybackWhenRequested() {
 		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
 				"tmpl-night-regular",

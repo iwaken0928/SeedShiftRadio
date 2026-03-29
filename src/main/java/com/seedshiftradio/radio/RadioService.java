@@ -117,6 +117,10 @@ public class RadioService {
 					.orElse(null);
 		}
 		if (item == null) {
+			if (session.getState() == PlayoutState.STOPPED) {
+				session.setState(PlayoutState.PREPARING);
+				playoutSessionRepository.save(session);
+			}
 			requestQueueWarmup(session.getId());
 			throw new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "再生可能なセグメントがまだありません。", Map.of("sessionId", session.getId()));
 		}

@@ -1,3 +1,4 @@
-model = "gpt-5.4"
-model_reasoning_effort = "xhigh"
+model = "qwen/qwen3-coder-next"
+model_provider = "lmstudio-local"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"

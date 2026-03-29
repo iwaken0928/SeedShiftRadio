@@ -2,6 +2,11 @@ model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
+[model_providers.lmstudio-local]
+name = "LM Studio Local"
+base_url = "http://localhost:1234/v1"
+wire_api = "responses"
+
 project_root_markers = [
   ".git",
   "pom.xml",

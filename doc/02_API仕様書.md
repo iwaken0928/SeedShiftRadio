@@ -52,7 +52,33 @@
     "enabled": true,
     "defaultTemplateId": "tmpl-night-regular",
     "fallbackStrategy": "LEGACY_RATIO",
-    "planningHorizonMinutes": 20
+    "planningHorizonMinutes": 20,
+    "preGeneration": {
+      "mode": "ASSISTED",
+      "maxPreparedMinutes": 12,
+      "maxPreparedBlocks": 2,
+      "preferCacheReuse": true
+    },
+    "replay": {
+      "intensity": "LIGHT",
+      "eligibleSegmentTypes": ["MUSIC_AI", "MUSIC_LOCAL", "JINGLE"],
+      "minimumAssetAgeHours": 6,
+      "cooldownHours": 72,
+      "maxReplaySharePercent": 20,
+      "excludeLetterSegments": true
+    },
+    "composition": {
+      "targetSegmentShares": {
+        "talk": 40,
+        "letter": 20,
+        "music": 35,
+        "jingle": 5
+      },
+      "maxConsecutiveTalkSegments": 2,
+      "musicBreakIntervalMinutes": 8,
+      "letterPriorityBoostThreshold": 4,
+      "allowSoftFallbackRetiming": true
+    }
   }
 }
 ```
@@ -86,6 +112,9 @@
   "title": "オープニングトーク",
   "playbackMode": "SERVER_AUDIO",
   "assetUrl": "/api/assets/audio/queue-0012.wav",
+  "contentOrigin": "CACHE_REUSED",
+  "preparedAt": "2026-03-20T08:58:00Z",
+  "replayOfPlayHistoryId": null,
   "speechDirectiveId": null,
   "letterId": "letter-0001",
   "durationMs": 28000,
@@ -143,6 +172,8 @@
   "segmentType": "LETTER",
   "title": "レター",
   "playbackMode": "SERVER_AUDIO",
+  "contentOrigin": "LIVE_GEN",
+  "replayOfPlayHistoryId": null,
   "resultStatus": "DONE",
   "correlationId": "corr-abc123",
   "playedAt": "2026-03-20T09:15:00Z"
@@ -475,6 +506,32 @@ Request:
   "defaultTemplateId": "tmpl-night-regular",
   "fallbackStrategy": "LEGACY_RATIO",
   "planningHorizonMinutes": 20,
+  "preGeneration": {
+    "mode": "ASSISTED",
+    "maxPreparedMinutes": 12,
+    "maxPreparedBlocks": 2,
+    "preferCacheReuse": true
+  },
+  "replay": {
+    "intensity": "LIGHT",
+    "eligibleSegmentTypes": ["MUSIC_AI", "MUSIC_LOCAL", "JINGLE"],
+    "minimumAssetAgeHours": 6,
+    "cooldownHours": 72,
+    "maxReplaySharePercent": 20,
+    "excludeLetterSegments": true
+  },
+  "composition": {
+    "targetSegmentShares": {
+      "talk": 40,
+      "letter": 20,
+      "music": 35,
+      "jingle": 5
+    },
+    "maxConsecutiveTalkSegments": 2,
+    "musicBreakIntervalMinutes": 8,
+    "letterPriorityBoostThreshold": 4,
+    "allowSoftFallbackRetiming": true
+  },
   "rules": [
     {
       "priority": 100,
@@ -509,7 +566,7 @@ Response:
 }
 ```
 
-`PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。
+`PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。`preGeneration`, `replay`, `composition` は station ごとの実行時調整プロファイルとして扱い、既存 `ProgramTemplate` の版を壊さずに運用中 block の深さ、キャッシュ優先度、再放送比率、番組の混ぜ方を調整できるようにする。
 
 ### 6.7 `POST /stations/{id}/programming/preview`
 
@@ -556,8 +613,8 @@ Response:
 
 ```json
 {
-  "version": 3,
-  "schemaVersion": "2026-03",
+  "version": 4,
+  "schemaVersion": "2026-04",
   "server": {
     "bindHost": "127.0.0.1",
     "port": 8080
@@ -568,7 +625,26 @@ Response:
   },
   "playout": {
     "targetReadyCount": 3,
-    "minReadyDurationMs": 90000
+    "minimumReadyCount": 2,
+    "minReadyDurationMs": 90000,
+    "maxPreparedDurationMs": 480000,
+    "maxPreparedBlocks": 2,
+    "scriptAheadCount": 4,
+    "ttsAheadCount": 3,
+    "musicAheadCount": 2,
+    "idlePrefetchEnabled": true
+  },
+  "cache": {
+    "scriptMaxBytes": 134217728,
+    "ttsMaxBytes": 536870912,
+    "musicMaxBytes": 2147483648,
+    "scriptRetentionDays": 7,
+    "ttsRetentionDays": 30,
+    "musicRetentionDays": 30,
+    "scriptReuseScope": "STATION",
+    "ttsReuseScope": "STATION",
+    "musicReuseScope": "GLOBAL",
+    "cleanupBatchSize": 200
   },
   "providers": {
     "llm": { "defaultProvider": "ollama" },
@@ -588,13 +664,15 @@ Response:
 
 ### 6.9 `PUT /api/settings`
 
-クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`paths`, `playout`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。
+クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`paths`, `playout`, `cache`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズと再利用範囲を決める。
 
 ```json
 {
-  "version": 3,
-  "schemaVersion": "2026-03",
+  "version": 4,
+  "schemaVersion": "2026-04",
   "paths": { ... },
+  "playout": { ... },
+  "cache": { ... },
   "providers": { ... }
 }
 ```

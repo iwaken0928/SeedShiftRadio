@@ -26,6 +26,7 @@
 | 項目 | 用途 |
 |---|---|
 | station profile | 局の人格、雰囲気、禁則、話題傾向 |
+| station composition policy | talk / letter / music の混ぜ方、連続 talk 上限、再放送許容量 |
 | program template | 現在番組のテーマ、テンポ、避ける話題、演出方針 |
 | program slot | slot role, `HARD` / `SOFT`, 必須要素, 代替可能範囲 |
 | segment type | TALK / LETTER / ANNOUNCEMENT |
@@ -109,6 +110,20 @@
 - 最新のレター状態が変化した
 - persona version が変わった
 - NG ポリシーが更新された
+- station `compositionPolicy` や `preGenerationPolicy` の script 影響項目が変わった
+
+再利用範囲:
+
+- `DISABLED`: 毎回再生成する
+- `SESSION`: 同一 session のみ再利用する
+- `STATION`: 同一 station 内で再利用する
+- `GLOBAL`: station を越えて再利用する
+
+再放送候補化:
+
+- TALK は `safetyFlags` が空で、レター本文や時刻依存告知を含まない場合のみ `broadcast_archive` 候補にしてよい
+- `LETTER` は既定で `broadcast_archive` 候補にしない
+- 再放送候補へ昇格した場合も、元の `contentHash`, `programTemplateVersion`, `personaVersion` を保持する
 
 ## 9. 品質ガード
 

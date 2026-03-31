@@ -17,7 +17,7 @@
 |---|---|---|
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
-| `/settings` | 設定画面 | Provider 設定、局管理、番組管理、キャッシュ設定、接続テスト |
+| `/settings` | 設定画面 | Provider 設定、局管理、番組管理、先行生成・再放送・キャッシュ設定、接続テスト |
 | `/monitor` | 監視画面 | Provider health, buffer, job, recent errors |
 
 ## 4. レイアウト方針
@@ -37,7 +37,7 @@
 | Playback Panel | 再生/停止、音量、再生モード、NowPlaying |
 | Program Panel | 現在番組タイトル、適用テンプレート、次スロット |
 | Subtitle Panel | 現在発話テキスト、発話者名 |
-| Queue Panel | 次に流れるセグメント、状態、生成中表示 |
+| Queue Panel | 次に流れるセグメント、状態、生成中表示、live/cache/replay タグ |
 | Provider Panel | LLM/TTS/MusicGen の health と buffer 状態 |
 
 ### 5.2 画面状態
@@ -91,6 +91,7 @@
 - Program Templates
 - Programming Rules
 - Programming Preview
+- Pre-generation / Replay
 - Paths
 - Cache
 - Security
@@ -103,6 +104,8 @@
 - 危険な項目は `localhost 以外へ bind` などの注意表示を出す
 - API キー自体は平文表示せず、参照先のみ表示する
 - 番組テンプレート編集では `HARD` / `SOFT` の違いを明示し、保存前に Preview を実行できるようにする
+- 局ごとの番組編成設定では `preGeneration`, `replay`, `composition` を 1 画面で編集できるようにし、再放送比率と番組構成比は slider と数値入力の両方を許容する
+- `Cache` セクションでは script / TTS / music の保持上限サイズ、保存日数、再利用範囲を個別に確認できるようにする
 - 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
 
 ## 8. 監視画面

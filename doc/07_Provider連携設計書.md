@@ -10,6 +10,7 @@
 - Provider ごとの差異は `Capability` と `Metadata` で吸収する
 - HTTP を第一候補とし、必要時のみ CLI 連携を許容する
 - タイムアウト、リトライ、エラー分類は共通化する
+- Provider 呼び出し前に cache hit と archive replay 可否を評価し、不要な生成を避ける
 
 ## 3. 推奨インターフェース
 
@@ -77,10 +78,20 @@ CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセ
 - timeout
 - provider fingerprint
 - credential ref
+- cache policy
+- preGenerationMode
 
 機密値は `env:` または `file:` 参照とする。
 
 Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。
+
+### 8.1 Cache-first 実行
+
+1. `contentHash` を計算し `generated_asset` を reuse scope に従って検索する
+2. hit した場合は Provider 呼び出しを省略し、`queue_item.content_origin=CACHE_REUSED` を記録する
+3. miss した場合のみ Provider を呼び出す
+4. 完了 asset は `byte_size`, `reuse_scope`, `expires_at`, `archive_eligible` を付けて保存する
+5. `archive_eligible=true` かつ安全条件を満たすものは `broadcast_archive` へ昇格可能にする
 
 ## 9. 推奨 OSS と使い分け
 
@@ -120,3 +131,4 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 - `provider_job.external_ref` は worker 側 `jobId` や Provider 側 request id を保持し、未接続時は placeholder 実装の識別子を入れてよい
 - 監視画面には生の provider error ではなく整形した分類を表示する
 - Provider request metadata には `stationId`, `programTemplateId`, `programSlotId` を含め、監査とキャッシュに利用できるようにする
+- Provider result metadata には `contentHash`, `byteSize`, `duration`, `archiveEligible` を含め、cleanup と replay promotion に利用できるようにする

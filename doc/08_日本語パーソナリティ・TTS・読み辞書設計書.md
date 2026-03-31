@@ -84,6 +84,7 @@ Web では主にデバッグ表示用、Native では実行用とする。
 
 - `SpeechDirectiveAssembler` は `queue item`, `Language Persona`, `Voice Persona`, 必要時 `client_capabilities` を使って `voiceHint` を決定する
 - `clientId` が与えられ、`preferredPlaybackMode=CLIENT_TTS` かつ `localVoiceProfiles` があれば、その候補を既定 `Voice Persona` より優先してよい
+- 先行生成や archive replay では、実行時に組み立て直すのではなく最終 `SpeechDirective` snapshot を script asset metadata へ保存して再利用してよい
 
 ## 7. TTS Provider 方針
 
@@ -108,6 +109,9 @@ Web では主にデバッグ表示用、Native では実行用とする。
 - `normalizedText` は DB に保持して再現可能にする
 - TTS の入力原文と実再生テキストが異なる場合は両方保持する
 - Voice Persona 変更時は TTS キャッシュを無効化する
+- `pronunciationHints`, `pauseHints`, `voiceHint` も replay 対応のため asset metadata に保持する
+- `LETTER` 由来の音声は既定で archive replay 候補にしない
+- `TALK` の replay 候補化は station `replayPolicy` と `safetyFlags` の両方を満たした場合のみ許可する
 
 ## 10. 将来拡張
 

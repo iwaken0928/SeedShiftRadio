@@ -83,10 +83,36 @@ public class SettingsService {
 					Map.of("field", "paths.musicLibrary"));
 		}
 
+		validatePlayout(document.playout());
 		validateProviderGroup("providers.llm", document.providers().llm());
 		validateProviderGroup("providers.tts", document.providers().tts());
 		validateProviderGroup("providers.musicGen", document.providers().musicGen());
 		validateCache(document.cache());
+	}
+
+	private void validatePlayout(SettingsDocument.PlayoutSettings playout) {
+		validatePositive(playout.targetReadyCount(), "playout.targetReadyCount");
+		validateNonNegative(playout.minimumReadyCount(), "playout.minimumReadyCount");
+		validatePositive(playout.minReadyDurationMs(), "playout.minReadyDurationMs");
+		validatePositive(playout.maxPreparedDurationMs(), "playout.maxPreparedDurationMs");
+		validateNonNegative(playout.maxPreparedBlocks(), "playout.maxPreparedBlocks");
+		validateNonNegative(playout.scriptAheadCount(), "playout.scriptAheadCount");
+		validateNonNegative(playout.ttsAheadCount(), "playout.ttsAheadCount");
+		validateNonNegative(playout.musicAheadCount(), "playout.musicAheadCount");
+		if (playout.minimumReadyCount() > playout.targetReadyCount()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"playout.minimumReadyCount は playout.targetReadyCount 以下で指定してください。",
+					Map.of("field", "playout.minimumReadyCount"));
+		}
+		if (playout.maxPreparedDurationMs() < playout.minReadyDurationMs()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"playout.maxPreparedDurationMs は playout.minReadyDurationMs 以上で指定してください。",
+					Map.of("field", "playout.maxPreparedDurationMs"));
+		}
 	}
 
 	private void validateProviderGroup(String field, SettingsDocument.ProviderGroup group) {

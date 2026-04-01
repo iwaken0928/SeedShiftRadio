@@ -90,16 +90,32 @@ public record SettingsDocument(
 		}
 	}
 
-	public record PlayoutSettings(Integer targetReadyCount, Integer minReadyDurationMs) {
+	public record PlayoutSettings(
+			Integer targetReadyCount,
+			Integer minimumReadyCount,
+			Integer minReadyDurationMs,
+			Integer maxPreparedDurationMs,
+			Integer maxPreparedBlocks,
+			Integer scriptAheadCount,
+			Integer ttsAheadCount,
+			Integer musicAheadCount,
+			Boolean idlePrefetchEnabled) {
 
 		public PlayoutSettings normalize() {
 			return new PlayoutSettings(
 					targetReadyCount == null || targetReadyCount < 1 ? 3 : targetReadyCount,
-					minReadyDurationMs == null || minReadyDurationMs < 1 ? 90_000 : minReadyDurationMs);
+					minimumReadyCount == null || minimumReadyCount < 0 ? 2 : minimumReadyCount,
+					minReadyDurationMs == null || minReadyDurationMs < 1 ? 90_000 : minReadyDurationMs,
+					maxPreparedDurationMs == null || maxPreparedDurationMs < 1 ? 480_000 : maxPreparedDurationMs,
+					maxPreparedBlocks == null || maxPreparedBlocks < 0 ? 2 : maxPreparedBlocks,
+					scriptAheadCount == null || scriptAheadCount < 0 ? 4 : scriptAheadCount,
+					ttsAheadCount == null || ttsAheadCount < 0 ? 3 : ttsAheadCount,
+					musicAheadCount == null || musicAheadCount < 0 ? 2 : musicAheadCount,
+					idlePrefetchEnabled == null ? Boolean.TRUE : idlePrefetchEnabled);
 		}
 
 		static PlayoutSettings defaults() {
-			return new PlayoutSettings(3, 90_000);
+			return new PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 2, true);
 		}
 	}
 

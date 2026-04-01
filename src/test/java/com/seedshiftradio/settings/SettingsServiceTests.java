@@ -46,6 +46,15 @@ class SettingsServiceTests {
 
 		assertEquals(1, response.version());
 		assertEquals("127.0.0.1", response.server().bindHost());
+		assertEquals(3, response.playout().targetReadyCount());
+		assertEquals(2, response.playout().minimumReadyCount());
+		assertEquals(90_000, response.playout().minReadyDurationMs());
+		assertEquals(480_000, response.playout().maxPreparedDurationMs());
+		assertEquals(2, response.playout().maxPreparedBlocks());
+		assertEquals(4, response.playout().scriptAheadCount());
+		assertEquals(3, response.playout().ttsAheadCount());
+		assertEquals(2, response.playout().musicAheadCount());
+		assertTrue(response.playout().idlePrefetchEnabled());
 		assertTrue(Files.exists(configPath));
 	}
 
@@ -207,6 +216,85 @@ class SettingsServiceTests {
 		assertEquals("DISABLED", response.cache().musicReuseScope());
 		assertEquals(50, response.cache().cleanupBatchSize());
 		assertEquals(256_000L, response.cache().musicMaxBytes());
+	}
+
+	@Test
+	void updateSettingsPersistsPlayoutConfiguration() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.PlayoutSettings updatedPlayout = new SettingsDocument.PlayoutSettings(
+				5,
+				4,
+				120_000,
+				600_000,
+				3,
+				6,
+				5,
+				4,
+				false);
+
+		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+				current.version(),
+				current.schemaVersion(),
+				current.server(),
+				current.paths(),
+				updatedPlayout,
+				current.cache(),
+				current.programming(),
+				current.providers(),
+				current.security(),
+				current.features()));
+
+		assertEquals(5, response.playout().targetReadyCount());
+		assertEquals(4, response.playout().minimumReadyCount());
+		assertEquals(120_000, response.playout().minReadyDurationMs());
+		assertEquals(600_000, response.playout().maxPreparedDurationMs());
+		assertEquals(3, response.playout().maxPreparedBlocks());
+		assertEquals(6, response.playout().scriptAheadCount());
+		assertEquals(5, response.playout().ttsAheadCount());
+		assertEquals(4, response.playout().musicAheadCount());
+		assertEquals(false, response.playout().idlePrefetchEnabled());
+	}
+
+	@Test
+	void updateSettingsRejectsMinimumReadyCountAboveTargetReadyCount() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						new SettingsDocument.PlayoutSettings(3, 4, 90_000, 480_000, 2, 4, 3, 2, true),
+						current.cache(),
+						current.programming(),
+						current.providers(),
+						current.security(),
+						current.features())));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
+	void updateSettingsRejectsMaxPreparedDurationBelowMinimumReadyDuration() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						new SettingsDocument.PlayoutSettings(3, 2, 90_000, 60_000, 2, 4, 3, 2, true),
+						current.cache(),
+						current.programming(),
+						current.providers(),
+						current.security(),
+						current.features())));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
 	}
 
 	@Test

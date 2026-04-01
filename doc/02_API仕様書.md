@@ -689,6 +689,8 @@ Response:
 
 `config.json` の現在値に `version` を付けて返し、Web/Native が同じ契約で設定を表示できるようにします。サーバーは起動時に `schemaVersion` も検証し、一致しない場合には `400` を返します。
 
+`playout` は全局共通の上限値として扱い、station ごとの `pre_generation_policy` や queue warmup/refill の深さはこの範囲内に収めます。`targetReadyCount` と `minReadyDurationMs` は現在のサーバー実装で既に利用されている基本項目で、`minimumReadyCount`, `maxPreparedDurationMs`, `maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount`, `idlePrefetchEnabled` も `/api/settings` と `config.json` の往復対象として実装済みです。ただし追加項目の多くはまだ上限制御の保存契約として先行実装した段階であり、実行経路への反映は段階的に有効化します。
+
 ```json
 {
   "version": 4,
@@ -756,6 +758,8 @@ Response:
 ```
 
 `cache` の `scriptMaxBytes`, `ttsMaxBytes`, `musicMaxBytes` は各 asset 種別ごとの保存上限を表します。`scriptReuseScope`, `ttsReuseScope`, `musicReuseScope` は `DISABLED`, `SESSION`, `STATION`, `GLOBAL`, `ARCHIVE_ONLY` のいずれかを取り、再利用候補の検索範囲を制御します。`cleanupBatchSize` は将来の eviction job の一回あたり処理量であり、現時点では処理本体は未実装です。
+
+`playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は待機時 prefetch を許可するフラグです。
 
 ### 6.10 `POST /api/settings/test-connections`
 

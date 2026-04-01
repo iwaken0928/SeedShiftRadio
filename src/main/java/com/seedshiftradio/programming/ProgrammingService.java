@@ -162,7 +162,14 @@ public class ProgrammingService {
 		station.setDefaultProgramTemplateId(request.defaultTemplateId());
 		stationRepository.save(station);
 
-		return new ProgrammingPolicyUpdateResponse(stationId, savedPolicy.getVersion(), request.enabled(), savedPolicy.getUpdatedAt());
+		return new ProgrammingPolicyUpdateResponse(
+				stationId,
+				savedPolicy.getVersion(),
+				request.enabled(),
+				preGeneration,
+				replay,
+				composition,
+				savedPolicy.getUpdatedAt());
 	}
 
 	@Transactional(readOnly = true)

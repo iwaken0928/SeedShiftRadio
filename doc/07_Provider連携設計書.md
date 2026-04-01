@@ -83,7 +83,7 @@ CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセ
 
 機密値は `env:` または `file:` 参照とする。
 
-Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。
+Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になるが、現行実装では MusicGen の cache-first 再利用までが先行しており、retention/eviction の定期処理は未実装である。
 
 ### 8.1 Cache-first 実行
 
@@ -92,6 +92,8 @@ Server は実行経路を `provider_job` と `generated_asset` に残し、`queu
 3. miss した場合のみ Provider を呼び出す
 4. 完了 asset は `byte_size`, `reuse_scope`, `expires_at`, `archive_eligible` を付けて保存する
 5. `archive_eligible=true` かつ安全条件を満たすものは `broadcast_archive` へ昇格可能にする
+
+現行実装で cache-first が使われているのは MusicGen のみで、`generated_asset.cache_key` と provider/request の正規化入力を使って再利用候補を探す。`script` と `TTS` の cache-first も設計上は同じ契約だが、実処理と eviction job はまだ未接続である。
 
 ## 9. 推奨 OSS と使い分け
 

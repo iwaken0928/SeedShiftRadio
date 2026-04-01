@@ -55,9 +55,10 @@ class SettingsServiceTests {
 
 		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
 				1,
-				"2026-03",
+				"2026-04",
 				new SettingsDocument.ServerSettings("127.0.0.1", 18080),
 				new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
+				null,
 				null,
 				null,
 				null,
@@ -76,9 +77,10 @@ class SettingsServiceTests {
 				ApiException.class,
 				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
 						1,
-						"2026-03",
+						"2026-04",
 						null,
 						new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("outside").toString()),
+						null,
 						null,
 						null,
 						null,
@@ -103,6 +105,7 @@ class SettingsServiceTests {
 						null,
 						null,
 						null,
+						null,
 						null)));
 
 		assertEquals("VALIDATION_ERROR", exception.getCode());
@@ -120,6 +123,7 @@ class SettingsServiceTests {
 						current.server(),
 						new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
 						current.playout(),
+						current.cache(),
 						current.programming(),
 						new SettingsDocument.ProviderCatalog(
 								new SettingsDocument.ProviderGroup(
@@ -132,6 +136,77 @@ class SettingsServiceTests {
 						current.features())));
 
 		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
+	void updateSettingsPreservesProviderFallbackProviders() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.ProviderEndpoint ollamaPrimary = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:11434",
+				"/api/tags",
+				5_000,
+				List.of("SCRIPT_GEN"));
+		SettingsDocument.ProviderEndpoint ollamaFallback = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:11435",
+				"/api/tags",
+				5_000,
+				List.of("SCRIPT_GEN"));
+
+		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+				current.version(),
+				current.schemaVersion(),
+				current.server(),
+				new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
+				current.playout(),
+				current.cache(),
+				current.programming(),
+				new SettingsDocument.ProviderCatalog(
+						new SettingsDocument.ProviderGroup(
+								"ollama",
+								List.of("ollama-fallback"),
+								Map.of(
+										"ollama", ollamaPrimary,
+										"ollama-fallback", ollamaFallback)),
+						current.providers().tts(),
+						current.providers().musicGen()),
+				current.security(),
+				current.features()));
+
+		assertEquals(List.of("ollama-fallback"), response.providers().llm().fallbackProviders());
+		assertTrue(response.providers().llm().providers().containsKey("ollama-fallback"));
+	}
+
+	@Test
+	void updateSettingsPersistsCacheConfiguration() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.CacheSettings updatedCache = new SettingsDocument.CacheSettings(
+				64_000L,
+				128_000L,
+				256_000L,
+				3,
+				7,
+				14,
+				"SESSION",
+				"STATION",
+				"DISABLED",
+				50);
+
+		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+				current.version(),
+				current.schemaVersion(),
+				current.server(),
+				new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
+				current.playout(),
+				updatedCache,
+				current.programming(),
+				current.providers(),
+				current.security(),
+				current.features()));
+
+		assertEquals("SESSION", response.cache().scriptReuseScope());
+		assertEquals("DISABLED", response.cache().musicReuseScope());
+		assertEquals(50, response.cache().cleanupBatchSize());
+		assertEquals(256_000L, response.cache().musicMaxBytes());
 	}
 
 	@Test

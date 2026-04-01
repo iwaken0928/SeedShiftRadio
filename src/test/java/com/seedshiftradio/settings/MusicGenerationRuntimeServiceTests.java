@@ -2,9 +2,11 @@ package com.seedshiftradio.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +45,9 @@ class MusicGenerationRuntimeServiceTests {
 	GeneratedAssetService generatedAssetService;
 
 	@Mock
+	RadioSettingsStore settingsStore;
+
+	@Mock
 	StationRepository stationRepository;
 
 	MusicGenerationRuntimeService musicGenerationRuntimeService;
@@ -53,7 +58,9 @@ class MusicGenerationRuntimeServiceTests {
 				musicGenWorkerGateway,
 				providerJobService,
 				generatedAssetService,
+				settingsStore,
 				stationRepository);
+		lenient().when(settingsStore.load()).thenReturn(SettingsDocument.defaults().normalize());
 	}
 
 	@Test
@@ -145,6 +152,97 @@ class MusicGenerationRuntimeServiceTests {
 		verify(generatedAssetService, never()).cloneAssetForQueue(any(), anyString(), anyString(), anyString(), any(Map.class));
 	}
 
+	@Test
+	void generateReusesCachedMusicAssetFromFallbackProviderBeforeCallingWorker() {
+		QueueItemEntity item = queueItem("queue-1", "corr-1");
+		ProviderJobEntity providerJob = providerJob("provider-job-1");
+		GeneratedAssetEntity cachedAsset = asset("asset-fallback-cache", "/tmp/music-existing.wav", "cache-key-fallback");
+		GeneratedAssetEntity clonedAsset = asset("asset-cloned", "/tmp/music-existing.wav", "cache-key-fallback");
+
+		MusicGenWorkerGateway.ResolvedMusicProvider primaryProvider = new MusicGenWorkerGateway.ResolvedMusicProvider(
+				"ace-step-primary",
+				"http://127.0.0.1:8000",
+				5_000,
+				List.of("MUSIC_GEN"));
+		MusicGenWorkerGateway.ResolvedMusicProvider fallbackProvider = new MusicGenWorkerGateway.ResolvedMusicProvider(
+				"ace-step-fallback",
+				"http://127.0.0.1:8001",
+				5_000,
+				List.of("MUSIC_GEN"));
+
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station("station-night")));
+		when(musicGenWorkerGateway.resolveProviders()).thenReturn(List.of(primaryProvider, fallbackProvider));
+		when(providerJobService.createQueuedJob(
+				ProviderJobType.MUSIC_GEN,
+				ProviderType.MUSIC,
+				"ace-step-primary",
+				"queue-1",
+				"corr-1")).thenReturn(providerJob);
+		when(generatedAssetService.findReusableAsset(eq(GeneratedAssetType.MUSIC), anyString()))
+				.thenReturn(Optional.empty(), Optional.of(cachedAsset));
+		when(generatedAssetService.cloneAssetForQueue(eq(cachedAsset), eq("queue-1"), eq("provider-job-1"), anyString(), any(Map.class)))
+				.thenReturn(clonedAsset);
+
+		MusicGenerationRuntimeService.GeneratedMusicAsset response = musicGenerationRuntimeService.generate("station-night", item);
+
+		assertEquals("asset-cloned", response.assetId());
+		assertEquals("provider-job-1", response.providerJobId());
+		assertNull(response.workerJobId());
+		assertTrue(response.assetUrl().endsWith("asset-cloned.wav"));
+		verify(providerJobService).markRunning("provider-job-1", "ace-step-fallback", "cache-hit:asset-fallback-cache");
+		verify(providerJobService).markSucceeded("provider-job-1");
+		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any());
+		verify(musicGenWorkerGateway, never()).awaitCompletion(any(), anyString());
+	}
+
+	@Test
+	void generateSkipsCacheLookupWhenMusicReuseScopeIsDisabled() {
+		QueueItemEntity item = queueItem("queue-1", "corr-1");
+		ProviderJobEntity providerJob = providerJob("provider-job-1");
+		GeneratedAssetEntity createdAsset = asset("asset-created", "/tmp/music-created.wav", null);
+		MusicGenWorkerGateway.ResolvedMusicProvider provider = new MusicGenWorkerGateway.ResolvedMusicProvider(
+				"ace-step",
+				"http://127.0.0.1:8000",
+				5_000,
+				List.of("MUSIC_GEN"));
+
+		when(settingsStore.load()).thenReturn(settingsWithMusicReuseScope("DISABLED"));
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station("station-night")));
+		when(musicGenWorkerGateway.resolveProviders()).thenReturn(List.of(provider));
+		when(providerJobService.createQueuedJob(
+				ProviderJobType.MUSIC_GEN,
+				ProviderType.MUSIC,
+				"ace-step",
+				"queue-1",
+				"corr-1")).thenReturn(providerJob);
+		when(musicGenWorkerGateway.submitWithFallback(any(), any(MusicGenWorkerGateway.MusicJobRequest.class)))
+				.thenReturn(new MusicGenWorkerGateway.SubmittedMusicJob("worker-job-1", "QUEUED", provider));
+		when(musicGenWorkerGateway.awaitCompletion(eq(provider), eq("worker-job-1")))
+				.thenReturn(new MusicGenWorkerGateway.MusicJobStatus(
+						"worker-job-1",
+						"SUCCEEDED",
+						Path.of("/tmp/music-created.wav").toString(),
+						30,
+						"ace-step:1.0",
+						"prompt-hash-1",
+						null,
+						"generated"));
+		when(generatedAssetService.registerExistingAsset(
+				eq(GeneratedAssetType.MUSIC),
+				eq(Path.of("/tmp/music-created.wav")),
+				eq("ace-step:1.0"),
+				eq("queue-1"),
+				eq("provider-job-1"),
+				eq(null),
+				any(Map.class)))
+				.thenReturn(createdAsset);
+
+		MusicGenerationRuntimeService.GeneratedMusicAsset response = musicGenerationRuntimeService.generate("station-night", item);
+
+		assertEquals("asset-created", response.assetId());
+		verify(generatedAssetService, never()).findReusableAsset(any(), anyString());
+	}
+
 	private QueueItemEntity queueItem(String id, String correlationId) {
 		QueueItemEntity entity = org.mockito.Mockito.mock(QueueItemEntity.class);
 		when(entity.getId()).thenReturn(id);
@@ -184,5 +282,31 @@ class MusicGenerationRuntimeServiceTests {
 				true,
 				"tmpl-night-regular",
 				true);
+	}
+
+	private SettingsDocument settingsWithMusicReuseScope(String musicReuseScope) {
+		SettingsDocument defaults = SettingsDocument.defaults().normalize();
+		return new SettingsDocument(
+				defaults.version(),
+				defaults.schemaVersion(),
+				defaults.updatedAt(),
+				defaults.server(),
+				defaults.paths(),
+				defaults.playout(),
+				new SettingsDocument.CacheSettings(
+						defaults.cache().scriptMaxBytes(),
+						defaults.cache().ttsMaxBytes(),
+						defaults.cache().musicMaxBytes(),
+						defaults.cache().scriptRetentionDays(),
+						defaults.cache().ttsRetentionDays(),
+						defaults.cache().musicRetentionDays(),
+						defaults.cache().scriptReuseScope(),
+						defaults.cache().ttsReuseScope(),
+						musicReuseScope,
+						defaults.cache().cleanupBatchSize()),
+				defaults.programming(),
+				defaults.providers(),
+				defaults.security(),
+				defaults.features()).normalize();
 	}
 }

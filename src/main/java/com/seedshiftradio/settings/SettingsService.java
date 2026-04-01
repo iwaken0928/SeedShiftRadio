@@ -2,7 +2,9 @@ package com.seedshiftradio.settings;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -11,6 +13,8 @@ import com.seedshiftradio.common.api.ApiException;
 
 @Service
 public class SettingsService {
+
+	private static final Set<String> CACHE_REUSE_SCOPES = Set.of("DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIVE_ONLY");
 
 	private final RadioSettingsStore settingsStore;
 	private final ProviderHealthService providerHealthService;
@@ -41,6 +45,7 @@ public class SettingsService {
 				request.server() == null ? current.server() : request.server(),
 				request.paths() == null ? current.paths() : request.paths(),
 				request.playout() == null ? current.playout() : request.playout(),
+				request.cache() == null ? current.cache() : request.cache(),
 				request.programming() == null ? current.programming() : request.programming(),
 				request.providers() == null ? current.providers() : request.providers(),
 				request.security() == null ? current.security() : request.security(),
@@ -81,6 +86,7 @@ public class SettingsService {
 		validateProviderGroup("providers.llm", document.providers().llm());
 		validateProviderGroup("providers.tts", document.providers().tts());
 		validateProviderGroup("providers.musicGen", document.providers().musicGen());
+		validateCache(document.cache());
 	}
 
 	private void validateProviderGroup(String field, SettingsDocument.ProviderGroup group) {
@@ -113,6 +119,41 @@ public class SettingsService {
 			if (endpoint.healthPath() == null || endpoint.healthPath().isBlank()) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + "." + entry.getKey() + ".healthPath は必須です。", Map.of("field", field + "." + entry.getKey() + ".healthPath"));
 			}
+		}
+	}
+
+	private void validateCache(SettingsDocument.CacheSettings cache) {
+		validatePositive(cache.scriptMaxBytes(), "cache.scriptMaxBytes");
+		validatePositive(cache.ttsMaxBytes(), "cache.ttsMaxBytes");
+		validatePositive(cache.musicMaxBytes(), "cache.musicMaxBytes");
+		validateNonNegative(cache.scriptRetentionDays(), "cache.scriptRetentionDays");
+		validateNonNegative(cache.ttsRetentionDays(), "cache.ttsRetentionDays");
+		validateNonNegative(cache.musicRetentionDays(), "cache.musicRetentionDays");
+		validatePositive(cache.cleanupBatchSize(), "cache.cleanupBatchSize");
+		validateReuseScope(cache.scriptReuseScope(), "cache.scriptReuseScope");
+		validateReuseScope(cache.ttsReuseScope(), "cache.ttsReuseScope");
+		validateReuseScope(cache.musicReuseScope(), "cache.musicReuseScope");
+	}
+
+	private void validatePositive(Number value, String field) {
+		if (value == null || value.longValue() < 1L) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + " は 1 以上で指定してください。", Map.of("field", field));
+		}
+	}
+
+	private void validateNonNegative(Number value, String field) {
+		if (value == null || value.longValue() < 0L) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + " は 0 以上で指定してください。", Map.of("field", field));
+		}
+	}
+
+	private void validateReuseScope(String reuseScope, String field) {
+		if (!CACHE_REUSE_SCOPES.contains(reuseScope)) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + " は " + String.join(", ", List.copyOf(CACHE_REUSE_SCOPES)) + " のいずれかで指定してください。",
+					Map.of("field", field, "value", reuseScope));
 		}
 	}
 

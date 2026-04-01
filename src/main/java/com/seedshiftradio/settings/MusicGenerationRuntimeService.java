@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -21,25 +22,31 @@ import com.seedshiftradio.station.StationRepository;
 @Service
 public class MusicGenerationRuntimeService {
 
+	private static final Set<String> NO_REUSE_SCOPES = Set.of("DISABLED", "ARCHIVE_ONLY");
+
 	private final MusicGenWorkerGateway musicGenWorkerGateway;
 	private final ProviderJobService providerJobService;
 	private final GeneratedAssetService generatedAssetService;
+	private final RadioSettingsStore settingsStore;
 	private final StationRepository stationRepository;
 
 	public MusicGenerationRuntimeService(
 			MusicGenWorkerGateway musicGenWorkerGateway,
 			ProviderJobService providerJobService,
 			GeneratedAssetService generatedAssetService,
+			RadioSettingsStore settingsStore,
 			StationRepository stationRepository) {
 		this.musicGenWorkerGateway = musicGenWorkerGateway;
 		this.providerJobService = providerJobService;
 		this.generatedAssetService = generatedAssetService;
+		this.settingsStore = settingsStore;
 		this.stationRepository = stationRepository;
 	}
 
 	public GeneratedMusicAsset generate(String stationId, QueueItemEntity item) {
 		List<MusicGenWorkerGateway.ResolvedMusicProvider> providers = musicGenWorkerGateway.resolveProviders();
 		MusicGenWorkerGateway.MusicJobRequest request = buildRequest(stationId, item);
+		String reuseScope = settingsStore.load().cache().musicReuseScope();
 		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
 				ProviderJobType.MUSIC_GEN,
 				ProviderType.MUSIC,
@@ -47,7 +54,7 @@ public class MusicGenerationRuntimeService {
 				item.getId(),
 				item.getCorrelationId());
 		try {
-			CachedAssetHit cachedAssetHit = findReusableAsset(providers, request);
+			CachedAssetHit cachedAssetHit = findReusableAsset(providers, request, item, reuseScope);
 			GeneratedAssetEntity reusableAsset = cachedAssetHit == null ? null : cachedAssetHit.asset();
 			if (reusableAsset != null) {
 				providerJobService.markRunning(providerJob.getId(), cachedAssetHit.provider().providerKey(), "cache-hit:" + reusableAsset.getId());
@@ -67,7 +74,7 @@ public class MusicGenerationRuntimeService {
 			MusicGenWorkerGateway.SubmittedMusicJob submittedJob = musicGenWorkerGateway.submitWithFallback(providers, request);
 			providerJobService.markRunning(providerJob.getId(), submittedJob.provider().providerKey(), submittedJob.jobId());
 			MusicGenWorkerGateway.MusicJobStatus completedJob = musicGenWorkerGateway.awaitCompletion(submittedJob.provider(), submittedJob.jobId());
-			String cacheKey = buildCacheKey(submittedJob.provider(), request);
+			String cacheKey = buildCacheKey(submittedJob.provider(), request, item, reuseScope);
 			GeneratedAssetEntity asset = generatedAssetService.registerExistingAsset(
 					GeneratedAssetType.MUSIC,
 					Path.of(completedJob.assetPath()),
@@ -95,9 +102,14 @@ public class MusicGenerationRuntimeService {
 
 	private CachedAssetHit findReusableAsset(
 			List<MusicGenWorkerGateway.ResolvedMusicProvider> providers,
-			MusicGenWorkerGateway.MusicJobRequest request) {
+			MusicGenWorkerGateway.MusicJobRequest request,
+			QueueItemEntity item,
+			String reuseScope) {
+		if (NO_REUSE_SCOPES.contains(reuseScope)) {
+			return null;
+		}
 		for (MusicGenWorkerGateway.ResolvedMusicProvider provider : providers) {
-			String cacheKey = buildCacheKey(provider, request);
+			String cacheKey = buildCacheKey(provider, request, item, reuseScope);
 			GeneratedAssetEntity reusableAsset = generatedAssetService.findReusableAsset(GeneratedAssetType.MUSIC, cacheKey).orElse(null);
 			if (reusableAsset != null) {
 				return new CachedAssetHit(provider, cacheKey, reusableAsset);
@@ -187,15 +199,27 @@ public class MusicGenerationRuntimeService {
 
 	private String buildCacheKey(
 			MusicGenWorkerGateway.ResolvedMusicProvider provider,
-			MusicGenWorkerGateway.MusicJobRequest request) {
+			MusicGenWorkerGateway.MusicJobRequest request,
+			QueueItemEntity item,
+			String reuseScope) {
+		if (NO_REUSE_SCOPES.contains(reuseScope)) {
+			return null;
+		}
 		List<String> normalizedMood = request.mood() == null
 				? List.of()
 				: request.mood().stream().map(this::normalize).toList();
+		String scopePartition = switch (reuseScope) {
+			case "GLOBAL" -> "global";
+			case "SESSION" -> normalize(item.getSessionId());
+			case "STATION" -> normalize(request.stationId());
+			default -> normalize(request.stationId());
+		};
 		String raw = String.join(
 				"|",
 				normalize(provider.providerKey()),
 				normalize(provider.baseUrl()),
-				normalize(request.stationId()),
+				normalize(reuseScope),
+				scopePartition,
 				normalize(request.mode()),
 				normalize(request.genre()),
 				String.join(",", normalizedMood),

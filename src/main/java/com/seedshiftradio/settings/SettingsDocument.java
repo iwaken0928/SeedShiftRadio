@@ -13,6 +13,7 @@ public record SettingsDocument(
 		ServerSettings server,
 		PathSettings paths,
 		PlayoutSettings playout,
+		CacheSettings cache,
 		ProgrammingSettings programming,
 		ProviderCatalog providers,
 		SecuritySettings security,
@@ -21,11 +22,12 @@ public record SettingsDocument(
 	public SettingsDocument normalize() {
 		return new SettingsDocument(
 				version == null || version < 1 ? 1 : version,
-				(schemaVersion == null || schemaVersion.isBlank()) ? "2026-03" : schemaVersion,
+				(schemaVersion == null || schemaVersion.isBlank()) ? "2026-04" : schemaVersion,
 				updatedAt == null ? Instant.now() : updatedAt,
 				server == null ? ServerSettings.defaults() : server.normalize(),
 				paths == null ? PathSettings.defaults() : paths.normalize(),
 				playout == null ? PlayoutSettings.defaults() : playout.normalize(),
+				cache == null ? CacheSettings.defaults() : cache.normalize(),
 				programming == null ? ProgrammingSettings.defaults() : programming.normalize(),
 				providers == null ? ProviderCatalog.defaults() : providers.normalize(),
 				security == null ? SecuritySettings.defaults() : security.normalize(),
@@ -40,6 +42,7 @@ public record SettingsDocument(
 				server,
 				paths,
 				playout,
+				cache,
 				programming,
 				providers,
 				security,
@@ -49,11 +52,12 @@ public record SettingsDocument(
 	public static SettingsDocument defaults() {
 		return new SettingsDocument(
 				1,
-				"2026-03",
+				"2026-04",
 				Instant.now(),
 				ServerSettings.defaults(),
 				PathSettings.defaults(),
 				PlayoutSettings.defaults(),
+				CacheSettings.defaults(),
 				ProgrammingSettings.defaults(),
 				ProviderCatalog.defaults(),
 				SecuritySettings.defaults(),
@@ -96,6 +100,51 @@ public record SettingsDocument(
 
 		static PlayoutSettings defaults() {
 			return new PlayoutSettings(3, 90_000);
+		}
+	}
+
+	public record CacheSettings(
+			Long scriptMaxBytes,
+			Long ttsMaxBytes,
+			Long musicMaxBytes,
+			Integer scriptRetentionDays,
+			Integer ttsRetentionDays,
+			Integer musicRetentionDays,
+			String scriptReuseScope,
+			String ttsReuseScope,
+			String musicReuseScope,
+			Integer cleanupBatchSize) {
+
+		public CacheSettings normalize() {
+			return new CacheSettings(
+					scriptMaxBytes == null || scriptMaxBytes < 1 ? 134_217_728L : scriptMaxBytes,
+					ttsMaxBytes == null || ttsMaxBytes < 1 ? 536_870_912L : ttsMaxBytes,
+					musicMaxBytes == null || musicMaxBytes < 1 ? 2_147_483_648L : musicMaxBytes,
+					scriptRetentionDays == null || scriptRetentionDays < 0 ? 7 : scriptRetentionDays,
+					ttsRetentionDays == null || ttsRetentionDays < 0 ? 30 : ttsRetentionDays,
+					musicRetentionDays == null || musicRetentionDays < 0 ? 30 : musicRetentionDays,
+					normalizeReuseScope(scriptReuseScope, "STATION"),
+					normalizeReuseScope(ttsReuseScope, "STATION"),
+					normalizeReuseScope(musicReuseScope, "GLOBAL"),
+					cleanupBatchSize == null || cleanupBatchSize < 1 ? 200 : cleanupBatchSize);
+		}
+
+		static CacheSettings defaults() {
+			return new CacheSettings(
+					134_217_728L,
+					536_870_912L,
+					2_147_483_648L,
+					7,
+					30,
+					30,
+					"STATION",
+					"STATION",
+					"GLOBAL",
+					200);
+		}
+
+		private static String normalizeReuseScope(String reuseScope, String fallback) {
+			return (reuseScope == null || reuseScope.isBlank()) ? fallback : reuseScope.toUpperCase();
 		}
 	}
 

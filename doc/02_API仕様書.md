@@ -742,7 +742,7 @@ Response:
 
 ### 6.9 `PUT /api/settings`
 
-クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`paths`, `playout`, `cache`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズと再利用範囲を決める。
+クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`paths`, `playout`, `cache`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使いますが、現時点では retention/eviction の定期実行は未実装です。
 
 ```json
 {
@@ -754,6 +754,8 @@ Response:
   "providers": { ... }
 }
 ```
+
+`cache` の `scriptMaxBytes`, `ttsMaxBytes`, `musicMaxBytes` は各 asset 種別ごとの保存上限を表します。`scriptReuseScope`, `ttsReuseScope`, `musicReuseScope` は `DISABLED`, `SESSION`, `STATION`, `GLOBAL`, `ARCHIVE_ONLY` のいずれかを取り、再利用候補の検索範囲を制御します。`cleanupBatchSize` は将来の eviction job の一回あたり処理量であり、現時点では処理本体は未実装です。
 
 ### 6.10 `POST /api/settings/test-connections`
 

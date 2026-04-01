@@ -172,7 +172,8 @@ class RadioApiTests {
 		mockMvc.perform(get("/api/settings").header("X-Admin-Token", "test-admin-token"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.version").value(greaterThanOrEqualTo(1)))
-				.andExpect(jsonPath("$.schemaVersion").value("2026-03"))
+				.andExpect(jsonPath("$.schemaVersion").value("2026-04"))
+				.andExpect(jsonPath("$.cache.musicReuseScope").value("GLOBAL"))
 				.andExpect(jsonPath("$.providers.llm.defaultProvider").exists())
 				.andExpect(jsonPath("$.features.streaming.placeholderEnabled").value(true));
 	}

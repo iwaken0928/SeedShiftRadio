@@ -83,6 +83,9 @@
 }
 ```
 
+- `programming` は `GET /api/stations/{id}/programming` の応答と同じ文脈で扱う局ごとの番組編成ポリシーであり、`preGeneration`, `replay`, `composition` の 3 つの runtime profile を含む
+- これらの profile は `station_programming_policy` の保存内容と 1 対 1 で対応し、StationDetail はその正本を読み出した denormalized view とみなす
+
 ### 4.3 RadioStatus
 
 ```json
@@ -495,7 +498,53 @@ Response:
 }
 ```
 
-### 6.6 `PUT /stations/{id}/programming`
+### 6.6 `GET /stations/{id}/programming`
+
+管理者向けの番組編成ポリシー取得 API とする。`X-Admin-Token` が必要。
+
+Response:
+
+```json
+{
+  "stationId": "station-night",
+  "version": 4,
+  "enabled": true,
+  "defaultTemplateId": "tmpl-night-regular",
+  "fallbackStrategy": "LEGACY_RATIO",
+  "planningHorizonMinutes": 20,
+  "preGeneration": {
+    "mode": "ASSISTED",
+    "maxPreparedMinutes": 12,
+    "maxPreparedBlocks": 2,
+    "preferCacheReuse": true
+  },
+  "replay": {
+    "intensity": "LIGHT",
+    "eligibleSegmentTypes": ["MUSIC_AI", "MUSIC_LOCAL", "JINGLE"],
+    "minimumAssetAgeHours": 6,
+    "cooldownHours": 72,
+    "maxReplaySharePercent": 20,
+    "excludeLetterSegments": true
+  },
+  "composition": {
+    "targetSegmentShares": {
+      "talk": 40,
+      "letter": 20,
+      "music": 35,
+      "jingle": 5
+    },
+    "maxConsecutiveTalkSegments": 2,
+    "musicBreakIntervalMinutes": 8,
+    "letterPriorityBoostThreshold": 4,
+    "allowSoftFallbackRetiming": true
+  },
+  "updatedAt": "2026-03-20T09:00:00Z"
+}
+```
+
+`GET /api/stations/{id}` の `programming` はこの応答の要約ビューであり、UI では一覧表示向けの軽量な局詳細として扱う。`GET /api/stations/{id}/programming` は編集画面向けの完全版とする。
+
+### 6.6.1 `PUT /stations/{id}/programming`
 
 Request:
 
@@ -562,11 +611,40 @@ Response:
   "stationId": "station-night",
   "version": 5,
   "enabled": true,
+  "defaultTemplateId": "tmpl-night-regular",
+  "fallbackStrategy": "LEGACY_RATIO",
+  "planningHorizonMinutes": 20,
+  "preGeneration": {
+    "mode": "ASSISTED",
+    "maxPreparedMinutes": 12,
+    "maxPreparedBlocks": 2,
+    "preferCacheReuse": true
+  },
+  "replay": {
+    "intensity": "LIGHT",
+    "eligibleSegmentTypes": ["MUSIC_AI", "MUSIC_LOCAL", "JINGLE"],
+    "minimumAssetAgeHours": 6,
+    "cooldownHours": 72,
+    "maxReplaySharePercent": 20,
+    "excludeLetterSegments": true
+  },
+  "composition": {
+    "targetSegmentShares": {
+      "talk": 40,
+      "letter": 20,
+      "music": 35,
+      "jingle": 5
+    },
+    "maxConsecutiveTalkSegments": 2,
+    "musicBreakIntervalMinutes": 8,
+    "letterPriorityBoostThreshold": 4,
+    "allowSoftFallbackRetiming": true
+  },
   "updatedAt": "2026-03-20T09:00:00Z"
 }
 ```
 
-`PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。`preGeneration`, `replay`, `composition` は station ごとの実行時調整プロファイルとして扱い、既存 `ProgramTemplate` の版を壊さずに運用中 block の深さ、キャッシュ優先度、再放送比率、番組の混ぜ方を調整できるようにする。
+`PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。`preGeneration`, `replay`, `composition` は station ごとの実行時調整プロファイルとして扱い、既存 `ProgramTemplate` の版を壊さずに運用中 block の深さ、キャッシュ優先度、再放送比率、番組の混ぜ方を調整できるようにする。`StationDetail.programming` はこの完全版の要約、`station_programming_policy` は完全版の正本とする。
 
 ### 6.7 `POST /stations/{id}/programming/preview`
 

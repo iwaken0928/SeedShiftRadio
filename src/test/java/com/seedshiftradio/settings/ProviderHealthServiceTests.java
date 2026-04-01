@@ -47,9 +47,14 @@ class ProviderHealthServiceTests {
 				SettingsDocument.PlayoutSettings.defaults(),
 				SettingsDocument.ProgrammingSettings.defaults(),
 				new SettingsDocument.ProviderCatalog(
-						new SettingsDocument.ProviderGroup("ollama", Map.of("ollama", new SettingsDocument.ProviderEndpoint(baseUrl, "/up", 1_000, List.of("SCRIPT_GEN")))),
-						new SettingsDocument.ProviderGroup("voicevox", Map.of("voicevox", new SettingsDocument.ProviderEndpoint(baseUrl, "/error", 1_000, List.of("TTS_GEN")))),
-						new SettingsDocument.ProviderGroup("ace-step", Map.of("ace-step", new SettingsDocument.ProviderEndpoint("http://127.0.0.1:1", "/health", 1_000, List.of("MUSIC_GEN"))))),
+						new SettingsDocument.ProviderGroup("ollama", List.of(), Map.of("ollama", new SettingsDocument.ProviderEndpoint(baseUrl, "/up", 1_000, List.of("SCRIPT_GEN")))),
+						new SettingsDocument.ProviderGroup("voicevox", List.of(), Map.of("voicevox", new SettingsDocument.ProviderEndpoint(baseUrl, "/error", 1_000, List.of("TTS_GEN")))),
+						new SettingsDocument.ProviderGroup(
+								"ace-step-primary",
+								List.of("ace-step-fallback"),
+								Map.of(
+										"ace-step-primary", new SettingsDocument.ProviderEndpoint("http://127.0.0.1:1", "/health", 1_000, List.of("MUSIC_GEN")),
+										"ace-step-fallback", new SettingsDocument.ProviderEndpoint(baseUrl, "/up", 1_000, List.of("MUSIC_GEN"))))),
 				SettingsDocument.SecuritySettings.defaults(),
 				SettingsDocument.FeatureSettings.defaults())
 				.normalize();
@@ -57,7 +62,7 @@ class ProviderHealthServiceTests {
 		RadioSettingsStore store = new RadioSettingsStore(new ObjectMapper().findAndRegisterModules(), new RadioConfigProperties(tempDir.resolve("config.json").toString()));
 		store.save(settings);
 		streamEventService = new StreamEventService();
-		providerHealthService = new ProviderHealthService(store, streamEventService);
+		providerHealthService = new ProviderHealthService(new ProviderRegistry(store), streamEventService);
 	}
 
 	@AfterEach
@@ -74,7 +79,8 @@ class ProviderHealthServiceTests {
 
 		assertEquals("UP", response.get("llm").status());
 		assertEquals("DEGRADED", response.get("tts").status());
-		assertEquals("DOWN", response.get("musicGen").status());
+		assertEquals("DEGRADED", response.get("musicGen").status());
+		assertEquals("ace-step-fallback", response.get("musicGen").providerKey());
 		assertEquals(1, events.size());
 		assertEquals("provider.health.changed", events.getFirst().eventType());
 		assertEquals(response, events.getFirst().payload());

@@ -31,7 +31,7 @@ public class GeneratedAssetService {
 
 	@Transactional
 	public GeneratedAssetEntity createAudioAsset(byte[] bytes, String providerFingerprint, Map<String, Object> metadata) {
-		return createAudioAsset(bytes, providerFingerprint, null, null, metadata);
+		return createAudioAsset(bytes, providerFingerprint, null, null, null, metadata);
 	}
 
 	@Transactional
@@ -40,6 +40,17 @@ public class GeneratedAssetService {
 			String providerFingerprint,
 			String queueItemId,
 			String providerJobId,
+			Map<String, Object> metadata) {
+		return createAudioAsset(bytes, providerFingerprint, queueItemId, providerJobId, null, metadata);
+	}
+
+	@Transactional
+	public GeneratedAssetEntity createAudioAsset(
+			byte[] bytes,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			String cacheKey,
 			Map<String, Object> metadata) {
 		String assetId = nextId();
 		Path assetPath = resolveAudioPath(assetId);
@@ -52,6 +63,7 @@ public class GeneratedAssetService {
 				providerFingerprint,
 				queueItemId,
 				providerJobId,
+				cacheKey,
 				metadata);
 	}
 
@@ -63,6 +75,18 @@ public class GeneratedAssetService {
 			String queueItemId,
 			String providerJobId,
 			Map<String, Object> metadata) {
+		return registerExistingAsset(assetType, assetPath, providerFingerprint, queueItemId, providerJobId, null, metadata);
+	}
+
+	@Transactional
+	public GeneratedAssetEntity registerExistingAsset(
+			GeneratedAssetType assetType,
+			Path assetPath,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			String cacheKey,
+			Map<String, Object> metadata) {
 		Path normalizedPath = assetPath.toAbsolutePath().normalize();
 		byte[] bytes = read(normalizedPath);
 		return persistAsset(
@@ -73,7 +97,48 @@ public class GeneratedAssetService {
 				providerFingerprint,
 				queueItemId,
 				providerJobId,
+				cacheKey,
 				metadata);
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<GeneratedAssetEntity> findReusableAsset(GeneratedAssetType assetType, String cacheKey) {
+		if (cacheKey == null || cacheKey.isBlank()) {
+			return Optional.empty();
+		}
+		return generatedAssetRepository.findFirstByAssetTypeAndCacheKeyOrderByCreatedAtDesc(assetType, cacheKey)
+				.filter(asset -> Files.isRegularFile(Path.of(asset.getStoragePath()).toAbsolutePath().normalize()));
+	}
+
+	@Transactional
+	public GeneratedAssetEntity cloneAssetForQueue(
+			GeneratedAssetEntity source,
+			String queueItemId,
+			String providerJobId,
+			String cacheKey,
+			Map<String, Object> metadataOverrides) {
+		Path assetPath = Path.of(source.getStoragePath()).toAbsolutePath().normalize();
+		if (!Files.isRegularFile(assetPath)) {
+			throw new ApiException(
+					HttpStatus.NOT_FOUND,
+					"NOT_FOUND",
+					"再利用対象の generated asset が見つかりません。",
+					Map.of("assetId", source.getId()));
+		}
+		Map<String, Object> mergedMetadata = new LinkedHashMap<>(source.getMetadata());
+		if (metadataOverrides != null) {
+			mergedMetadata.putAll(metadataOverrides);
+		}
+		return persistAssetRecord(
+				nextId(),
+				source.getAssetType(),
+				assetPath,
+				source.getContentHash(),
+				source.getProviderFingerprint(),
+				queueItemId,
+				providerJobId,
+				cacheKey,
+				mergedMetadata);
 	}
 
 	public Optional<Path> resolveAudioAssetPath(String assetId) {
@@ -128,13 +193,37 @@ public class GeneratedAssetService {
 			String providerFingerprint,
 			String queueItemId,
 			String providerJobId,
+			String cacheKey,
+			Map<String, Object> metadata) {
+		return persistAssetRecord(
+				assetId,
+				assetType,
+				assetPath,
+				sha256(bytes),
+				providerFingerprint,
+				queueItemId,
+				providerJobId,
+				cacheKey,
+				metadata);
+	}
+
+	private GeneratedAssetEntity persistAssetRecord(
+			String assetId,
+			GeneratedAssetType assetType,
+			Path assetPath,
+			String contentHash,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			String cacheKey,
 			Map<String, Object> metadata) {
 		GeneratedAssetEntity entity = new GeneratedAssetEntity();
 		entity.setId(assetId);
 		entity.setAssetType(assetType);
 		entity.setStoragePath(assetPath.toString());
-		entity.setContentHash(sha256(bytes));
+		entity.setContentHash(contentHash);
 		entity.setProviderFingerprint(providerFingerprint == null || providerFingerprint.isBlank() ? "server:placeholder" : providerFingerprint);
+		entity.setCacheKey(cacheKey == null || cacheKey.isBlank() ? null : cacheKey);
 		entity.setQueueItemId(queueItemId);
 		entity.setProviderJobId(providerJobId);
 		entity.setMetadata(metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata));

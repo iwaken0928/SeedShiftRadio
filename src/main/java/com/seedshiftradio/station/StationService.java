@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.common.api.ApiException;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport;
 import com.seedshiftradio.programming.ProgrammingService;
 import com.seedshiftradio.station.StationDtos.StationDetailResponse;
 import com.seedshiftradio.station.StationDtos.StationProgrammingSummary;
@@ -65,7 +66,10 @@ public class StationService {
 						policy.enabled(),
 						policy.defaultTemplateId(),
 						policy.fallbackStrategy(),
-						policy.planningHorizonMinutes()));
+						policy.planningHorizonMinutes(),
+						policy.preGeneration() != null ? policy.preGeneration() : ProgrammingPolicyProfileSupport.defaultPreGenerationProfile(),
+						policy.replay() != null ? policy.replay() : ProgrammingPolicyProfileSupport.defaultReplayProfile(),
+						policy.composition() != null ? policy.composition() : ProgrammingPolicyProfileSupport.defaultCompositionProfile()));
 	}
 
 	@Transactional

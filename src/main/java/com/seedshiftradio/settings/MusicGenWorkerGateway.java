@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.seedshiftradio.domain.ProviderType;
 
 @Service
 public class MusicGenWorkerGateway {
@@ -21,41 +22,49 @@ public class MusicGenWorkerGateway {
 	private static final Duration JOB_TIMEOUT = Duration.ofSeconds(180);
 	private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 
-	private final RadioSettingsStore settingsStore;
+	private final ProviderRegistry providerRegistry;
 	private final ObjectMapper objectMapper;
 
-	public MusicGenWorkerGateway(RadioSettingsStore settingsStore, ObjectMapper objectMapper) {
-		this.settingsStore = settingsStore;
+	public MusicGenWorkerGateway(ProviderRegistry providerRegistry, ObjectMapper objectMapper) {
+		this.providerRegistry = providerRegistry;
 		this.objectMapper = objectMapper;
 	}
 
-	public ResolvedMusicProvider resolveProvider() {
-		SettingsDocument.ProviderGroup group = settingsStore.load().providers().musicGen();
-		if (group == null || group.providers() == null || group.providers().isEmpty()) {
+	public List<ResolvedMusicProvider> resolveProviders() {
+		List<ResolvedMusicProvider> providers = providerRegistry.resolveChain(ProviderType.MUSIC).stream()
+				.map(provider -> new ResolvedMusicProvider(
+						provider.providerKey(),
+						provider.baseUrl(),
+						provider.timeoutMs(),
+						provider.capabilities()))
+				.toList();
+		if (providers.isEmpty()) {
 			throw new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "MusicGen provider が設定されていません。");
 		}
-		SettingsDocument.ProviderEndpoint endpoint = group.providers().get(group.defaultProvider());
-		if (endpoint == null) {
-			throw new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "MusicGen defaultProvider が providers に存在しません。");
-		}
-		return new ResolvedMusicProvider(
-				group.defaultProvider(),
-				trimTrailingSlash(endpoint.baseUrl()),
-				endpoint.timeoutMs(),
-				endpoint.capabilities());
+		return providers;
 	}
 
-	public SubmittedMusicJob submit(ResolvedMusicProvider provider, MusicJobRequest request) {
-		HttpRequest httpRequest = jsonRequest(
-				provider,
-				"/music/jobs",
-				"POST",
-				serialize(request));
-		WorkerSubmitResponse response = send(httpRequest, provider, WorkerSubmitResponse.class, "submit");
-		if (response.jobId() == null || response.jobId().isBlank()) {
-			throw new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "MusicGen worker が jobId を返しませんでした。");
+	public SubmittedMusicJob submitWithFallback(List<ResolvedMusicProvider> providers, MusicJobRequest request) {
+		MusicGenWorkerException lastFailure = null;
+		for (int index = 0; index < providers.size(); index++) {
+			ResolvedMusicProvider provider = providers.get(index);
+			try {
+				WorkerSubmitResponse response = submit(provider, request);
+				if (response.jobId() == null || response.jobId().isBlank()) {
+					throw new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "MusicGen worker が jobId を返しませんでした。");
+				}
+				return new SubmittedMusicJob(response.jobId(), response.status(), provider);
+			} catch (MusicGenWorkerException exception) {
+				lastFailure = exception;
+				boolean canRetryWithFallback = index < providers.size() - 1 && isFallbackCandidate(exception);
+				if (!canRetryWithFallback) {
+					throw exception;
+				}
+			}
 		}
-		return new SubmittedMusicJob(response.jobId(), response.status());
+		throw lastFailure == null
+				? new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "MusicGen provider が設定されていません。")
+				: lastFailure;
 	}
 
 	public MusicJobStatus awaitCompletion(ResolvedMusicProvider provider, String jobId) {
@@ -95,6 +104,15 @@ public class MusicGenWorkerGateway {
 				response.promptHash(),
 				response.errorCode(),
 				response.message());
+	}
+
+	private WorkerSubmitResponse submit(ResolvedMusicProvider provider, MusicJobRequest request) {
+		HttpRequest httpRequest = jsonRequest(
+				provider,
+				"/music/jobs",
+				"POST",
+				serialize(request));
+		return send(httpRequest, provider, WorkerSubmitResponse.class, "submit");
 	}
 
 	private HttpRequest jsonRequest(ResolvedMusicProvider provider, String path, String method, String body) {
@@ -168,11 +186,11 @@ public class MusicGenWorkerGateway {
 		}
 	}
 
-	private String trimTrailingSlash(String baseUrl) {
-		if (baseUrl == null || baseUrl.isBlank()) {
-			return "http://127.0.0.1:8000";
-		}
-		return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+	private boolean isFallbackCandidate(MusicGenWorkerException exception) {
+		return switch (exception.errorCode()) {
+			case "PROVIDER_UNREACHABLE", "PROVIDER_TIMEOUT", "PROVIDER_BAD_RESPONSE", "PROVIDER_RESOURCE_EXHAUSTED" -> true;
+			default -> false;
+		};
 	}
 
 	public record ResolvedMusicProvider(String providerKey, String baseUrl, int timeoutMs, List<String> capabilities) {
@@ -188,7 +206,7 @@ public class MusicGenWorkerGateway {
 			Integer seed) {
 	}
 
-	public record SubmittedMusicJob(String jobId, String status) {
+	public record SubmittedMusicJob(String jobId, String status, ResolvedMusicProvider provider) {
 	}
 
 	public record MusicJobStatus(

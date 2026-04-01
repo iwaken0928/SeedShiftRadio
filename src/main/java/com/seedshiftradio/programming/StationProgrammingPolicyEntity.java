@@ -1,6 +1,11 @@
 package com.seedshiftradio.programming;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -39,6 +44,18 @@ public class StationProgrammingPolicyEntity {
 
 	@Column(name = "planning_horizon_minutes", nullable = false)
 	private Integer planningHorizonMinutes;
+
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "pre_generation_policy", nullable = false, columnDefinition = "jsonb")
+	private Map<String, Object> preGenerationPolicy = new LinkedHashMap<>();
+
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "replay_policy", nullable = false, columnDefinition = "jsonb")
+	private Map<String, Object> replayPolicy = new LinkedHashMap<>();
+
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "composition_policy", nullable = false, columnDefinition = "jsonb")
+	private Map<String, Object> compositionPolicy = new LinkedHashMap<>();
 
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;

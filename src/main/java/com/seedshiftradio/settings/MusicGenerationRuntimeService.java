@@ -1,6 +1,9 @@
 package com.seedshiftradio.settings;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -35,26 +38,46 @@ public class MusicGenerationRuntimeService {
 	}
 
 	public GeneratedMusicAsset generate(String stationId, QueueItemEntity item) {
-		MusicGenWorkerGateway.ResolvedMusicProvider provider = musicGenWorkerGateway.resolveProvider();
+		List<MusicGenWorkerGateway.ResolvedMusicProvider> providers = musicGenWorkerGateway.resolveProviders();
+		MusicGenWorkerGateway.MusicJobRequest request = buildRequest(stationId, item);
 		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
 				ProviderJobType.MUSIC_GEN,
 				ProviderType.MUSIC,
-				provider.providerKey(),
+				providers.getFirst().providerKey(),
 				item.getId(),
 				item.getCorrelationId());
 		try {
-			MusicGenWorkerGateway.SubmittedMusicJob submittedJob = musicGenWorkerGateway.submit(provider, buildRequest(stationId, item));
-			providerJobService.markRunning(providerJob.getId(), submittedJob.jobId());
-			MusicGenWorkerGateway.MusicJobStatus completedJob = musicGenWorkerGateway.awaitCompletion(provider, submittedJob.jobId());
+			CachedAssetHit cachedAssetHit = findReusableAsset(providers, request);
+			GeneratedAssetEntity reusableAsset = cachedAssetHit == null ? null : cachedAssetHit.asset();
+			if (reusableAsset != null) {
+				providerJobService.markRunning(providerJob.getId(), cachedAssetHit.provider().providerKey(), "cache-hit:" + reusableAsset.getId());
+				GeneratedAssetEntity asset = generatedAssetService.cloneAssetForQueue(
+						reusableAsset,
+						item.getId(),
+						providerJob.getId(),
+						cachedAssetHit.cacheKey(),
+						buildCacheHitMetadata(stationId, item, cachedAssetHit.provider(), providerJob, reusableAsset));
+				providerJobService.markSucceeded(providerJob.getId());
+				return new GeneratedMusicAsset(
+						asset.getId(),
+						"/api/assets/audio/" + asset.getId() + ".wav",
+						providerJob.getId(),
+						null);
+			}
+			MusicGenWorkerGateway.SubmittedMusicJob submittedJob = musicGenWorkerGateway.submitWithFallback(providers, request);
+			providerJobService.markRunning(providerJob.getId(), submittedJob.provider().providerKey(), submittedJob.jobId());
+			MusicGenWorkerGateway.MusicJobStatus completedJob = musicGenWorkerGateway.awaitCompletion(submittedJob.provider(), submittedJob.jobId());
+			String cacheKey = buildCacheKey(submittedJob.provider(), request);
 			GeneratedAssetEntity asset = generatedAssetService.registerExistingAsset(
 					GeneratedAssetType.MUSIC,
 					Path.of(completedJob.assetPath()),
 					completedJob.providerFingerprint() == null || completedJob.providerFingerprint().isBlank()
-							? provider.providerKey()
+							? submittedJob.provider().providerKey()
 							: completedJob.providerFingerprint(),
 					item.getId(),
 					providerJob.getId(),
-					buildMetadata(stationId, item, provider, providerJob, completedJob));
+					cacheKey,
+					buildGeneratedMetadata(stationId, item, submittedJob.provider(), providerJob, completedJob, cacheKey));
 			providerJobService.markSucceeded(providerJob.getId());
 			return new GeneratedMusicAsset(
 					asset.getId(),
@@ -70,6 +93,19 @@ public class MusicGenerationRuntimeService {
 		}
 	}
 
+	private CachedAssetHit findReusableAsset(
+			List<MusicGenWorkerGateway.ResolvedMusicProvider> providers,
+			MusicGenWorkerGateway.MusicJobRequest request) {
+		for (MusicGenWorkerGateway.ResolvedMusicProvider provider : providers) {
+			String cacheKey = buildCacheKey(provider, request);
+			GeneratedAssetEntity reusableAsset = generatedAssetService.findReusableAsset(GeneratedAssetType.MUSIC, cacheKey).orElse(null);
+			if (reusableAsset != null) {
+				return new CachedAssetHit(provider, cacheKey, reusableAsset);
+			}
+		}
+		return null;
+	}
+
 	private MusicGenWorkerGateway.MusicJobRequest buildRequest(String stationId, QueueItemEntity item) {
 		return new MusicGenWorkerGateway.MusicJobRequest(
 				item.getCorrelationId() + ":" + item.getId(),
@@ -81,24 +117,46 @@ public class MusicGenerationRuntimeService {
 				resolveSeed(item));
 	}
 
-	private Map<String, Object> buildMetadata(
+	private Map<String, Object> buildGeneratedMetadata(
 			String stationId,
 			QueueItemEntity item,
 			MusicGenWorkerGateway.ResolvedMusicProvider provider,
 			ProviderJobEntity providerJob,
-			MusicGenWorkerGateway.MusicJobStatus completedJob) {
+			MusicGenWorkerGateway.MusicJobStatus completedJob,
+			String cacheKey) {
 		Map<String, Object> metadata = new LinkedHashMap<>();
 		metadata.put("stationId", stationId);
 		metadata.put("queueItemId", item.getId());
 		metadata.put("providerKey", provider.providerKey());
 		metadata.put("providerJobId", providerJob.getId());
 		metadata.put("workerJobId", completedJob.jobId());
+		metadata.put("cacheKey", cacheKey);
+		metadata.put("cacheHit", false);
 		metadata.put("segmentType", item.getSegmentType().name());
 		metadata.put("slotRole", item.getSlotRole().name());
 		metadata.put("durationSec", completedJob.durationSec());
 		if (completedJob.promptHash() != null && !completedJob.promptHash().isBlank()) {
 			metadata.put("promptHash", completedJob.promptHash());
 		}
+		return metadata;
+	}
+
+	private Map<String, Object> buildCacheHitMetadata(
+			String stationId,
+			QueueItemEntity item,
+			MusicGenWorkerGateway.ResolvedMusicProvider provider,
+			ProviderJobEntity providerJob,
+			GeneratedAssetEntity reusableAsset) {
+		Map<String, Object> metadata = new LinkedHashMap<>();
+		metadata.put("stationId", stationId);
+		metadata.put("queueItemId", item.getId());
+		metadata.put("providerKey", provider.providerKey());
+		metadata.put("providerJobId", providerJob.getId());
+		metadata.put("cacheKey", reusableAsset.getCacheKey());
+		metadata.put("cacheHit", true);
+		metadata.put("cacheSourceAssetId", reusableAsset.getId());
+		metadata.put("segmentType", item.getSegmentType().name());
+		metadata.put("slotRole", item.getSlotRole().name());
 		return metadata;
 	}
 
@@ -127,6 +185,49 @@ public class MusicGenerationRuntimeService {
 		return Math.floorMod((item.getCorrelationId() + ":" + item.getId()).hashCode(), Integer.MAX_VALUE);
 	}
 
+	private String buildCacheKey(
+			MusicGenWorkerGateway.ResolvedMusicProvider provider,
+			MusicGenWorkerGateway.MusicJobRequest request) {
+		List<String> normalizedMood = request.mood() == null
+				? List.of()
+				: request.mood().stream().map(this::normalize).toList();
+		String raw = String.join(
+				"|",
+				normalize(provider.providerKey()),
+				normalize(provider.baseUrl()),
+				normalize(request.stationId()),
+				normalize(request.mode()),
+				normalize(request.genre()),
+				String.join(",", normalizedMood),
+				String.valueOf(request.durationSec()),
+				String.valueOf(request.seed() == null ? 0 : request.seed()));
+		return sha256(raw);
+	}
+
+	private String normalize(String value) {
+		return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+	}
+
+	private String sha256(String value) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+			StringBuilder builder = new StringBuilder(bytes.length * 2);
+			for (byte current : bytes) {
+				builder.append(String.format("%02x", current));
+			}
+			return builder.toString();
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 が利用できません。", exception);
+		}
+	}
+
 	public record GeneratedMusicAsset(String assetId, String assetUrl, String providerJobId, String workerJobId) {
+	}
+
+	private record CachedAssetHit(
+			MusicGenWorkerGateway.ResolvedMusicProvider provider,
+			String cacheKey,
+			GeneratedAssetEntity asset) {
 	}
 }

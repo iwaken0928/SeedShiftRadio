@@ -45,6 +45,9 @@ public class GeneratedAssetEntity {
 	@Column(name = "provider_fingerprint", nullable = false)
 	private String providerFingerprint;
 
+	@Column(name = "cache_key")
+	private String cacheKey;
+
 	@JdbcTypeCode(SqlTypes.JSON)
 	@Column(nullable = false, columnDefinition = "jsonb")
 	private Map<String, Object> metadata = new LinkedHashMap<>();

@@ -15,24 +15,24 @@ import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 
+import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.stream.StreamEventService;
 
 @Service
 public class ProviderHealthService {
 
-	private final RadioSettingsStore settingsStore;
+	private final ProviderRegistry providerRegistry;
 	private final StreamEventService streamEventService;
 
 	private volatile Map<String, SettingsDtos.ProviderHealthPayload> latestSnapshot = Map.of();
 
-	public ProviderHealthService(RadioSettingsStore settingsStore, StreamEventService streamEventService) {
-		this.settingsStore = settingsStore;
+	public ProviderHealthService(ProviderRegistry providerRegistry, StreamEventService streamEventService) {
+		this.providerRegistry = providerRegistry;
 		this.streamEventService = streamEventService;
 	}
 
 	public synchronized Map<String, SettingsDtos.ProviderHealthPayload> refreshHealth() {
-		SettingsDocument settings = settingsStore.load();
-		Map<String, SettingsDtos.ProviderHealthPayload> current = probeAll(settings.providers());
+		Map<String, SettingsDtos.ProviderHealthPayload> current = probeAll();
 		if (latestSnapshot.isEmpty() || hasMeaningfulChange(latestSnapshot, current)) {
 			streamEventService.publish("provider.health.changed", current);
 		}
@@ -45,66 +45,123 @@ public class ProviderHealthService {
 		return snapshot.isEmpty() ? refreshHealth() : snapshot;
 	}
 
-	private Map<String, SettingsDtos.ProviderHealthPayload> probeAll(SettingsDocument.ProviderCatalog providers) {
+	private Map<String, SettingsDtos.ProviderHealthPayload> probeAll() {
 		Map<String, SettingsDtos.ProviderHealthPayload> result = new LinkedHashMap<>();
-		result.put("llm", probe("llm", providers.llm()));
-		result.put("tts", probe("tts", providers.tts()));
-		result.put("musicGen", probe("musicGen", providers.musicGen()));
+		result.put("llm", probe(ProviderType.LLM));
+		result.put("tts", probe(ProviderType.TTS));
+		result.put("musicGen", probe(ProviderType.MUSIC));
 		return result;
 	}
 
-	private SettingsDtos.ProviderHealthPayload probe(String providerType, SettingsDocument.ProviderGroup group) {
-		if (group == null || group.providers() == null || group.providers().isEmpty()) {
-			return down(providerType, null, null, "Provider が未設定です。", Instant.now(), 0L, List.of());
-		}
-		SettingsDocument.ProviderEndpoint endpoint = group.providers().get(group.defaultProvider());
-		if (endpoint == null) {
-			return down(providerType, group.defaultProvider(), null, "defaultProvider が providers に存在しません。", Instant.now(), 0L, List.of());
+	private SettingsDtos.ProviderHealthPayload probe(ProviderType providerType) {
+		List<ProbeResult> attempts = providerRegistry.resolveChain(providerType).stream()
+				.map(this::probeProvider)
+				.toList();
+		String providerTypeKey = providerRegistry.providerGroupKey(providerType);
+		if (attempts.isEmpty()) {
+			return down(providerTypeKey, null, null, "Provider が未設定です。", Instant.now(), 0L, List.of());
 		}
 
-		String baseUrl = trimTrailingSlash(endpoint.baseUrl());
-		String healthPath = endpoint.healthPath().startsWith("/") ? endpoint.healthPath() : "/" + endpoint.healthPath();
+		ProbeResult primary = attempts.getFirst();
+		if ("UP".equals(primary.payload().status())) {
+			return primary.payload();
+		}
+
+		ProbeResult fallbackUp = attempts.stream()
+				.skip(1)
+				.filter(result -> "UP".equals(result.payload().status()))
+				.findFirst()
+				.orElse(null);
+		if (fallbackUp != null) {
+			return new SettingsDtos.ProviderHealthPayload(
+					providerTypeKey,
+					fallbackUp.payload().providerKey(),
+					"DEGRADED",
+					fallbackUp.payload().lastCheckedAt(),
+					fallbackUp.payload().responseTimeMs(),
+					"defaultProvider " + primary.provider().providerKey() + " が " + primary.payload().status()
+							+ " のため fallback " + fallbackUp.provider().providerKey() + " を使用します。",
+					fallbackUp.payload().capabilities(),
+					fallbackUp.payload().baseUrl());
+		}
+
+		ProbeResult degraded = attempts.stream()
+				.filter(result -> "DEGRADED".equals(result.payload().status()))
+				.findFirst()
+				.orElse(null);
+		if (degraded != null) {
+			String message = degraded == primary
+					? degraded.payload().message()
+					: "defaultProvider " + primary.provider().providerKey()
+							+ " が利用できず、fallback " + degraded.provider().providerKey() + " も劣化状態です。 " + degraded.payload().message();
+			return new SettingsDtos.ProviderHealthPayload(
+					providerTypeKey,
+					degraded.payload().providerKey(),
+					"DEGRADED",
+					degraded.payload().lastCheckedAt(),
+					degraded.payload().responseTimeMs(),
+					message,
+					degraded.payload().capabilities(),
+					degraded.payload().baseUrl());
+		}
+
+		ProbeResult lastFailure = attempts.getLast();
+		String message = attempts.size() == 1
+				? lastFailure.payload().message()
+				: "defaultProvider " + primary.provider().providerKey()
+						+ " から fallback を試行しましたが利用できません。 " + lastFailure.payload().message();
+		return down(
+				providerTypeKey,
+				lastFailure.payload().providerKey(),
+				lastFailure.payload().baseUrl(),
+				message,
+				lastFailure.payload().lastCheckedAt(),
+				lastFailure.payload().responseTimeMs(),
+				lastFailure.payload().capabilities());
+	}
+
+	private ProbeResult probeProvider(ProviderRegistry.ResolvedProvider provider) {
 		Instant checkedAt = Instant.now();
 		long startedAt = System.nanoTime();
 		try {
 			HttpClient client = HttpClient.newBuilder()
-					.connectTimeout(Duration.ofMillis(endpoint.timeoutMs()))
+					.connectTimeout(Duration.ofMillis(provider.timeoutMs()))
 					.build();
-			HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + healthPath))
+			HttpRequest request = HttpRequest.newBuilder(URI.create(provider.baseUrl() + provider.healthPath()))
 					.GET()
-					.timeout(Duration.ofMillis(endpoint.timeoutMs()))
+					.timeout(Duration.ofMillis(provider.timeoutMs()))
 					.build();
 			HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
 			long responseTimeMs = elapsedMillis(startedAt);
 			if (response.statusCode() >= 200 && response.statusCode() < 300) {
-				return new SettingsDtos.ProviderHealthPayload(
-						providerType,
-						group.defaultProvider(),
+				return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
+						provider.providerGroupKey(),
+						provider.providerKey(),
 						"UP",
 						checkedAt,
 						responseTimeMs,
 						"接続成功",
-						endpoint.capabilities(),
-						baseUrl);
+						provider.capabilities(),
+						provider.baseUrl()));
 			}
-			return new SettingsDtos.ProviderHealthPayload(
-					providerType,
-					group.defaultProvider(),
+			return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
+					provider.providerGroupKey(),
+					provider.providerKey(),
 					"DEGRADED",
 					checkedAt,
 					responseTimeMs,
 					"HTTP " + response.statusCode(),
-					endpoint.capabilities(),
-					baseUrl);
+					provider.capabilities(),
+					provider.baseUrl()));
 		} catch (IllegalArgumentException exception) {
-			return down(providerType, group.defaultProvider(), baseUrl, "無効な URL です。", checkedAt, elapsedMillis(startedAt), endpoint.capabilities());
+			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "無効な URL です。", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (HttpTimeoutException exception) {
-			return down(providerType, group.defaultProvider(), baseUrl, "PROVIDER_TIMEOUT", checkedAt, elapsedMillis(startedAt), endpoint.capabilities());
+			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "PROVIDER_TIMEOUT", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (IOException exception) {
-			return down(providerType, group.defaultProvider(), baseUrl, "PROVIDER_UNREACHABLE", checkedAt, elapsedMillis(startedAt), endpoint.capabilities());
+			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "PROVIDER_UNREACHABLE", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			return down(providerType, group.defaultProvider(), baseUrl, "PROVIDER_INTERRUPTED", checkedAt, elapsedMillis(startedAt), endpoint.capabilities());
+			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "PROVIDER_INTERRUPTED", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		}
 	}
 
@@ -146,14 +203,10 @@ public class ProviderHealthService {
 				baseUrl);
 	}
 
-	private String trimTrailingSlash(String baseUrl) {
-		if (baseUrl == null || baseUrl.isBlank()) {
-			return "http://127.0.0.1";
-		}
-		return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-	}
-
 	private long elapsedMillis(long startedAt) {
 		return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+	}
+
+	private record ProbeResult(ProviderRegistry.ResolvedProvider provider, SettingsDtos.ProviderHealthPayload payload) {
 	}
 }

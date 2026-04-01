@@ -3,6 +3,7 @@ package com.seedshiftradio.settings;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
@@ -18,16 +19,22 @@ import com.seedshiftradio.radio.QueueItemEntity;
 public class AssetService {
 
 	private final RadioSettingsStore settingsStore;
+	private final ProviderRegistry providerRegistry;
+	private final TtsProvider ttsProvider;
 	private final GeneratedAssetService generatedAssetService;
 	private final ProviderJobService providerJobService;
 	private final PlaceholderAudioFactory placeholderAudioFactory;
 
 	public AssetService(
 			RadioSettingsStore settingsStore,
+			ProviderRegistry providerRegistry,
+			TtsProvider ttsProvider,
 			GeneratedAssetService generatedAssetService,
 			ProviderJobService providerJobService,
 			PlaceholderAudioFactory placeholderAudioFactory) {
 		this.settingsStore = settingsStore;
+		this.providerRegistry = providerRegistry;
+		this.ttsProvider = ttsProvider;
 		this.generatedAssetService = generatedAssetService;
 		this.providerJobService = providerJobService;
 		this.placeholderAudioFactory = placeholderAudioFactory;
@@ -38,23 +45,21 @@ public class AssetService {
 		if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
 			return;
 		}
+		ProviderRegistry.ResolvedProvider provider = resolveTtsProvider();
 		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
 				resolveJobType(item),
 				resolveProviderType(item),
-				"seedshift-placeholder",
+				provider.providerKey(),
 				item.getId(),
 				item.getCorrelationId());
-		providerJobService.markRunning(providerJob.getId(), "placeholder-" + item.getId());
+		providerJobService.markRunning(providerJob.getId(), provider.providerKey(), "placeholder-" + item.getId());
+		TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item);
 		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
-				placeholderAudioFactory.createSilentWav(item.getDurationMs()),
-				resolveProviderFingerprint(item),
+				synthesizedAudio.audioBytes(),
+				synthesizedAudio.providerFingerprint(),
 				item.getId(),
 				providerJob.getId(),
-				Map.of(
-						"queueItemId", item.getId(),
-						"segmentType", item.getSegmentType().name(),
-						"slotRole", item.getSlotRole().name(),
-						"placeholder", true));
+				synthesizedAudio.metadata());
 		providerJobService.markSucceeded(providerJob.getId());
 		item.setAssetId(asset.getId());
 		item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
@@ -103,11 +108,19 @@ public class AssetService {
 		};
 	}
 
-	private String resolveProviderFingerprint(QueueItemEntity item) {
-		String suffix = switch (item.getSegmentType()) {
-			case MUSIC_AI, MUSIC_LOCAL -> "music";
-			default -> "audio";
-		};
-		return "seedshift-placeholder:" + suffix;
+	private ProviderRegistry.ResolvedProvider resolveTtsProvider() {
+		List<ProviderRegistry.ResolvedProvider> providers = providerRegistry.resolveChain(ProviderType.TTS);
+		if (!providers.isEmpty()) {
+			return providers.getFirst();
+		}
+		return new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"seedshift-placeholder",
+				"http://127.0.0.1",
+				"/health",
+				5_000,
+				List.of("TTS_GEN"),
+				true);
 	}
 }

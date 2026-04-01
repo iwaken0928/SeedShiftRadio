@@ -7,6 +7,9 @@ import java.util.Map;
 
 import com.seedshiftradio.domain.ConstraintMode;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.CompositionProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.ReplayProfile;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -77,6 +80,9 @@ public final class ProgrammingDtos {
 			String defaultTemplateId,
 			String fallbackStrategy,
 			Integer planningHorizonMinutes,
+			PreGenerationProfile preGeneration,
+			ReplayProfile replay,
+			CompositionProfile composition,
 			Instant updatedAt,
 			List<ProgramRuleDto> rules) {
 	}
@@ -98,6 +104,9 @@ public final class ProgrammingDtos {
 			String defaultTemplateId,
 			@NotBlank String fallbackStrategy,
 			@NotNull Integer planningHorizonMinutes,
+			@Valid PreGenerationProfile preGeneration,
+			@Valid ReplayProfile replay,
+			@Valid CompositionProfile composition,
 			@Valid @NotNull List<ProgramRuleRequest> rules) {
 	}
 

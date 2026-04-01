@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.programming.ProgramTemplateEntity;
 import com.seedshiftradio.programming.ProgramTemplateRepository;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport;
 import com.seedshiftradio.programming.ProgrammingDtos;
 import com.seedshiftradio.programming.StationProgrammingPolicyEntity;
 import com.seedshiftradio.programming.StationProgrammingPolicyRepository;
@@ -131,11 +132,13 @@ public class StationAdminService {
 	private StationDtos.StationDetail toDetail(StationEntity entity) {
 		StationProgrammingPolicyEntity policy = policyRepository.findByStationId(entity.getId()).orElse(null);
 		StationDtos.Programming programming = new StationDtos.Programming(
-				policy != null && entity.isProgrammingEnabled(),
+				entity.isProgrammingEnabled(),
 				policy != null ? policy.getDefaultTemplateId() : entity.getDefaultProgramTemplateId(),
-				policy != null ? policy.getFallbackStrategy() : null,
-				policy != null ? policy.getPlanningHorizonMinutes() : null,
-				policy != null ? policy.getVersion() : entity.getVersion());
+				policy != null ? policy.getFallbackStrategy() : "LEGACY_RATIO",
+				policy != null ? policy.getPlanningHorizonMinutes() : 20,
+				policy != null ? ProgrammingPolicyProfileSupport.toPreGenerationProfile(policy.getPreGenerationPolicy()) : ProgrammingPolicyProfileSupport.defaultPreGenerationProfile(),
+				policy != null ? ProgrammingPolicyProfileSupport.toReplayProfile(policy.getReplayPolicy()) : ProgrammingPolicyProfileSupport.defaultReplayProfile(),
+				policy != null ? ProgrammingPolicyProfileSupport.toCompositionProfile(policy.getCompositionPolicy()) : ProgrammingPolicyProfileSupport.defaultCompositionProfile());
 		return new StationDtos.StationDetail(
 				entity.getId(),
 				entity.getName(),
@@ -144,6 +147,7 @@ public class StationAdminService {
 				entity.getLanguagePersonaId(),
 				entity.getDefaultVoiceProfileId(),
 				entity.isActive(),
+				entity.getVersion(),
 				programming);
 	}
 

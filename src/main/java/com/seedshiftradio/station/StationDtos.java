@@ -8,6 +8,9 @@ import java.util.Map;
 
 import com.seedshiftradio.domain.ConstraintMode;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.CompositionProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.ReplayProfile;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -36,7 +39,9 @@ public final class StationDtos {
 			String defaultTemplateId,
 			String fallbackStrategy,
 			Integer planningHorizonMinutes,
-			Integer version) {
+			PreGenerationProfile preGeneration,
+			ReplayProfile replay,
+			CompositionProfile composition) {
 	}
 
 	public record StationDetail(
@@ -47,6 +52,7 @@ public final class StationDtos {
 			String languagePersonaId,
 			String defaultVoiceProfileId,
 			boolean isActive,
+			Integer version,
 			Programming programming) {
 	}
 
@@ -78,8 +84,11 @@ public final class StationDtos {
 			boolean enabled,
 			String defaultTemplateId,
 			String fallbackStrategy,
-			Integer planningHorizonMinutes) {
-	}
+			Integer planningHorizonMinutes,
+			PreGenerationProfile preGeneration,
+			ReplayProfile replay,
+			CompositionProfile composition) {
+		}
 
 	public record StationDetailResponse(
 			String id,
@@ -123,6 +132,9 @@ public final class StationDtos {
 			String defaultTemplateId,
 			String fallbackStrategy,
 			Integer planningHorizonMinutes,
+			PreGenerationProfile preGeneration,
+			ReplayProfile replay,
+			CompositionProfile composition,
 			Instant updatedAt,
 			List<ProgrammingRuleResponse> rules) {
 	}
@@ -144,10 +156,20 @@ public final class StationDtos {
 			String defaultTemplateId,
 			@NotBlank String fallbackStrategy,
 			@NotNull Integer planningHorizonMinutes,
+			@Valid PreGenerationProfile preGeneration,
+			@Valid ReplayProfile replay,
+			@Valid CompositionProfile composition,
 			@Valid List<ProgrammingRuleRequest> rules) {
 	}
 
-	public record ProgrammingPolicyUpdateResponse(String stationId, Integer version, boolean enabled, Instant updatedAt) {
+	public record ProgrammingPolicyUpdateResponse(
+			String stationId,
+			Integer version,
+			boolean enabled,
+			PreGenerationProfile preGeneration,
+			ReplayProfile replay,
+			CompositionProfile composition,
+			Instant updatedAt) {
 	}
 
 	public record ProviderStatesRequest(String musicGen, String tts, String llm) {

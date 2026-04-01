@@ -110,6 +110,22 @@ class ProgrammingAdminServiceTests {
 		assertEquals("slot-default", response.slots().getFirst().slotId());
 	}
 
+	@Test
+	void getPolicyReturnsDefaultRuntimeProfilesWhenPolicyIsMissing() {
+		StationEntity station = station("station-night");
+
+		when(stationRepository.findById("station-night")).thenReturn(java.util.Optional.of(station));
+		when(policyRepository.findByStationId("station-night")).thenReturn(java.util.Optional.empty());
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc("policy-station-night")).thenReturn(List.of());
+
+		ProgrammingDtos.ProgrammingPolicyResponse response = programmingAdminService.getPolicy("station-night");
+
+		assertEquals("station-night", response.stationId());
+		assertEquals("ASSISTED", response.preGeneration().mode());
+		assertEquals(List.of("MUSIC_AI", "MUSIC_LOCAL", "JINGLE"), response.replay().eligibleSegmentTypes());
+		assertEquals(40, response.composition().targetSegmentShares().get("talk"));
+	}
+
 	private StationEntity station(String id) {
 		StationEntity station = new StationEntity(
 				id,

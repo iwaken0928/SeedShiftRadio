@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public record SettingsDocument(
 		Integer version,
@@ -125,17 +126,20 @@ public record SettingsDocument(
 			return new ProviderCatalog(
 					new ProviderGroup(
 							"ollama",
+							List.of(),
 							Map.of("ollama", new ProviderEndpoint("http://127.0.0.1:11434", "/api/tags", 5_000, List.of("SCRIPT_GEN")))),
 					new ProviderGroup(
 							"voicevox",
+							List.of(),
 							Map.of("voicevox", new ProviderEndpoint("http://127.0.0.1:50021", "/version", 5_000, List.of("TTS_GEN")))),
 					new ProviderGroup(
 							"ace-step",
+							List.of(),
 							Map.of("ace-step", new ProviderEndpoint("http://127.0.0.1:8000", "/health", 5_000, List.of("MUSIC_GEN")))));
 		}
 	}
 
-	public record ProviderGroup(String defaultProvider, Map<String, ProviderEndpoint> providers) {
+	public record ProviderGroup(String defaultProvider, List<String> fallbackProviders, Map<String, ProviderEndpoint> providers) {
 
 		public ProviderGroup normalize() {
 			Map<String, ProviderEndpoint> normalizedProviders = providers == null || providers.isEmpty()
@@ -146,8 +150,21 @@ public record SettingsDocument(
 									entry -> entry.getValue() == null ? ProviderEndpoint.defaults() : entry.getValue().normalize(),
 									(left, right) -> right,
 									LinkedHashMap::new)));
+			String normalizedDefault = (defaultProvider == null || defaultProvider.isBlank())
+					? normalizedProviders.keySet().stream().findFirst().orElse("default")
+					: defaultProvider;
+			List<String> normalizedFallbacks = fallbackProviders == null
+					? List.of()
+					: fallbackProviders.stream()
+							.filter(Objects::nonNull)
+							.map(String::trim)
+							.filter(value -> !value.isBlank())
+							.distinct()
+							.filter(value -> !value.equals(normalizedDefault))
+							.toList();
 			return new ProviderGroup(
-					(defaultProvider == null || defaultProvider.isBlank()) ? normalizedProviders.keySet().stream().findFirst().orElse("default") : defaultProvider,
+					normalizedDefault,
+					normalizedFallbacks,
 					normalizedProviders);
 		}
 	}

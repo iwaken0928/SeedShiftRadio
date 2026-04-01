@@ -92,6 +92,7 @@ Response:
 - `workers/musicgen` に FastAPI worker を追加し、`POST /music/jobs`, `GET /music/jobs/{jobId}`, `GET /health` を実装した
 - worker 内部の生成器は実モデル未接続のため deterministic な WAV 生成を行い、Server と Worker の非同期契約を先に成立させる
 - Server は `GenerateMusicJob -> MusicGenWorkerGateway -> generated_asset/provider_job` の経路で `submit -> poll -> asset 登録 -> READY` を実行する
+- Server は worker 呼び出し前に `generated_asset.cache_key` を検索し、同一条件の音源があれば再利用を優先する
 - worker 失敗時は `provider_job.error_code` を更新し、session を `DEGRADED` として queue refill を再要求する
 
 ## 7. キャッシュ方針
@@ -106,7 +107,7 @@ Response:
 - seed
 - provider fingerprint
 
-同一キーがあれば再生成より再利用を優先する。
+同一キーがあれば再生成より再利用を優先する。cache hit 時も現在の `queue_item` と `provider_job` を追跡できるよう、Server は同じ `storage_path` を指す新しい `generated_asset` レコードを作成して返す。
 
 ## 8. フォールバック
 

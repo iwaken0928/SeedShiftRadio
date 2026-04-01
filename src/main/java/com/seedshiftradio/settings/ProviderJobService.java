@@ -39,8 +39,16 @@ public class ProviderJobService {
 
 	@Transactional
 	public ProviderJobEntity markRunning(String providerJobId, String externalRef) {
+		return markRunning(providerJobId, null, externalRef);
+	}
+
+	@Transactional
+	public ProviderJobEntity markRunning(String providerJobId, String providerKey, String externalRef) {
 		ProviderJobEntity entity = providerJobRepository.findById(providerJobId).orElseThrow();
 		entity.setStatus(ProviderJobStatus.RUNNING);
+		if (providerKey != null && !providerKey.isBlank()) {
+			entity.setProviderKey(providerKey);
+		}
 		entity.setExternalRef(externalRef);
 		entity.setStartedAt(Instant.now());
 		return providerJobRepository.save(entity);

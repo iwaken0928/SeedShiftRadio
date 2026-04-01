@@ -25,6 +25,9 @@ import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.letter.LetterRepository;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.CompositionProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.ReplayProfile;
 import com.seedshiftradio.station.PersonalityRepository;
 import com.seedshiftradio.station.StationDtos.PreviewProgram;
 import com.seedshiftradio.station.StationDtos.PreviewSlot;
@@ -96,6 +99,9 @@ public class ProgrammingService {
 				policy.getDefaultTemplateId(),
 				policy.getFallbackStrategy(),
 				policy.getPlanningHorizonMinutes(),
+				ProgrammingPolicyProfileSupport.toPreGenerationProfile(policy.getPreGenerationPolicy()),
+				ProgrammingPolicyProfileSupport.toReplayProfile(policy.getReplayPolicy()),
+				ProgrammingPolicyProfileSupport.toCompositionProfile(policy.getCompositionPolicy()),
 				policy.getUpdatedAt(),
 				rules);
 	}
@@ -117,9 +123,22 @@ public class ProgrammingService {
 		if (policy.getVersion() != null && !Objects.equals(policy.getVersion(), request.version())) {
 			throw conflict("version", "番組編成設定が他で更新されています。");
 		}
+		PreGenerationProfile preGeneration = request.preGeneration() != null
+				? ProgrammingPolicyProfileSupport.materializePreGenerationProfile(request.preGeneration())
+				: ProgrammingPolicyProfileSupport.toPreGenerationProfile(policy.getPreGenerationPolicy());
+		ReplayProfile replay = request.replay() != null
+				? ProgrammingPolicyProfileSupport.materializeReplayProfile(request.replay())
+				: ProgrammingPolicyProfileSupport.toReplayProfile(policy.getReplayPolicy());
+		CompositionProfile composition = request.composition() != null
+				? ProgrammingPolicyProfileSupport.materializeCompositionProfile(request.composition())
+				: ProgrammingPolicyProfileSupport.toCompositionProfile(policy.getCompositionPolicy());
+		ProgrammingPolicyProfileSupport.validateProfiles(preGeneration, replay, composition);
 		policy.setDefaultTemplateId(request.defaultTemplateId());
 		policy.setFallbackStrategy(request.fallbackStrategy());
 		policy.setPlanningHorizonMinutes(request.planningHorizonMinutes());
+		policy.setPreGenerationPolicy(ProgrammingPolicyProfileSupport.toMap(preGeneration));
+		policy.setReplayPolicy(ProgrammingPolicyProfileSupport.toMap(replay));
+		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(composition));
 		StationProgrammingPolicyEntity savedPolicy = policyRepository.save(policy);
 
 		ruleRepository.deleteByPolicyId(savedPolicy.getId());
@@ -558,6 +577,9 @@ public class ProgrammingService {
 		policy.setDefaultTemplateId(defaultTemplateId);
 		policy.setFallbackStrategy("LEGACY_RATIO");
 		policy.setPlanningHorizonMinutes(20);
+		policy.setPreGenerationPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultPreGenerationProfile()));
+		policy.setReplayPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultReplayProfile()));
+		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultCompositionProfile()));
 		policy.setUpdatedAt(Instant.now());
 		return policy;
 	}

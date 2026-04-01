@@ -1,5 +1,6 @@
 package com.seedshiftradio.programming;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -14,6 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.common.api.ApiException;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.CompositionProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.ReplayProfile;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
 
@@ -80,8 +84,8 @@ public class ProgrammingAdminService {
 
 	@Transactional(readOnly = true)
 	public List<ProgrammingDtos.ProgramRuleDto> getRules(String stationId) {
-		StationProgrammingPolicyEntity policy = findPolicy(stationId);
-		return ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId()).stream().map(this::toRuleDto).toList();
+		StationEntity station = findStation(stationId);
+		return getRules(loadPolicy(station));
 	}
 
 	public ProgrammingDtos.ProgrammingPolicyResponse savePolicy(String stationId, ProgrammingDtos.ProgrammingPolicyRequest request) {
@@ -99,9 +103,22 @@ public class ProgrammingAdminService {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "有効な番組編成には少なくとも 1 つのルールが必要です。", Map.of("stationId", stationId));
 		}
 		validatePolicyReferences(stationId, request.defaultTemplateId(), request.rules());
+		PreGenerationProfile preGeneration = request.preGeneration() != null
+				? ProgrammingPolicyProfileSupport.materializePreGenerationProfile(request.preGeneration())
+				: ProgrammingPolicyProfileSupport.toPreGenerationProfile(entity.getPreGenerationPolicy());
+		ReplayProfile replay = request.replay() != null
+				? ProgrammingPolicyProfileSupport.materializeReplayProfile(request.replay())
+				: ProgrammingPolicyProfileSupport.toReplayProfile(entity.getReplayPolicy());
+		CompositionProfile composition = request.composition() != null
+				? ProgrammingPolicyProfileSupport.materializeCompositionProfile(request.composition())
+				: ProgrammingPolicyProfileSupport.toCompositionProfile(entity.getCompositionPolicy());
+		ProgrammingPolicyProfileSupport.validateProfiles(preGeneration, replay, composition);
 		entity.setDefaultTemplateId(request.defaultTemplateId());
 		entity.setFallbackStrategy(request.fallbackStrategy());
 		entity.setPlanningHorizonMinutes(request.planningHorizonMinutes());
+		entity.setPreGenerationPolicy(ProgrammingPolicyProfileSupport.toMap(preGeneration));
+		entity.setReplayPolicy(ProgrammingPolicyProfileSupport.toMap(replay));
+		entity.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(composition));
 		StationProgrammingPolicyEntity saved = policyRepository.save(entity);
 		station.setProgrammingEnabled(request.enabled());
 		station.setDefaultProgramTemplateId(request.defaultTemplateId());
@@ -115,22 +132,29 @@ public class ProgrammingAdminService {
 				saved.getDefaultTemplateId(),
 				saved.getFallbackStrategy(),
 				saved.getPlanningHorizonMinutes(),
+				ProgrammingPolicyProfileSupport.toPreGenerationProfile(saved.getPreGenerationPolicy()),
+				ProgrammingPolicyProfileSupport.toReplayProfile(saved.getReplayPolicy()),
+				ProgrammingPolicyProfileSupport.toCompositionProfile(saved.getCompositionPolicy()),
 				saved.getUpdatedAt(),
 				getRules(stationId));
 	}
 
 	@Transactional(readOnly = true)
 	public ProgrammingDtos.ProgrammingPolicyResponse getPolicy(String stationId) {
-		StationProgrammingPolicyEntity policy = findPolicy(stationId);
+		StationEntity station = findStation(stationId);
+		StationProgrammingPolicyEntity policy = loadPolicy(station);
 		return new ProgrammingDtos.ProgrammingPolicyResponse(
 				stationId,
 				policy.getVersion(),
-				findStation(stationId).isProgrammingEnabled(),
+				station.isProgrammingEnabled(),
 				policy.getDefaultTemplateId(),
 				policy.getFallbackStrategy(),
 				policy.getPlanningHorizonMinutes(),
+				ProgrammingPolicyProfileSupport.toPreGenerationProfile(policy.getPreGenerationPolicy()),
+				ProgrammingPolicyProfileSupport.toReplayProfile(policy.getReplayPolicy()),
+				ProgrammingPolicyProfileSupport.toCompositionProfile(policy.getCompositionPolicy()),
 				policy.getUpdatedAt(),
-				getRules(stationId));
+				getRules(policy));
 	}
 
 	@Transactional(readOnly = true)
@@ -243,6 +267,30 @@ public class ProgrammingAdminService {
 	private StationProgrammingPolicyEntity findPolicy(String stationId) {
 		return policyRepository.findByStationId(stationId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "編成ポリシーが見つかりません。", Map.of("stationId", stationId)));
+	}
+
+	private StationProgrammingPolicyEntity loadPolicy(StationEntity station) {
+		return policyRepository.findByStationId(station.getId())
+				.orElseGet(() -> defaultPolicy(station.getId(), station.getDefaultProgramTemplateId()));
+	}
+
+	private List<ProgrammingDtos.ProgramRuleDto> getRules(StationProgrammingPolicyEntity policy) {
+		return ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId()).stream().map(this::toRuleDto).toList();
+	}
+
+	private StationProgrammingPolicyEntity defaultPolicy(String stationId, String defaultTemplateId) {
+		StationProgrammingPolicyEntity policy = new StationProgrammingPolicyEntity();
+		policy.setId("policy-" + stationId);
+		policy.setStationId(stationId);
+		policy.setVersion(0);
+		policy.setDefaultTemplateId(defaultTemplateId);
+		policy.setFallbackStrategy("LEGACY_RATIO");
+		policy.setPlanningHorizonMinutes(20);
+		policy.setPreGenerationPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultPreGenerationProfile()));
+		policy.setReplayPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultReplayProfile()));
+		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultCompositionProfile()));
+		policy.setUpdatedAt(Instant.now());
+		return policy;
 	}
 
 	private ProgramTemplateEntity findTemplate(String id) {

@@ -109,6 +109,32 @@ class SettingsServiceTests {
 	}
 
 	@Test
+	void updateSettingsRejectsUnknownFallbackProvider() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
+						current.playout(),
+						current.programming(),
+						new SettingsDocument.ProviderCatalog(
+								new SettingsDocument.ProviderGroup(
+										"ollama",
+										List.of("missing-llm"),
+										Map.of("ollama", new SettingsDocument.ProviderEndpoint("http://127.0.0.1:11434", "/api/tags", 5_000, List.of("SCRIPT_GEN")))),
+								current.providers().tts(),
+								current.providers().musicGen()),
+						current.security(),
+						current.features())));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
 	void testConnectionsReturnsLatestProviderHealth() {
 		Map<String, SettingsDtos.ProviderHealthPayload> providerHealth = Map.of(
 				"llm", new SettingsDtos.ProviderHealthPayload("llm", "ollama", "UP", Instant.parse("2026-03-20T09:00:00Z"), 12L, "接続成功", List.of("SCRIPT_GEN"), "http://127.0.0.1:11434"),

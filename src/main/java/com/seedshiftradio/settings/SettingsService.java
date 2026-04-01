@@ -90,6 +90,15 @@ public class SettingsService {
 		if (!group.providers().containsKey(group.defaultProvider())) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + ".defaultProvider が providers に存在しません。", Map.of("field", field + ".defaultProvider"));
 		}
+		for (String fallbackProvider : group.fallbackProviders()) {
+			if (!group.providers().containsKey(fallbackProvider)) {
+				throw new ApiException(
+						HttpStatus.BAD_REQUEST,
+						"VALIDATION_ERROR",
+						field + ".fallbackProviders に providers 未登録の key が含まれています。",
+						Map.of("field", field + ".fallbackProviders", "providerKey", fallbackProvider));
+			}
+		}
 		for (Map.Entry<String, SettingsDocument.ProviderEndpoint> entry : group.providers().entrySet()) {
 			SettingsDocument.ProviderEndpoint endpoint = entry.getValue();
 			try {

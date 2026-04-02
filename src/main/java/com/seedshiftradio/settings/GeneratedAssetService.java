@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -59,7 +60,7 @@ public class GeneratedAssetService {
 				assetId,
 				GeneratedAssetType.AUDIO,
 				assetPath,
-				bytes,
+				bytes.length,
 				providerFingerprint,
 				queueItemId,
 				providerJobId,
@@ -93,12 +94,18 @@ public class GeneratedAssetService {
 				nextId(),
 				assetType,
 				normalizedPath,
-				bytes,
+				bytes.length,
 				providerFingerprint,
 				queueItemId,
 				providerJobId,
 				cacheKey,
 				metadata);
+	}
+
+	@Transactional
+	public Optional<GeneratedAssetEntity> touchAsset(String assetId) {
+		return generatedAssetRepository.findById(assetId)
+				.map(entity -> generatedAssetRepository.save(touch(entity)));
 	}
 
 	@Transactional(readOnly = true)
@@ -125,6 +132,7 @@ public class GeneratedAssetService {
 					"再利用対象の generated asset が見つかりません。",
 					Map.of("assetId", source.getId()));
 		}
+		touchAsset(source.getId());
 		Map<String, Object> mergedMetadata = new LinkedHashMap<>(source.getMetadata());
 		if (metadataOverrides != null) {
 			mergedMetadata.putAll(metadataOverrides);
@@ -133,6 +141,7 @@ public class GeneratedAssetService {
 				nextId(),
 				source.getAssetType(),
 				assetPath,
+				resolveByteSize(assetPath, source.getByteSize()),
 				source.getContentHash(),
 				source.getProviderFingerprint(),
 				queueItemId,
@@ -189,7 +198,7 @@ public class GeneratedAssetService {
 			String assetId,
 			GeneratedAssetType assetType,
 			Path assetPath,
-			byte[] bytes,
+			long byteSize,
 			String providerFingerprint,
 			String queueItemId,
 			String providerJobId,
@@ -199,7 +208,8 @@ public class GeneratedAssetService {
 				assetId,
 				assetType,
 				assetPath,
-				sha256(bytes),
+				byteSize,
+				sha256(read(assetPath)),
 				providerFingerprint,
 				queueItemId,
 				providerJobId,
@@ -211,12 +221,14 @@ public class GeneratedAssetService {
 			String assetId,
 			GeneratedAssetType assetType,
 			Path assetPath,
+			long byteSize,
 			String contentHash,
 			String providerFingerprint,
 			String queueItemId,
 			String providerJobId,
 			String cacheKey,
 			Map<String, Object> metadata) {
+		LifecycleDefaults lifecycleDefaults = resolveLifecycleDefaults(assetType);
 		GeneratedAssetEntity entity = new GeneratedAssetEntity();
 		entity.setId(assetId);
 		entity.setAssetType(assetType);
@@ -224,11 +236,69 @@ public class GeneratedAssetService {
 		entity.setContentHash(contentHash);
 		entity.setProviderFingerprint(providerFingerprint == null || providerFingerprint.isBlank() ? "server:placeholder" : providerFingerprint);
 		entity.setCacheKey(cacheKey == null || cacheKey.isBlank() ? null : cacheKey);
+		entity.setByteSize(Math.max(0L, byteSize));
+		entity.setReuseScope(lifecycleDefaults.reuseScope());
+		entity.setReuseCount(0);
+		entity.setLastAccessedAt(Instant.now());
+		entity.setExpiresAt(resolveExpiresAt(lifecycleDefaults));
+		entity.setArchiveEligible(resolveArchiveEligible(metadata));
 		entity.setQueueItemId(queueItemId);
 		entity.setProviderJobId(providerJobId);
 		entity.setMetadata(metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata));
 		entity.setUpdatedAt(Instant.now());
 		return generatedAssetRepository.save(entity);
+	}
+
+	private GeneratedAssetEntity touch(GeneratedAssetEntity entity) {
+		entity.setReuseCount(normalizeReuseCount(entity.getReuseCount()) + 1);
+		entity.setLastAccessedAt(Instant.now());
+		return entity;
+	}
+
+	private long resolveByteSize(Path assetPath, Long fallback) {
+		if (fallback != null && fallback >= 0) {
+			return fallback;
+		}
+		try {
+			return Files.size(assetPath);
+		} catch (IOException exception) {
+			throw new ApiException(
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"INTERNAL_ERROR",
+					"generated asset のサイズ取得に失敗しました。",
+					Map.of("assetPath", assetPath.toString()));
+		}
+	}
+
+	private LifecycleDefaults resolveLifecycleDefaults(GeneratedAssetType assetType) {
+		SettingsDocument.CacheSettings cache = settingsStore.load().cache();
+		return switch (assetType) {
+			case SCRIPT -> new LifecycleDefaults(cache.scriptReuseScope(), cache.scriptRetentionDays());
+			case AUDIO -> new LifecycleDefaults(cache.ttsReuseScope(), cache.ttsRetentionDays());
+			case MUSIC -> new LifecycleDefaults(cache.musicReuseScope(), cache.musicRetentionDays());
+		};
+	}
+
+	private Instant resolveExpiresAt(LifecycleDefaults defaults) {
+		return Instant.now().plus(Duration.ofDays(defaults.retentionDays()));
+	}
+
+	private boolean resolveArchiveEligible(Map<String, Object> metadata) {
+		if (metadata == null || metadata.isEmpty()) {
+			return false;
+		}
+		Object value = metadata.get("archiveEligible");
+		if (value instanceof Boolean booleanValue) {
+			return booleanValue;
+		}
+		if (value instanceof String stringValue) {
+			return Boolean.parseBoolean(stringValue);
+		}
+		return false;
+	}
+
+	private int normalizeReuseCount(Integer reuseCount) {
+		return reuseCount == null || reuseCount < 0 ? 0 : reuseCount;
 	}
 
 	private String sha256(byte[] bytes) {
@@ -247,5 +317,8 @@ public class GeneratedAssetService {
 
 	private String nextId() {
 		return "asset-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+	}
+
+	private record LifecycleDefaults(String reuseScope, int retentionDays) {
 	}
 }

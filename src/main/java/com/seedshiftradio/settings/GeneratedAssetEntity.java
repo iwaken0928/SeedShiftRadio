@@ -48,6 +48,24 @@ public class GeneratedAssetEntity {
 	@Column(name = "cache_key")
 	private String cacheKey;
 
+	@Column(name = "byte_size", nullable = false)
+	private Long byteSize;
+
+	@Column(name = "reuse_scope", nullable = false)
+	private String reuseScope;
+
+	@Column(name = "reuse_count", nullable = false)
+	private Integer reuseCount;
+
+	@Column(name = "last_accessed_at", nullable = false)
+	private Instant lastAccessedAt;
+
+	@Column(name = "expires_at")
+	private Instant expiresAt;
+
+	@Column(name = "archive_eligible", nullable = false)
+	private boolean archiveEligible;
+
 	@JdbcTypeCode(SqlTypes.JSON)
 	@Column(nullable = false, columnDefinition = "jsonb")
 	private Map<String, Object> metadata = new LinkedHashMap<>();
@@ -69,6 +87,18 @@ public class GeneratedAssetEntity {
 		Instant now = Instant.now();
 		createdAt = now;
 		updatedAt = now;
+		if (byteSize == null) {
+			byteSize = 0L;
+		}
+		if (reuseScope == null || reuseScope.isBlank()) {
+			reuseScope = "STATION";
+		}
+		if (reuseCount == null) {
+			reuseCount = 0;
+		}
+		if (lastAccessedAt == null) {
+			lastAccessedAt = now;
+		}
 		if (metadata == null) {
 			metadata = new LinkedHashMap<>();
 		}
@@ -77,6 +107,18 @@ public class GeneratedAssetEntity {
 	@PreUpdate
 	void onUpdate() {
 		updatedAt = Instant.now();
+		if (byteSize == null) {
+			byteSize = 0L;
+		}
+		if (reuseScope == null || reuseScope.isBlank()) {
+			reuseScope = "STATION";
+		}
+		if (reuseCount == null) {
+			reuseCount = 0;
+		}
+		if (lastAccessedAt == null) {
+			lastAccessedAt = updatedAt;
+		}
 		if (metadata == null) {
 			metadata = new LinkedHashMap<>();
 		}

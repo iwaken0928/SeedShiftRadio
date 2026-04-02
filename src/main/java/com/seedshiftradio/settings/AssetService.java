@@ -74,7 +74,9 @@ public class AssetService {
 		}
 		Path assetPath = generatedAssetService.resolveAudioAssetPath(assetId).orElse(legacyAssetPath);
 		if (Files.exists(assetPath)) {
-			return readBytes(assetPath);
+			byte[] bytes = readBytes(assetPath);
+			generatedAssetService.touchAsset(assetId);
+			return bytes;
 		}
 		if (Boolean.TRUE.equals(settings.features().streaming().placeholderEnabled())) {
 			return placeholderAudioFactory.createSilentWav(1_000);

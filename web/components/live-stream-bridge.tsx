@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { openSeedShiftStream, type StreamStatus } from "@/lib/sse";
 import { useUiStore } from "@/stores/ui-store";
@@ -12,15 +12,21 @@ export function LiveStreamBridge() {
   const setConnectionStatus = useUiStore((state) => state.setConnectionStatus);
   const setLastEventId = useUiStore((state) => state.setLastEventId);
   const lastEventId = useUiStore((state) => state.lastEventId);
+  const lastEventIdRef = useRef<string | null>(lastEventId);
+
+  useEffect(() => {
+    lastEventIdRef.current = lastEventId;
+  }, [lastEventId]);
 
   useEffect(() => {
     const controller = new AbortController();
     const stop = openSeedShiftStream({
       signal: controller.signal,
-      initialLastEventId: lastEventId,
+      initialLastEventId: lastEventIdRef.current,
       onStatus: (status: StreamStatus) => setConnectionStatus(status),
       onEvent: (event: EventMessage) => {
         if (event.id) {
+          lastEventIdRef.current = event.id;
           setLastEventId(event.id);
         }
         pushEvent({
@@ -37,7 +43,7 @@ export function LiveStreamBridge() {
       stop();
       controller.abort();
     };
-  }, [lastEventId, pushEvent, queryClient, setConnectionStatus, setLastEventId]);
+  }, [pushEvent, queryClient, setConnectionStatus, setLastEventId]);
 
   return null;
 }

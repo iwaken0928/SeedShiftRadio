@@ -6,8 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -111,6 +115,23 @@ class RadioServiceStateMachineTests {
 				letterSegmentBinder,
 				eventPublisher);
 		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 2, true)));
+		when(speechDirectiveAssembler.assemble(any(PlayoutSessionEntity.class), any(QueueItemEntity.class), nullable(String.class))).thenAnswer(invocation -> {
+			PlayoutSessionEntity session = invocation.getArgument(0);
+			QueueItemEntity item = invocation.getArgument(1);
+			String speechDirectiveId = item.getSpeechDirectiveId() == null ? "sd-" + item.getId() : item.getSpeechDirectiveId();
+			String text = item.getTitle() == null ? "字幕" : item.getTitle();
+			return new SpeechDirectiveResponse(
+					speechDirectiveId,
+					text,
+					text,
+					List.of(),
+					"calm",
+					"medium",
+					List.of(),
+					"persona-night-main",
+					"voice-night-main",
+					session.getCorrelationId());
+		});
 		doAnswer(invocation -> {
 			Object event = invocation.getArgument(0);
 			if (event instanceof QueueWarmupRequested warmupRequested) {
@@ -176,6 +197,42 @@ class RadioServiceStateMachineTests {
 		assertEquals(QueueItemStatus.READY, item.getStatus());
 		assertNull(session.getCurrentQueueItemId());
 		assertEquals(PlayoutState.STOPPED, response.state());
+		verify(streamEventService).publish(
+				eq("subtitle.updated"),
+				argThat(payload -> payload instanceof SubtitlePayload subtitle
+						&& "playout-001".equals(subtitle.sessionId())
+						&& subtitle.itemId() == null
+						&& subtitle.text().isEmpty()));
+	}
+
+	@Test
+	void playPublishesSubtitleForCurrentItem() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		QueueItemEntity item = queueItem("queue-001", "playout-001", QueueItemStatus.READY);
+		wireRepositoryState(session, List.of(), Map.of(), new ArrayList<>(List.of(item)));
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(speechDirectiveAssembler.assemble(session, item, null)).thenReturn(new SpeechDirectiveResponse(
+				"sd-queue-001",
+				"字幕テキストです。",
+				"字幕テキストです。",
+				List.of(),
+				"calm",
+				"medium",
+				List.of(),
+				"persona-night-main",
+				"voice-night-main",
+				session.getCorrelationId()));
+		doAnswer(invocation -> null).when(eventPublisher).publishEvent(any(Object.class));
+
+		radioService.play();
+
+		verify(streamEventService).publish(
+				eq("subtitle.updated"),
+				argThat(payload -> payload instanceof SubtitlePayload subtitle
+						&& "playout-001".equals(subtitle.sessionId())
+						&& "queue-001".equals(subtitle.itemId())
+						&& "sd-queue-001".equals(subtitle.speechDirectiveId())
+						&& "字幕テキストです。".equals(subtitle.text())));
 	}
 
 	@Test

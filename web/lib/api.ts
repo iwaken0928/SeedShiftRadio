@@ -150,16 +150,23 @@ export function getLetter(letterId: string) {
   });
 }
 
-export function createLetter(body: {
-  stationId: string | null;
-  radioName: string;
-  subject: string;
-  body: string;
-}) {
+export function createLetter(
+  body: {
+    stationId: string | null;
+    radioName: string;
+    subject: string;
+    body: string;
+  },
+  options?: { idempotencyKey?: string },
+) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (options?.idempotencyKey) {
+    headers["Idempotency-Key"] = options.idempotencyKey;
+  }
   return requestJson<{ id: string; status: string; createdAt: string }>("/api/letters", {
     method: "POST",
     body: JSON.stringify(body),
-    headers: { "Content-Type": "application/json" },
+    headers,
   });
 }
 

@@ -5,11 +5,15 @@ import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import type { PropsWithChildren } from "react";
 import { Badge } from "@/components/ui";
+import { getAdminToken } from "@/lib/env";
 import { useUiStore } from "@/stores/ui-store";
 
-const navItems = [
+const publicNavItems = [
   { href: "/", label: "Radio" },
   { href: "/letters", label: "Letters" },
+];
+
+const adminNavItems = [
   { href: "/settings", label: "Settings" },
   { href: "/monitor", label: "Monitor" },
 ];
@@ -20,6 +24,8 @@ export function AppFrame({ children }: PropsWithChildren) {
   const liveSubtitle = useUiStore((state) => state.liveSubtitle);
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const radioName = useUiStore((state) => state.radioName);
+  const hasAdminToken = Boolean(getAdminToken());
+  const navItems = hasAdminToken ? [...publicNavItems, ...adminNavItems] : publicNavItems;
 
   return (
     <div className="relative min-h-screen text-slate-900">
@@ -63,7 +69,11 @@ export function AppFrame({ children }: PropsWithChildren) {
               <Badge tone="default">{radioName}</Badge>
             </div>
           </div>
-          {liveSubtitle ? <p className="mt-3 rounded-2xl bg-slate-950/5 px-4 py-2 text-sm text-slate-700">{liveSubtitle}</p> : null}
+          {liveSubtitle ? (
+            <p className="mt-3 rounded-2xl bg-slate-950/5 px-4 py-2 text-sm text-slate-700" aria-live="polite" aria-atomic="true" role="status">
+              {liveSubtitle}
+            </p>
+          ) : null}
         </header>
 
         <main className="relative flex-1">{children}</main>

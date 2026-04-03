@@ -7,13 +7,14 @@ import type { PlaybackEventRequest } from "@/lib/types";
 type Props = {
   sourceUrl: string | null;
   label: string;
+  clientId: string;
   itemId: string | null;
   sessionId: string | null;
   volume: number;
   onPlaybackEvent: (request: PlaybackEventRequest) => Promise<void> | void;
 };
 
-export function AudioConsole({ sourceUrl, label, itemId, sessionId, volume, onPlaybackEvent }: Props) {
+export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, volume, onPlaybackEvent }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const sentStartRef = useRef<string | null>(null);
@@ -27,8 +28,29 @@ export function AudioConsole({ sourceUrl, label, itemId, sessionId, volume, onPl
   }, [volume]);
 
   useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.removeAttribute("src");
+      audio.load();
+    }
     sentStartRef.current = null;
+    setPlaying(false);
   }, [sourceUrl, itemId]);
+
+  const emitPlaybackEvent = async (eventType: PlaybackEventRequest["eventType"]) => {
+    if (!sessionId || !itemId) {
+      return;
+    }
+    await onPlaybackEvent({
+      clientId,
+      sessionId,
+      itemId,
+      eventType,
+      occurredAt: new Date().toISOString(),
+    });
+  };
 
   const play = async () => {
     const audio = audioRef.current;
@@ -43,20 +65,10 @@ export function AudioConsole({ sourceUrl, label, itemId, sessionId, volume, onPl
       setPlaying(true);
       if (itemId && sentStartRef.current !== itemId) {
         sentStartRef.current = itemId;
-        await onPlaybackEvent({
-          sessionId: sessionId ?? "",
-          itemId,
-          eventType: "SEGMENT_STARTED",
-        });
+        await emitPlaybackEvent("SEGMENT_STARTED");
       }
     } catch {
-      if (itemId) {
-        await onPlaybackEvent({
-          sessionId: sessionId ?? "",
-          itemId,
-          eventType: "SEGMENT_ERROR",
-        });
-      }
+      await emitPlaybackEvent("SEGMENT_ERROR");
     }
   };
 
@@ -77,13 +89,7 @@ export function AudioConsole({ sourceUrl, label, itemId, sessionId, volume, onPl
     audio.pause();
     audio.currentTime = 0;
     setPlaying(false);
-    if (itemId) {
-      await onPlaybackEvent({
-        sessionId: sessionId ?? "",
-        itemId,
-        eventType: "PLAYBACK_STOPPED",
-      });
-    }
+    await emitPlaybackEvent("PLAYBACK_STOPPED");
   };
 
   return (
@@ -116,23 +122,11 @@ export function AudioConsole({ sourceUrl, label, itemId, sessionId, volume, onPl
           preload="auto"
           onEnded={() => {
             setPlaying(false);
-            if (itemId) {
-              void onPlaybackEvent({
-                sessionId: sessionId ?? "",
-                itemId,
-                eventType: "SEGMENT_ENDED",
-              });
-            }
+            void emitPlaybackEvent("SEGMENT_ENDED");
           }}
           onError={() => {
             setPlaying(false);
-            if (itemId) {
-              void onPlaybackEvent({
-                sessionId: sessionId ?? "",
-                itemId,
-                eventType: "SEGMENT_ERROR",
-              });
-            }
+            void emitPlaybackEvent("SEGMENT_ERROR");
           }}
         />
 

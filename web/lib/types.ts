@@ -347,9 +347,11 @@ export interface TuneResponse {
 }
 
 export interface PlaybackEventRequest {
+  clientId: string;
   sessionId: string;
   itemId: string;
   eventType: "SEGMENT_STARTED" | "SEGMENT_ENDED" | "SEGMENT_ERROR" | "PLAYBACK_STOPPED";
+  occurredAt: string;
 }
 
 export interface PlaybackEventResponse {

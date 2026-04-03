@@ -219,7 +219,22 @@
 }
 ```
 
-### 4.9 ErrorResponse
+### 4.9 SubtitlePayload
+
+```json
+{
+  "sessionId": "playout-20260320-01",
+  "itemId": "queue-0012",
+  "speechDirectiveId": "sd-0012",
+  "text": "こんばんは、ミッドナイト・エコーです。",
+  "updatedAt": "2026-03-20T09:00:05Z"
+}
+```
+
+- `itemId`, `speechDirectiveId` は再生中 item がない時は `null`
+- 再生停止や current item 消失時は `text` を空文字で送って字幕をクリアする
+
+### 4.10 ErrorResponse
 
 ```json
 {

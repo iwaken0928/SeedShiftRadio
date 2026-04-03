@@ -851,6 +851,27 @@ public class RadioService {
 		if (session.getCurrentProgramBlockId() != null) {
 			streamEventService.publish("program.changed", getProgram());
 		}
+		emitSubtitleEvent(session);
+	}
+
+	private void emitSubtitleEvent(PlayoutSessionEntity session) {
+		QueueItemEntity currentItem = getCurrentQueueItem(session);
+		if (currentItem == null) {
+			streamEventService.publish("subtitle.updated", new SubtitlePayload(session.getId(), null, null, "", Instant.now()));
+			return;
+		}
+		SpeechDirectiveResponse directive = speechDirectiveAssembler.assemble(session, currentItem, null);
+		String text = directive.normalizedText() != null && !directive.normalizedText().isBlank()
+				? directive.normalizedText()
+				: directive.text();
+		streamEventService.publish(
+				"subtitle.updated",
+				new SubtitlePayload(
+						session.getId(),
+						currentItem.getId(),
+						directive.id(),
+						text == null ? "" : text,
+						Instant.now()));
 	}
 
 	private QueueSnapshotResponse toQueueSnapshot(String sessionId) {

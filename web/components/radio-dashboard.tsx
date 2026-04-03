@@ -15,6 +15,7 @@ import {
   stopPlayback,
   tuneRadio,
 } from "@/lib/api";
+import { AudioConsole } from "@/components/audio-console";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Button, Card, EmptyState, Metric, SectionHeader } from "@/components/ui";
 import { useUiStore } from "@/stores/ui-store";
@@ -172,16 +173,18 @@ export function RadioDashboard() {
                     {currentOrNextItem ? <Badge tone="default">{currentOrNextItem.status}</Badge> : null}
                     {status?.programTitle ? <Badge tone="default">{status.programTitle}</Badge> : null}
                   </div>
-                  {currentOrNextItem?.assetUrl ? (
-                    <audio
-                      className="mt-4 w-full"
-                      controls
-                      preload="metadata"
-                      src={`${getApiBase()}${currentOrNextItem.assetUrl}`}
-                      onPlay={() => void emitPlaybackEvent(status, currentOrNextItem, "SEGMENT_STARTED")}
-                      onEnded={() => void emitPlaybackEvent(status, currentOrNextItem, "SEGMENT_ENDED")}
-                      onError={() => void emitPlaybackEvent(status, currentOrNextItem, "SEGMENT_ERROR")}
-                    />
+                  {currentOrNextItem?.assetUrl && status?.sessionId ? (
+                    <div className="mt-4">
+                      <AudioConsole
+                        sourceUrl={getAssetUrl(currentOrNextItem.assetUrl)}
+                        label={currentOrNextItem.title}
+                        clientId={ensureClientId()}
+                        itemId={currentOrNextItem.id}
+                        sessionId={status.sessionId}
+                        volume={volume}
+                        onPlaybackEvent={(request) => void emitPlaybackEvent(request)}
+                      />
+                    </div>
                   ) : (
                     <p className="mt-4 text-sm text-slate-600">assetUrl がまだないため、再生コントロールは待機中です。</p>
                   )}
@@ -301,19 +304,15 @@ function resolveCurrentOrNextItem(status: RadioStatus | undefined, items: QueueI
   return items.find((item) => item.id === status.currentItemId) ?? items.find((item) => item.status === "READY") ?? null;
 }
 
-async function emitPlaybackEvent(
-  status: RadioStatus | undefined,
-  item: QueueItem | null,
-  eventType: PlaybackEventRequest["eventType"],
-) {
-  if (!status?.sessionId || !item) {
+function getAssetUrl(assetUrl: string) {
+  return `${getApiBase()}${assetUrl}`;
+}
+
+async function emitPlaybackEvent(request: PlaybackEventRequest) {
+  if (!request.clientId || !request.sessionId || !request.itemId || !request.occurredAt) {
     return;
   }
-  await sendPlaybackEvent({
-    sessionId: status.sessionId,
-    itemId: item.id,
-    eventType,
-  });
+  await sendPlaybackEvent(request);
 }
 
 function SpeechDirectivePanel({ directive }: { directive: SpeechDirective }) {

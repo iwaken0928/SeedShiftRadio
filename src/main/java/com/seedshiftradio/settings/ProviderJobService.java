@@ -1,6 +1,8 @@
 package com.seedshiftradio.settings;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -9,14 +11,17 @@ import org.springframework.transaction.annotation.Transactional;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.stream.StreamEventService;
 
 @Service
 public class ProviderJobService {
 
 	private final ProviderJobRepository providerJobRepository;
+	private final StreamEventService streamEventService;
 
-	public ProviderJobService(ProviderJobRepository providerJobRepository) {
+	public ProviderJobService(ProviderJobRepository providerJobRepository, StreamEventService streamEventService) {
 		this.providerJobRepository = providerJobRepository;
+		this.streamEventService = streamEventService;
 	}
 
 	@Transactional
@@ -34,7 +39,9 @@ public class ProviderJobService {
 		entity.setQueueItemId(queueItemId);
 		entity.setStatus(ProviderJobStatus.QUEUED);
 		entity.setCorrelationId(correlationId);
-		return providerJobRepository.save(entity);
+		ProviderJobEntity saved = providerJobRepository.save(entity);
+		publishAuditEvent("provider.job.queued", saved);
+		return saved;
 	}
 
 	@Transactional
@@ -51,7 +58,9 @@ public class ProviderJobService {
 		}
 		entity.setExternalRef(externalRef);
 		entity.setStartedAt(Instant.now());
-		return providerJobRepository.save(entity);
+		ProviderJobEntity saved = providerJobRepository.save(entity);
+		publishAuditEvent("provider.job.running", saved);
+		return saved;
 	}
 
 	@Transactional
@@ -60,7 +69,9 @@ public class ProviderJobService {
 		entity.setStatus(ProviderJobStatus.SUCCEEDED);
 		entity.setEndedAt(Instant.now());
 		entity.setErrorCode(null);
-		return providerJobRepository.save(entity);
+		ProviderJobEntity saved = providerJobRepository.save(entity);
+		publishAuditEvent("provider.job.succeeded", saved);
+		return saved;
 	}
 
 	@Transactional
@@ -69,7 +80,29 @@ public class ProviderJobService {
 		entity.setStatus(ProviderJobStatus.FAILED);
 		entity.setEndedAt(Instant.now());
 		entity.setErrorCode(errorCode);
-		return providerJobRepository.save(entity);
+		ProviderJobEntity saved = providerJobRepository.save(entity);
+		publishAuditEvent("provider.job.failed", saved);
+		return saved;
+	}
+
+	private void publishAuditEvent(String eventName, ProviderJobEntity entity) {
+		Map<String, Object> payload = new LinkedHashMap<>();
+		payload.put("providerJobId", entity.getId());
+		payload.put("jobType", entity.getJobType().name());
+		payload.put("providerType", entity.getProviderType().name());
+		putIfPresent(payload, "providerKey", entity.getProviderKey());
+		putIfPresent(payload, "queueItemId", entity.getQueueItemId());
+		payload.put("status", entity.getStatus().name());
+		putIfPresent(payload, "externalRef", entity.getExternalRef());
+		putIfPresent(payload, "errorCode", entity.getErrorCode());
+		payload.put("correlationId", entity.getCorrelationId());
+		streamEventService.publish(eventName, payload);
+	}
+
+	private static void putIfPresent(Map<String, Object> payload, String key, String value) {
+		if (value != null && !value.isBlank()) {
+			payload.put(key, value);
+		}
 	}
 
 	private String nextId() {

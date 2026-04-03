@@ -7,20 +7,25 @@ import { getAdminToken } from "@/lib/env";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Button, Card, EmptyState, Input, SectionHeader, Textarea } from "@/components/ui";
 import { useUiStore } from "@/stores/ui-store";
-import type { LetterStatus } from "@/lib/types";
+import type { LetterStatus, LetterSubmissionRecord } from "@/lib/types";
 
 const letterStatuses: LetterStatus[] = ["UNREAD", "PENDING", "ADOPTED", "REPLIED"];
+const MAX_SUBJECT_LENGTH = 255;
+const MAX_BODY_LENGTH = 1000;
 
 export function LettersDashboard() {
   const queryClient = useQueryClient();
   const hasAdminToken = Boolean(getAdminToken());
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const radioName = useUiStore((state) => state.radioName);
+  const localLetterSubmissions = useUiStore((state) => state.localLetterSubmissions);
+  const addLocalLetterSubmission = useUiStore((state) => state.addLocalLetterSubmission);
   const [selectedStatus, setSelectedStatus] = useState<LetterStatus | undefined>(undefined);
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [replyText, setReplyText] = useState("");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const radioStatusQuery = useQuery({
     queryKey: ["radio", "status"],
@@ -69,14 +74,36 @@ export function LettersDashboard() {
           idempotencyKey: createIdempotencyKey(),
         },
       ),
-    onSuccess: async () => {
+    onSuccess: async (response) => {
+      const submission: LetterSubmissionRecord = {
+        id: response.id,
+        stationId: selectedStationId,
+        radioName,
+        subject,
+        status: response.status,
+        createdAt: response.createdAt,
+      };
+      addLocalLetterSubmission(submission);
       setSubject("");
       setBody("");
+      setToastMessage("レターを送信しました");
       if (hasAdminToken) {
         await queryClient.invalidateQueries({ queryKey: ["letters"] });
       }
     },
   });
+
+  useEffect(() => {
+    if (!toastMessage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setToastMessage(null), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [toastMessage]);
+
+  const bodyLength = body.length;
+  const bodyRemaining = MAX_BODY_LENGTH - bodyLength;
+  const canSubmit = Boolean(subject.trim()) && Boolean(body.trim()) && bodyLength <= MAX_BODY_LENGTH && !createMutation.isPending;
 
   const statusMutation = useMutation({
     mutationFn: async (status: LetterStatus) =>
@@ -112,6 +139,11 @@ export function LettersDashboard() {
             title="Submit a letter"
             description="公開投稿はここだけで完結します。管理 inbox は別カードに分離し、管理トークンがない場合は表示しません。"
           />
+          {toastMessage ? (
+            <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status" aria-live="polite">
+              {toastMessage}
+            </div>
+          ) : null}
           <div className="space-y-3">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
               現在の宛先: <span className="font-semibold text-slate-950">{selectedStationId ?? "共通宛"}</span>
@@ -122,20 +154,29 @@ export function LettersDashboard() {
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Subject</label>
-              <Input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="最近の作業BGM" />
+              <Input value={subject} maxLength={MAX_SUBJECT_LENGTH} onChange={(event) => setSubject(event.target.value)} placeholder="最近の作業BGM" />
             </div>
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Body</label>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Body</label>
+                <span className={`text-xs font-semibold ${bodyRemaining < 0 ? "text-rose-700" : bodyRemaining < 100 ? "text-amber-700" : "text-slate-500"}`}>
+                  {bodyLength}/{MAX_BODY_LENGTH}
+                </span>
+              </div>
               <Textarea
                 rows={6}
+                maxLength={MAX_BODY_LENGTH}
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 placeholder="深夜作業でおすすめの音を教えてください。"
               />
+              <p className={`mt-2 text-xs ${bodyRemaining < 0 ? "text-rose-700" : "text-slate-500"}`}>
+                {bodyRemaining < 0 ? "本文は 1000 文字以内にしてください。" : `残り ${bodyRemaining} 文字`}
+              </p>
             </div>
             <Button
               tone="secondary"
-              disabled={!subject.trim() || !body.trim() || createMutation.isPending}
+              disabled={!canSubmit}
               onClick={() => createMutation.mutate()}
             >
               {createMutation.isPending ? "Submitting..." : "Submit Letter"}
@@ -144,6 +185,31 @@ export function LettersDashboard() {
               投稿時は `Idempotency-Key` を付与して二重送信を抑止します。公開投稿は管理トークンなしでも利用できます。
             </p>
           </div>
+        </Card>
+
+        <Card className="mt-4">
+          <SectionHeader eyebrow="Local" title="Sent from this device" description="この端末で送ったレターをローカルに保存して見返せるようにします。" />
+          {localLetterSubmissions.length ? (
+            <div className="space-y-3">
+              {localLetterSubmissions.map((submission) => (
+                <div key={submission.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-semibold text-slate-950">{submission.subject}</div>
+                    <Badge tone={submission.status === "ADOPTED" ? "accent" : submission.status === "REPLIED" ? "success" : "default"}>
+                      {submission.status}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    {submission.radioName}
+                    {submission.stationId ? ` / ${submission.stationId}` : " / 共通宛"}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">{new Date(submission.createdAt).toLocaleString("ja-JP")}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="まだ送信履歴はありません" description="最初のレターを送ると、ここにこの端末の履歴が残ります。" />
+          )}
         </Card>
 
         {!hasAdminToken ? (

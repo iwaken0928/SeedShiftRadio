@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { StreamStatus } from "@/lib/sse";
+import type { LetterSubmissionRecord } from "@/lib/types";
 
 type RouteKey = "radio" | "letters" | "settings" | "monitor";
 
@@ -23,6 +24,7 @@ type UiStore = {
   liveSubtitle: string;
   lastEventId: string | null;
   recentEvents: EventEntry[];
+  localLetterSubmissions: LetterSubmissionRecord[];
   ensureClientId: () => string;
   setSelectedStationId: (stationId: string | null) => void;
   setRadioName: (radioName: string) => void;
@@ -31,6 +33,7 @@ type UiStore = {
   setConnectionStatus: (status: StreamStatus) => void;
   setLiveSubtitle: (subtitle: string) => void;
   pushEvent: (entry: EventEntry) => void;
+  addLocalLetterSubmission: (entry: LetterSubmissionRecord) => void;
   setLastEventId: (eventId: string | null) => void;
   resetLiveState: () => void;
 };
@@ -54,6 +57,7 @@ export const useUiStore = create<UiStore>()(
       liveSubtitle: "",
       lastEventId: null,
       recentEvents: [],
+      localLetterSubmissions: [],
       ensureClientId: () => {
         const current = get().clientId;
         if (current) {
@@ -73,6 +77,13 @@ export const useUiStore = create<UiStore>()(
         set((state) => ({
           recentEvents: [entry, ...state.recentEvents].slice(0, 30),
         })),
+      addLocalLetterSubmission: (entry) =>
+        set((state) => {
+          const next = [entry, ...state.localLetterSubmissions.filter((existing) => existing.id !== entry.id)];
+          return {
+            localLetterSubmissions: next.slice(0, 20),
+          };
+        }),
       setLastEventId: (lastEventId) => set({ lastEventId }),
       resetLiveState: () =>
         set({
@@ -88,6 +99,7 @@ export const useUiStore = create<UiStore>()(
         radioName: state.radioName,
         volume: state.volume,
         activeRoute: state.activeRoute,
+        localLetterSubmissions: state.localLetterSubmissions,
       }),
     },
   ),

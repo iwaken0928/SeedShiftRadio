@@ -741,10 +741,48 @@ Response:
     "musicReuseScope": "GLOBAL",
     "cleanupBatchSize": 200
   },
+  "programming": {
+    "defaultPlanningHorizonMinutes": 20,
+    "legacyRatioFallback": true,
+    "seedImportRef": "file:./data/config/programming-seed.json"
+  },
   "providers": {
-    "llm": { "defaultProvider": "ollama" },
-    "tts": { "defaultProvider": "voicevox" },
-    "musicGen": { "defaultProvider": "ace-step" }
+    "llm": {
+      "defaultProvider": "ollama",
+      "fallbackProviders": [],
+      "providers": {
+        "ollama": {
+          "baseUrl": "http://127.0.0.1:11434",
+          "healthPath": "/api/tags",
+          "timeoutMs": 5000,
+          "capabilities": ["SCRIPT_GEN"]
+        }
+      }
+    },
+    "tts": {
+      "defaultProvider": "voicevox",
+      "fallbackProviders": [],
+      "providers": {
+        "voicevox": {
+          "baseUrl": "http://127.0.0.1:50021",
+          "healthPath": "/version",
+          "timeoutMs": 5000,
+          "capabilities": ["TTS_GEN"]
+        }
+      }
+    },
+    "musicGen": {
+      "defaultProvider": "ace-step",
+      "fallbackProviders": [],
+      "providers": {
+        "ace-step": {
+          "baseUrl": "http://127.0.0.1:8000",
+          "healthPath": "/health",
+          "timeoutMs": 5000,
+          "capabilities": ["MUSIC_GEN"]
+        }
+      }
+    }
   },
   "features": {
     "streaming": {
@@ -759,16 +797,20 @@ Response:
 
 ### 6.9 `PUT /api/settings`
 
-クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`paths`, `playout`, `cache`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使いますが、現時点では retention/eviction の定期実行は未実装です。
+クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`programming` は planning の既定値と legacy fallback の土台設定を保持し、`providers` は種別ごとの `defaultProvider`, `fallbackProviders`, endpoint map を一括更新します。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使いますが、現時点では retention/eviction の定期実行は未実装です。
 
 ```json
 {
   "version": 4,
   "schemaVersion": "2026-04",
+  "server": { ... },
   "paths": { ... },
   "playout": { ... },
   "cache": { ... },
-  "providers": { ... }
+  "programming": { ... },
+  "providers": { ... },
+  "security": { ... },
+  "features": { ... }
 }
 ```
 
@@ -776,9 +818,11 @@ Response:
 
 `playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は待機時 prefetch を許可するフラグです。
 
+`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+
 ### 6.10 `POST /api/settings/test-connections`
 
-Provider に対する接続テストを一括実行し、種別ごとの `status` を返します。レスポンスは `checkedAt` と `providers` map を持ち、各 payload は `/api/monitor/summary`, `/api/health`, SSE `provider.health.changed` と同一形式です。
+Provider に対する接続テストを一括実行し、種別ごとの `status` を返します。レスポンスは `checkedAt` と `providers` map を持ち、各 payload は `/api/monitor/summary`, `/api/health`, SSE `provider.health.changed` と同一形式です。Web の `/settings` では未保存 draft ではなく、直前に保存された `config.json` を対象にテストします。
 
 ```json
 {
@@ -813,6 +857,59 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
   "capabilities": ["ace-step:fast"]
 }
 ```
+
+### 6.13 MonitorSummary
+
+`GET /api/monitor/summary` は `ProviderHealth` に加えて、`provider_job` から復元した `runningJobs` / `recentErrors` と、SSE 履歴から抽出した `auditEvents` を返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
+
+```json
+{
+  "sessionId": "playout-20260320-01",
+  "stationId": "station-night",
+  "state": "PLAYING",
+  "bufferReadyCount": 2,
+  "pendingLetterCount": 3,
+  "degraded": false,
+  "runningJobs": [
+    {
+      "id": "provider-job-running-001",
+      "jobType": "MUSIC_GEN",
+      "providerType": "MUSIC",
+      "providerKey": "ace-step",
+      "queueItemId": "queue-001",
+      "status": "RUNNING",
+      "externalRef": "worker-job-001",
+      "errorCode": null,
+      "startedAt": "2026-03-20T09:00:00Z",
+      "endedAt": null
+    }
+  ],
+  "recentErrors": [
+    {
+      "id": "provider-job-failed-001",
+      "jobType": "TTS_GEN",
+      "providerType": "TTS",
+      "providerKey": "voicevox",
+      "queueItemId": "queue-002",
+      "status": "FAILED",
+      "externalRef": "worker-job-002",
+      "errorCode": "PROVIDER_TIMEOUT",
+      "startedAt": "2026-03-20T09:10:00Z",
+      "endedAt": "2026-03-20T09:11:00Z"
+    }
+  ],
+  "auditEvents": [
+    {
+      "id": "12",
+      "eventType": "buffer.warning",
+      "occurredAt": "2026-03-20T09:14:00Z",
+      "summary": "session=playout-20260320-01, ready=1"
+    }
+  ]
+}
+```
+
+`auditEvents` は監査用の要約であり、レター本文全文やプロンプト全文は含めません。
 
 ## 7. SSE仕様
 

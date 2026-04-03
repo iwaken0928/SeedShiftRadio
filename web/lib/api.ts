@@ -13,6 +13,7 @@ import {
   type QueueSnapshot,
   type RadioStatus,
   type SettingsResponse,
+  type SettingsUpdateRequest,
   type SpeechDirective,
   type StationDetail,
   type StationSummary,
@@ -163,7 +164,7 @@ export function createLetter(
   if (options?.idempotencyKey) {
     headers["Idempotency-Key"] = options.idempotencyKey;
   }
-  return requestJson<{ id: string; status: string; createdAt: string }>("/api/letters", {
+  return requestJson<{ id: string; status: LetterStatus; createdAt: string }>("/api/letters", {
     method: "POST",
     body: JSON.stringify(body),
     headers,
@@ -199,6 +200,14 @@ export function getHealth() {
 export function getSettings() {
   return requestJson<SettingsResponse>("/api/settings", {
     headers: withAdminHeaders(),
+  });
+}
+
+export function updateSettings(body: SettingsUpdateRequest) {
+  return requestJson<SettingsResponse>("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(body),
+    headers: withAdminHeaders({ "Content-Type": "application/json" }),
   });
 }
 

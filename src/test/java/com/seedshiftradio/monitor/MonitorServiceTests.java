@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.lang.reflect.Constructor;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -13,12 +15,21 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.seedshiftradio.domain.PlayoutState;
+import com.seedshiftradio.domain.ProviderJobStatus;
+import com.seedshiftradio.domain.ProviderJobType;
+import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.letter.LetterService;
+import com.seedshiftradio.monitor.MonitorDtos.AuditEventSummary;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
+import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
+import com.seedshiftradio.radio.RadioEventRecord;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.RadioStatusResponse;
+import com.seedshiftradio.settings.ProviderJobEntity;
+import com.seedshiftradio.settings.ProviderJobRepository;
 import com.seedshiftradio.settings.ProviderHealthService;
 import com.seedshiftradio.settings.SettingsDtos;
+import com.seedshiftradio.stream.StreamEventService;
 
 @ExtendWith(MockitoExtension.class)
 class MonitorServiceTests {
@@ -32,15 +43,21 @@ class MonitorServiceTests {
 	@Mock
 	ProviderHealthService providerHealthService;
 
+	@Mock
+	ProviderJobRepository providerJobRepository;
+
+	@Mock
+	StreamEventService streamEventService;
+
 	MonitorService monitorService;
 
 	@BeforeEach
 	void setUp() {
-		monitorService = new MonitorService(radioService, letterService, providerHealthService);
+		monitorService = new MonitorService(radioService, letterService, providerHealthService, providerJobRepository, streamEventService);
 	}
 
 	@Test
-	void summaryIncludesProviderHealthAndPendingLetters() {
+	void summaryIncludesJobsAndAuditEvents() {
 		RadioStatusResponse status = new RadioStatusResponse(
 				"playout-001",
 				"station-night",
@@ -54,12 +71,23 @@ class MonitorServiceTests {
 				Instant.parse("2026-03-20T09:00:00Z"),
 				"corr-001");
 		Map<String, SettingsDtos.ProviderHealthPayload> providerHealth = Map.of(
-				"llm", new SettingsDtos.ProviderHealthPayload("llm", "ollama", "UP", Instant.parse("2026-03-20T09:00:00Z"), 12L, "接続成功", java.util.List.of("SCRIPT_GEN"), "http://127.0.0.1:11434"),
-				"tts", new SettingsDtos.ProviderHealthPayload("tts", "voicevox", "DOWN", Instant.parse("2026-03-20T09:00:00Z"), 31L, "PROVIDER_UNREACHABLE", java.util.List.of("TTS_GEN"), "http://127.0.0.1:50021"),
-				"musicGen", new SettingsDtos.ProviderHealthPayload("musicGen", "ace-step", "DEGRADED", Instant.parse("2026-03-20T09:00:00Z"), 48L, "HTTP 503", java.util.List.of("MUSIC_GEN"), "http://127.0.0.1:8000"));
+				"llm", new SettingsDtos.ProviderHealthPayload("llm", "ollama", "UP", Instant.parse("2026-03-20T09:00:00Z"), 12L, "接続成功", List.of("SCRIPT_GEN"), "http://127.0.0.1:11434"),
+				"tts", new SettingsDtos.ProviderHealthPayload("tts", "voicevox", "DOWN", Instant.parse("2026-03-20T09:00:00Z"), 31L, "PROVIDER_UNREACHABLE", List.of("TTS_GEN"), "http://127.0.0.1:50021"));
+
 		when(radioService.getStatus()).thenReturn(status);
 		when(letterService.countPendingLetters("station-night")).thenReturn(5L);
 		when(providerHealthService.getLatestOrProbe()).thenReturn(providerHealth);
+		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING)).thenReturn(List.of(job("job-running", ProviderJobStatus.RUNNING, ProviderJobType.MUSIC_GEN)));
+		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.FAILED)).thenReturn(List.of(job("job-failed", ProviderJobStatus.FAILED, ProviderJobType.TTS_GEN)));
+		when(streamEventService.recentEvents(20)).thenReturn(List.of(
+				new RadioEventRecord("12", "provider.job.failed", Instant.parse("2026-03-20T09:15:00Z"), Map.of(
+						"providerJobId", "job-failed",
+						"jobType", "TTS_GEN",
+						"status", "FAILED",
+						"errorCode", "PROVIDER_TIMEOUT")),
+				new RadioEventRecord("11", "buffer.warning", Instant.parse("2026-03-20T09:14:00Z"), Map.of(
+						"sessionId", "playout-001",
+						"readyCount", 1))));
 
 		MonitorSummaryResponse summary = monitorService.summary();
 
@@ -67,5 +95,40 @@ class MonitorServiceTests {
 		assertEquals(5L, summary.pendingLetterCount());
 		assertEquals(status.degraded(), summary.degraded());
 		assertEquals(providerHealth, summary.providerHealth());
+		assertEquals(1, summary.runningJobs().size());
+		assertEquals("job-running", summary.runningJobs().getFirst().id());
+		assertEquals(1, summary.recentErrors().size());
+		assertEquals("job-failed", summary.recentErrors().getFirst().id());
+		assertEquals(2, summary.auditEvents().size());
+		assertEquals("provider.job.failed", summary.auditEvents().getFirst().eventType());
+		assertEquals("buffer.warning", summary.auditEvents().getLast().eventType());
+	}
+
+	private ProviderJobEntity job(String id, ProviderJobStatus status, ProviderJobType jobType) {
+		ProviderJobEntity entity = newProviderJobEntity();
+		entity.setId(id);
+		entity.setStatus(status);
+		entity.setJobType(jobType);
+		entity.setProviderType(ProviderType.MUSIC);
+		entity.setProviderKey("ace-step");
+		entity.setQueueItemId("queue-001");
+		entity.setExternalRef("worker-job-001");
+		entity.setErrorCode(status == ProviderJobStatus.FAILED ? "PROVIDER_TIMEOUT" : null);
+		entity.setCorrelationId("corr-001");
+		entity.setCreatedAt(Instant.parse("2026-03-20T09:00:00Z"));
+		entity.setUpdatedAt(Instant.parse("2026-03-20T09:10:00Z"));
+		entity.setStartedAt(Instant.parse("2026-03-20T09:05:00Z"));
+		entity.setEndedAt(status == ProviderJobStatus.FAILED ? Instant.parse("2026-03-20T09:10:00Z") : null);
+		return entity;
+	}
+
+	private ProviderJobEntity newProviderJobEntity() {
+		try {
+			Constructor<ProviderJobEntity> constructor = ProviderJobEntity.class.getDeclaredConstructor();
+			constructor.setAccessible(true);
+			return constructor.newInstance();
+		} catch (ReflectiveOperationException ex) {
+			throw new IllegalStateException("ProviderJobEntity を生成できません", ex);
+		}
 	}
 }

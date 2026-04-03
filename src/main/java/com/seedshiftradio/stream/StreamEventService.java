@@ -86,6 +86,18 @@ public class StreamEventService {
 		return latest == 0 ? null : Long.toString(latest);
 	}
 
+	public List<RadioEventRecord> recentEvents(int limit) {
+		if (limit <= 0) {
+			return List.of();
+		}
+		synchronized (history) {
+			int start = Math.max(0, history.size() - limit);
+			ArrayList<RadioEventRecord> recent = new ArrayList<>(history.subList(start, history.size()));
+			java.util.Collections.reverse(recent);
+			return List.copyOf(recent);
+		}
+	}
+
 	private void sendReplay(SseEmitter emitter, String lastEventId) {
 		for (RadioEventRecord event : replayAfter(lastEventId)) {
 			try {

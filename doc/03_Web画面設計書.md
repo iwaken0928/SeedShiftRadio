@@ -18,7 +18,7 @@
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
 | `/settings` | 設定画面 | Provider 設定、局管理、番組管理、先行生成・再放送・キャッシュ設定、接続テスト |
-| `/monitor` | 監視画面 | Provider health, buffer, job, recent errors |
+| `/monitor` | 監視画面 | Provider health, buffer, running jobs, recent errors, audit events |
 
 ## 4. レイアウト方針
 
@@ -79,6 +79,7 @@
 - 本文は 1000 文字以内を初期上限とする
 - `radioName` は直前値を LocalStorage に保持する
 - 投稿時は二重送信防止を行う
+- 公開側は投稿完了トーストと、この端末で送ったレターの簡易一覧を表示する
 
 ## 7. 設定画面
 
@@ -108,6 +109,14 @@
 - `Cache` セクションでは script / TTS / music の保持上限サイズ、保存日数、再利用範囲を個別に確認できるようにする
 - 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
 
+### 7.3 初期実装範囲
+
+- 第一段の `/settings` は `server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を 1 画面で一括編集する
+- `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を編集できるようにする
+- `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
+- 管理トークンがない場合は導線を非表示にし、直接開いた時は管理画面であることを案内する
+- `Stations`, `Program Templates`, `Programming Preview`, `Import / Export` は後続フェーズで追加する
+
 ## 8. 監視画面
 
 - Provider 状態
@@ -117,7 +126,7 @@
 - 直近エラー
 - 直近 10 件の監査イベント
 
-監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。
+監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 
 ## 9. 状態管理
 

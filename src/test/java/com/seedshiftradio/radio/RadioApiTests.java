@@ -11,6 +11,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
+import java.lang.reflect.Constructor;
+import java.util.Map;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -29,11 +33,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.domain.PlayHistoryResultStatus;
+import com.seedshiftradio.domain.ProviderJobStatus;
+import com.seedshiftradio.domain.ProviderJobType;
+import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.PlaybackMode;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.letter.LetterEntity;
 import com.seedshiftradio.letter.LetterRepository;
+import com.seedshiftradio.settings.ProviderJobEntity;
+import com.seedshiftradio.settings.ProviderJobRepository;
+import com.seedshiftradio.stream.StreamEventService;
 
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("docker")
@@ -73,6 +83,12 @@ class RadioApiTests {
 
 	@Autowired
 	LetterRepository letterRepository;
+
+	@Autowired
+	ProviderJobRepository providerJobRepository;
+
+	@Autowired
+	StreamEventService streamEventService;
 
 	MockMvc mockMvc;
 
@@ -165,6 +181,59 @@ class RadioApiTests {
 				.andExpect(jsonPath("$.sessionId").exists())
 				.andExpect(jsonPath("$.bufferReadyCount").value(greaterThanOrEqualTo(1)))
 				.andExpect(jsonPath("$.providerHealth.llm.status").exists());
+	}
+
+	@Test
+	void monitorSummaryIncludesJobsAndAuditEvents() throws Exception {
+		ProviderJobEntity running = newProviderJobEntity();
+		running.setId("provider-job-running-001");
+		running.setJobType(ProviderJobType.MUSIC_GEN);
+		running.setProviderType(ProviderType.MUSIC);
+		running.setProviderKey("ace-step");
+		running.setQueueItemId("queue-001");
+		running.setStatus(ProviderJobStatus.RUNNING);
+		running.setCorrelationId("corr-001");
+		running.setExternalRef("worker-job-001");
+		running.setStartedAt(Instant.parse("2026-03-20T09:00:00Z"));
+		running.setCreatedAt(Instant.parse("2026-03-20T09:00:00Z"));
+		running.setUpdatedAt(Instant.parse("2026-03-20T09:05:00Z"));
+		providerJobRepository.save(running);
+
+		ProviderJobEntity failed = newProviderJobEntity();
+		failed.setId("provider-job-failed-001");
+		failed.setJobType(ProviderJobType.TTS_GEN);
+		failed.setProviderType(ProviderType.TTS);
+		failed.setProviderKey("voicevox");
+		failed.setQueueItemId("queue-002");
+		failed.setStatus(ProviderJobStatus.FAILED);
+		failed.setCorrelationId("corr-002");
+		failed.setExternalRef("worker-job-002");
+		failed.setErrorCode("PROVIDER_TIMEOUT");
+		failed.setStartedAt(Instant.parse("2026-03-20T09:10:00Z"));
+		failed.setEndedAt(Instant.parse("2026-03-20T09:11:00Z"));
+		failed.setCreatedAt(Instant.parse("2026-03-20T09:10:00Z"));
+		failed.setUpdatedAt(Instant.parse("2026-03-20T09:11:00Z"));
+		providerJobRepository.save(failed);
+
+		streamEventService.publish("buffer.warning", Map.of(
+				"sessionId", "playout-001",
+				"readyCount", 1));
+
+		mockMvc.perform(get("/api/monitor/summary").header("X-Admin-Token", "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.runningJobs[0].id").value(running.getId()))
+				.andExpect(jsonPath("$.recentErrors[0].id").value(failed.getId()))
+				.andExpect(jsonPath("$.auditEvents[0].eventType").value("buffer.warning"));
+	}
+
+	private ProviderJobEntity newProviderJobEntity() {
+		try {
+			Constructor<ProviderJobEntity> constructor = ProviderJobEntity.class.getDeclaredConstructor();
+			constructor.setAccessible(true);
+			return constructor.newInstance();
+		} catch (ReflectiveOperationException ex) {
+			throw new IllegalStateException("ProviderJobEntity を生成できません", ex);
+		}
 	}
 
 	@Test

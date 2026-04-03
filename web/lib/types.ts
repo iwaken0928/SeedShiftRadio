@@ -146,6 +146,15 @@ export interface LetterReplySummary {
   createdAt: string;
 }
 
+export interface LetterSubmissionRecord {
+  id: string;
+  stationId: string | null;
+  radioName: string;
+  subject: string;
+  status: LetterStatus;
+  createdAt: string;
+}
+
 export interface PlayHistoryItem {
   id: string;
   sessionId: string;
@@ -170,7 +179,32 @@ export interface MonitorSummary {
   pendingLetterCount: number;
   degraded: boolean;
   providerHealth: Record<string, ProviderHealthPayload>;
+  runningJobs: MonitorProviderJob[];
+  recentErrors: MonitorProviderJob[];
+  auditEvents: MonitorAuditEvent[];
   updatedAt: string;
+}
+
+export interface MonitorProviderJob {
+  id: string;
+  jobType: "SCRIPT_GEN" | "TTS_GEN" | "MUSIC_GEN";
+  providerType: "LLM" | "TTS" | "MUSIC";
+  providerKey: string | null;
+  queueItemId: string | null;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  externalRef: string | null;
+  errorCode: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MonitorAuditEvent {
+  id: string;
+  eventType: string;
+  occurredAt: string;
+  summary: string;
 }
 
 export interface ProviderHealthPayload {
@@ -210,10 +244,22 @@ export interface SettingsResponse {
   features: FeatureSettings;
 }
 
+export interface SettingsUpdateRequest {
+  version: number;
+  schemaVersion: string;
+  server: ServerSettings;
+  paths: PathSettings;
+  playout: PlayoutSettings;
+  cache: CacheSettings;
+  programming: ProgrammingSettings;
+  providers: ProviderCatalog;
+  security: SecuritySettings;
+  features: FeatureSettings;
+}
+
 export interface ServerSettings {
-  host: string;
+  bindHost: string;
   port: number;
-  corsAllowedOrigins: string[];
 }
 
 export interface PathSettings {
@@ -230,6 +276,7 @@ export interface PlayoutSettings {
   scriptAheadCount: number;
   ttsAheadCount: number;
   musicAheadCount: number;
+  idlePrefetchEnabled: boolean;
 }
 
 export interface CacheSettings {
@@ -246,9 +293,9 @@ export interface CacheSettings {
 }
 
 export interface ProgrammingSettings {
-  defaultTemplateId: string | null;
-  fallbackStrategy: string;
-  planningHorizonMinutes: number;
+  defaultPlanningHorizonMinutes: number;
+  legacyRatioFallback: boolean;
+  seedImportRef: string;
 }
 
 export interface ProviderCatalog {
@@ -271,7 +318,6 @@ export interface ProviderEndpoint {
 }
 
 export interface SecuritySettings {
-  adminTokenRequired: boolean;
   adminTokenRef: string | null;
 }
 

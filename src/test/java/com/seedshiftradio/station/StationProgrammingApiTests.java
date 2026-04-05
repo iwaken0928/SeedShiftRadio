@@ -20,13 +20,22 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.seedshiftradio.support.TestSettingsFixture;
+
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("docker")
 @SpringBootTest(properties = {
 		"seedshift.radio.security.admin-token=test-admin-token",
-		"seedshift.radio.config.path=./build/test-settings/radio-config.json"
+		"seedshift.radio.config.path=./build/test-settings/station-programming-api-config.json",
+		"jobrunr.background-job-server.enabled=false"
 })
 class StationProgrammingApiTests {
+
+	private static final String TEST_CONFIG_PATH = "./build/test-settings/station-programming-api-config.json";
+
+	static {
+		TestSettingsFixture.writeFastLocalConfig(TEST_CONFIG_PATH);
+	}
 
 	@Container
 	@ServiceConnection

@@ -44,14 +44,22 @@ import com.seedshiftradio.letter.LetterRepository;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobRepository;
 import com.seedshiftradio.stream.StreamEventService;
+import com.seedshiftradio.support.TestSettingsFixture;
 
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("docker")
 @SpringBootTest(properties = {
 		"seedshift.radio.security.admin-token=test-admin-token",
-		"seedshift.radio.config.path=./build/test-settings/radio-config.json"
+		"seedshift.radio.config.path=./build/test-settings/radio-api-config.json",
+		"jobrunr.background-job-server.enabled=false"
 })
 class RadioApiTests {
+
+	private static final String TEST_CONFIG_PATH = "./build/test-settings/radio-api-config.json";
+
+	static {
+		TestSettingsFixture.writeFastLocalConfig(TEST_CONFIG_PATH);
+	}
 
 	@Container
 	@ServiceConnection
@@ -485,11 +493,18 @@ class RadioApiTests {
 						.andExpect(status().isOk())
 						.andExpect(jsonPath("$.stationId").value(stationId))
 						.andExpect(jsonPath("$.state").value(expectedState))
-						.andExpect(jsonPath("$.bufferReadyCount").value(greaterThanOrEqualTo(1)));
+						.andExpect(jsonPath("$.bufferReadyCount").value(greaterThanOrEqualTo(2)));
 
 				mockMvc.perform(get("/api/radio/queue"))
 						.andExpect(status().isOk())
-						.andExpect(jsonPath("$.items.length()").value(greaterThanOrEqualTo(1)));
+						.andExpect(jsonPath("$.items.length()").value(greaterThanOrEqualTo(2)));
+
+				PlayoutSessionEntity session = playoutSessionRepository.findFirstByOrderByStartedAtDesc().orElseThrow();
+				assertEquals(stationId, session.getStationId());
+				assertTrue(session.getBufferReadyCount() >= 2);
+				assertTrue(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()).stream()
+						.filter(item -> item.getStatus() == com.seedshiftradio.domain.QueueItemStatus.READY)
+						.count() >= 2);
 				return;
 			} catch (AssertionError exception) {
 				lastAssertion = exception;

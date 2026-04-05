@@ -1,20 +1,38 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getSettings, testConnections, updateSettings } from "@/lib/api";
+import {
+  getProgramTemplate,
+  getSettings,
+  getStation,
+  getStationProgramming,
+  listProgramTemplates,
+  listStations,
+  previewProgramming,
+  testConnections,
+  updateSettings,
+} from "@/lib/api";
 import { getAdminToken } from "@/lib/env";
 import type {
   ConnectionsTestResponse,
+  ProgramTemplateDetail,
+  ProgramTemplateSummary,
+  ProgrammingPreviewRequest,
+  ProgrammingPreviewResponse,
   FeatureSettings,
   ProviderCatalog,
   ProviderGroup,
   ProviderHealthPayload,
   SettingsResponse,
   SettingsUpdateRequest,
+  StationDetail,
+  StationProgrammingResponse,
+  StationSummary,
 } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Input, Label, Metric, SectionHeader } from "@/components/ui";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
+import { useUiStore } from "@/stores/ui-store";
 
 const REUSE_SCOPE_OPTIONS = ["DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIVE_ONLY"] as const;
 const PROVIDER_GROUPS: Array<keyof ProviderCatalog> = ["llm", "tts", "musicGen"];
@@ -23,14 +41,19 @@ const PROVIDER_LABELS: Record<keyof ProviderCatalog, string> = {
   tts: "TTS",
   musicGen: "MusicGen",
 };
+const PROGRAMMING_STATE_OPTIONS = ["UP", "DEGRADED", "DOWN", "UNKNOWN"] as const;
 const SELECT_CLASS_NAME =
   "w-full rounded-2xl border border-slate-300 bg-white/85 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-200";
 
 export function SettingsDashboard() {
   const queryClient = useQueryClient();
   const hasAdminToken = Boolean(getAdminToken());
+  const selectedStationId = useUiStore((state) => state.selectedStationId);
+  const setSelectedStationId = useUiStore((state) => state.setSelectedStationId);
   const [draft, setDraft] = useState<SettingsUpdateRequest | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [previewDraft, setPreviewDraft] = useState(createPreviewDraft);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -63,6 +86,50 @@ export function SettingsDashboard() {
     mutationFn: testConnections,
   });
 
+  const stationsQuery = useQuery({
+    queryKey: ["settings", "stations"],
+    queryFn: listStations,
+    enabled: hasAdminToken,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const stationDetailQuery = useQuery({
+    queryKey: ["settings", "station", selectedStationId],
+    queryFn: () => getStation(selectedStationId ?? ""),
+    enabled: hasAdminToken && Boolean(selectedStationId),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const stationProgrammingQuery = useQuery({
+    queryKey: ["settings", "station-programming", selectedStationId],
+    queryFn: () => getStationProgramming(selectedStationId ?? ""),
+    enabled: hasAdminToken && Boolean(selectedStationId),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const templatesQuery = useQuery({
+    queryKey: ["settings", "program-templates"],
+    queryFn: listProgramTemplates,
+    enabled: hasAdminToken,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const templateDetailQuery = useQuery({
+    queryKey: ["settings", "program-template", selectedTemplateId],
+    queryFn: () => getProgramTemplate(selectedTemplateId ?? ""),
+    enabled: hasAdminToken && Boolean(selectedTemplateId),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const previewMutation = useMutation({
+    mutationFn: () =>
+      previewProgramming(selectedStationId ?? "", {
+        at: toPreviewIso(previewDraft.at),
+        pendingLetterCount: previewDraft.pendingLetterCount,
+        providerStates: previewDraft.providerStates,
+      }),
+  });
+
   const baseDraft = settingsQuery.data ? createDraft(settingsQuery.data) : null;
   const isDirty = baseDraft !== null && draft !== null && JSON.stringify(baseDraft) !== JSON.stringify(draft);
   const bindHostWarning = draft && isUnsafeBindHost(draft.server.bindHost);
@@ -79,6 +146,29 @@ export function SettingsDashboard() {
     setDraft((current) => (current ? updater(current) : current));
     setSaveNotice(null);
   };
+
+  useEffect(() => {
+    if (!stationsQuery.data?.length) {
+      return;
+    }
+    if (!selectedStationId || !stationsQuery.data.some((station) => station.id === selectedStationId)) {
+      setSelectedStationId(stationsQuery.data[0].id);
+    }
+  }, [selectedStationId, setSelectedStationId, stationsQuery.data]);
+
+  useEffect(() => {
+    if (!templatesQuery.data?.length) {
+      setSelectedTemplateId(null);
+      return;
+    }
+    if (selectedTemplateId && templatesQuery.data.some((template) => template.id === selectedTemplateId)) {
+      return;
+    }
+    const preferredTemplate =
+      (selectedStationId ? templatesQuery.data.find((template) => template.stationId === selectedStationId) : undefined) ??
+      templatesQuery.data[0];
+    setSelectedTemplateId(preferredTemplate.id);
+  }, [selectedStationId, selectedTemplateId, templatesQuery.data]);
 
   if (!hasAdminToken) {
     return (
@@ -458,6 +548,21 @@ export function SettingsDashboard() {
             />
           )}
         </Card>
+
+        <StationOverviewCard
+          stations={stationsQuery.data ?? []}
+          selectedStationId={selectedStationId}
+          station={stationDetailQuery.data}
+          programming={stationProgrammingQuery.data}
+          onSelectStation={setSelectedStationId}
+        />
+
+        <ProgramTemplateCard
+          templates={templatesQuery.data ?? []}
+          selectedTemplateId={selectedTemplateId}
+          template={templateDetailQuery.data}
+          onSelectTemplate={setSelectedTemplateId}
+        />
       </PanelColumn>
 
       <PanelColumn className="xl:col-span-5">
@@ -479,6 +584,18 @@ export function SettingsDashboard() {
             )}
           </div>
         </Card>
+
+        <ProgrammingPreviewCard
+          stations={stationsQuery.data ?? []}
+          selectedStationId={selectedStationId}
+          previewDraft={previewDraft}
+          previewResult={previewMutation.data}
+          previewError={previewMutation.error}
+          previewPending={previewMutation.isPending}
+          onStationChange={setSelectedStationId}
+          onPreviewDraftChange={setPreviewDraft}
+          onPreview={() => previewMutation.mutate()}
+        />
       </PanelColumn>
     </PanelGrid>
   );
@@ -850,4 +967,452 @@ function formatTimestamp(value: string) {
 function isUnsafeBindHost(bindHost: string) {
   const normalized = bindHost.trim().toLowerCase();
   return normalized !== "127.0.0.1" && normalized !== "localhost" && normalized !== "::1";
+}
+
+type PreviewDraft = {
+  at: string;
+  pendingLetterCount: number;
+  providerStates: ProgrammingPreviewRequest["providerStates"];
+};
+
+function StationOverviewCard({
+  stations,
+  selectedStationId,
+  station,
+  programming,
+  onSelectStation,
+}: {
+  stations: StationSummary[];
+  selectedStationId: string | null;
+  station?: StationDetail;
+  programming?: StationProgrammingResponse;
+  onSelectStation: (stationId: string | null) => void;
+}) {
+  return (
+    <Card className="mt-4">
+      <SectionHeader
+        eyebrow="Stations"
+        title="Station overview"
+        description="局情報と station ごとの編成 profile を settings 画面から参照します。"
+      />
+      {!stations.length ? (
+        <EmptyState title="局がまだありません" description="`/api/stations` に局が追加されるとここに表示されます。" />
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="settings-station-select">Station</Label>
+            <select
+              id="settings-station-select"
+              className={SELECT_CLASS_NAME}
+              value={selectedStationId ?? ""}
+              onChange={(event) => onSelectStation(event.currentTarget.value || null)}
+            >
+              {stations.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name} ({entry.frequencyMHz} MHz)
+                </option>
+              ))}
+            </select>
+          </div>
+          {station ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Metric label="Genre" value={station.genre} />
+                <Metric label="Frequency" value={`${station.frequencyMHz} MHz`} />
+                <Metric label="Persona" value={station.languagePersonaId} />
+                <Metric label="Voice" value={station.defaultVoiceProfileId} />
+              </div>
+              <KeyValueGrid
+                title="Programming policy"
+                entries={[
+                  ["Enabled", programming?.enabled ? "true" : "false"],
+                  ["Default Template", programming?.defaultTemplateId ?? station.programming.defaultTemplateId ?? "-"],
+                  ["Fallback", programming?.fallbackStrategy ?? station.programming.fallbackStrategy],
+                  ["Planning Horizon", `${programming?.planningHorizonMinutes ?? station.programming.planningHorizonMinutes} min`],
+                ]}
+              />
+              <KeyValueGrid
+                title="Pre-generation"
+                entries={[
+                  ["Mode", programming?.preGeneration.mode ?? station.programming.preGeneration.mode],
+                  ["Max Prepared Minutes", programming?.preGeneration.maxPreparedMinutes ?? station.programming.preGeneration.maxPreparedMinutes],
+                  ["Max Prepared Blocks", programming?.preGeneration.maxPreparedBlocks ?? station.programming.preGeneration.maxPreparedBlocks],
+                  ["Prefer Cache Reuse", String(programming?.preGeneration.preferCacheReuse ?? station.programming.preGeneration.preferCacheReuse)],
+                ]}
+              />
+              <KeyValueGrid
+                title="Replay"
+                entries={[
+                  ["Intensity", programming?.replay.intensity ?? station.programming.replay.intensity],
+                  [
+                    "Eligible Segments",
+                    formatSegmentTypes(programming?.replay.eligibleSegmentTypes ?? station.programming.replay.eligibleSegmentTypes),
+                  ],
+                  ["Cooldown", `${programming?.replay.cooldownHours ?? station.programming.replay.cooldownHours} h`],
+                  ["Max Share", `${programming?.replay.maxReplaySharePercent ?? station.programming.replay.maxReplaySharePercent}%`],
+                ]}
+              />
+              <KeyValueGrid
+                title="Composition"
+                entries={[
+                  [
+                    "Target Shares",
+                    formatShareMap(programming?.composition.targetSegmentShares ?? station.programming.composition.targetSegmentShares),
+                  ],
+                  [
+                    "Max Consecutive Talk",
+                    programming?.composition.maxConsecutiveTalkSegments ?? station.programming.composition.maxConsecutiveTalkSegments,
+                  ],
+                  [
+                    "Music Break Interval",
+                    `${programming?.composition.musicBreakIntervalMinutes ?? station.programming.composition.musicBreakIntervalMinutes} min`,
+                  ],
+                  [
+                    "Letter Boost Threshold",
+                    programming?.composition.letterPriorityBoostThreshold ?? station.programming.composition.letterPriorityBoostThreshold,
+                  ],
+                ]}
+              />
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Rules</div>
+                {programming?.rules.length ? (
+                  programming.rules.map((rule) => (
+                    <div key={rule.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone="accent">Priority {rule.priority}</Badge>
+                        <Badge tone="default">{rule.templateId}</Badge>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-600">
+                        {rule.days.join(", ")} / {rule.startTime}-{rule.endTime} / minimum letters {rule.minimumPendingLetters}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        required states: {rule.requiredProviderStates.length ? rule.requiredProviderStates.join(", ") : "none"}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState title="Programming rule はまだありません" description="自動番組生成ルールが未設定の場合は fallback で運用されます。" />
+                )}
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="局詳細を取得できません" description="station を選択すると概要と programming policy を表示します。" />
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ProgramTemplateCard({
+  templates,
+  selectedTemplateId,
+  template,
+  onSelectTemplate,
+}: {
+  templates: ProgramTemplateSummary[];
+  selectedTemplateId: string | null;
+  template?: ProgramTemplateDetail;
+  onSelectTemplate: (templateId: string | null) => void;
+}) {
+  return (
+    <Card className="mt-4">
+      <SectionHeader
+        eyebrow="Templates"
+        title="Program templates"
+        description="番組テンプレートの一覧と slot 構成を読み取り専用で確認します。"
+      />
+      {!templates.length ? (
+        <EmptyState title="Program Template はまだありません" description="`/api/program-templates` の一覧がここに表示されます。" />
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="program-template-select">Template</Label>
+            <select
+              id="program-template-select"
+              className={SELECT_CLASS_NAME}
+              value={selectedTemplateId ?? ""}
+              onChange={(event) => onSelectTemplate(event.currentTarget.value || null)}
+            >
+              {templates.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name} ({entry.scope})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-3">
+            {templates.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => onSelectTemplate(entry.id)}
+                className={`rounded-2xl border px-4 py-3 text-left transition ${
+                  entry.id === selectedTemplateId ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-800"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-semibold">{entry.name}</div>
+                  <Badge tone={entry.isActive ? "success" : "warning"}>{entry.isActive ? "ACTIVE" : "INACTIVE"}</Badge>
+                  <Badge tone="default">{entry.scope}</Badge>
+                </div>
+                <div className="mt-1 text-sm opacity-80">
+                  {entry.stationId ?? "GLOBAL"} / {entry.targetDurationMinutes} min / horizon {entry.planningHorizonMinutes} min
+                </div>
+              </button>
+            ))}
+          </div>
+          {template ? (
+            <div className="space-y-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-lg font-semibold text-slate-950">{template.name}</div>
+                <Badge tone="accent">v{template.version}</Badge>
+                {template.fallbackTemplateId ? <Badge tone="default">fallback: {template.fallbackTemplateId}</Badge> : null}
+              </div>
+              <KeyValueGrid
+                title="Template facts"
+                entries={[
+                  ["Scope", template.scope],
+                  ["Station", template.stationId ?? "GLOBAL"],
+                  ["Target Duration", `${template.targetDurationMinutes} min`],
+                  ["Planning Horizon", `${template.planningHorizonMinutes} min`],
+                ]}
+              />
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slots</div>
+                {template.slots.map((slot) => (
+                  <div key={slot.slotId} className="rounded-2xl bg-white px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-semibold text-slate-950">{slot.slotId}</div>
+                      <Badge tone="default">{slot.role}</Badge>
+                      <Badge tone={slot.constraintMode === "HARD" ? "danger" : "accent"}>{slot.constraintMode}</Badge>
+                    </div>
+                    <div className="mt-2 text-sm text-slate-600">
+                      candidate: {formatSegmentTypes(slot.candidateSegmentTypes)} / fallback: {formatSegmentTypes(slot.fallbackSegmentTypes)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      target: {formatDurationMs(slot.targetDurationMs)} / policy: {formatJson(slot.slotPolicy)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="テンプレート詳細を取得できません" description="一覧からテンプレートを選ぶと slot 構成を確認できます。" />
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ProgrammingPreviewCard({
+  stations,
+  selectedStationId,
+  previewDraft,
+  previewResult,
+  previewError,
+  previewPending,
+  onStationChange,
+  onPreviewDraftChange,
+  onPreview,
+}: {
+  stations: StationSummary[];
+  selectedStationId: string | null;
+  previewDraft: PreviewDraft;
+  previewResult?: ProgrammingPreviewResponse;
+  previewError: unknown;
+  previewPending: boolean;
+  onStationChange: (stationId: string | null) => void;
+  onPreviewDraftChange: Dispatch<SetStateAction<PreviewDraft>>;
+  onPreview: () => void;
+}) {
+  return (
+    <Card className="mt-4">
+      <SectionHeader
+        eyebrow="Preview"
+        title="Programming preview"
+        description="station, pending letters, provider state を指定して preview API の結果を確認します。"
+      />
+      {!stations.length ? (
+        <EmptyState title="Preview 対象の station がありません" description="局を追加すると preview を試せます。" />
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="preview-station-select">Station</Label>
+            <select
+              id="preview-station-select"
+              className={SELECT_CLASS_NAME}
+              value={selectedStationId ?? ""}
+              onChange={(event) => onStationChange(event.currentTarget.value || null)}
+            >
+              {stations.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <Label htmlFor="preview-at">At</Label>
+              <Input
+                id="preview-at"
+                type="datetime-local"
+                value={previewDraft.at}
+                onChange={(event) =>
+                  onPreviewDraftChange((current) => ({
+                    ...current,
+                    at: event.currentTarget.value,
+                  }))
+                }
+              />
+            </div>
+            <NumberField
+              id="preview-pending-letters"
+              label="Pending Letters"
+              value={previewDraft.pendingLetterCount}
+              min={0}
+              onChange={(value) =>
+                onPreviewDraftChange((current) => ({
+                  ...current,
+                  pendingLetterCount: value,
+                }))
+              }
+            />
+            {(["musicGen", "tts", "llm"] as const).map((providerKey) => (
+              <div key={providerKey}>
+                <Label htmlFor={`preview-${providerKey}`}>{providerKey}</Label>
+                <select
+                  id={`preview-${providerKey}`}
+                  className={SELECT_CLASS_NAME}
+                  value={previewDraft.providerStates[providerKey]}
+                  onChange={(event) =>
+                    onPreviewDraftChange((current) => ({
+                      ...current,
+                      providerStates: {
+                        ...current.providerStates,
+                        [providerKey]: event.currentTarget.value,
+                      },
+                    }))
+                  }
+                >
+                  {PROGRAMMING_STATE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+          <Button tone="primary" disabled={!selectedStationId || previewPending} onClick={onPreview}>
+            {previewPending ? "Previewing..." : "Run Preview"}
+          </Button>
+          {previewResult ? (
+            <div className="space-y-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-lg font-semibold text-slate-950">{previewResult.program.title}</div>
+                {previewResult.selectedTemplateId ? <Badge tone="default">{previewResult.selectedTemplateId}</Badge> : null}
+                {previewResult.fallbackApplied ? <Badge tone="warning">fallback applied</Badge> : <Badge tone="success">template resolved</Badge>}
+              </div>
+              <div className="text-sm text-slate-600">planned duration: {formatDurationMs(previewResult.program.plannedDurationMs)}</div>
+              <div className="space-y-2">
+                {previewResult.slots.map((slot) => (
+                  <div key={slot.slotId} className="rounded-2xl bg-white px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-semibold text-slate-950">{slot.slotId}</div>
+                      <Badge tone="default">{slot.role}</Badge>
+                      <Badge tone={slot.constraintMode === "HARD" ? "danger" : "accent"}>{slot.constraintMode}</Badge>
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">target duration: {formatDurationMs(slot.targetDurationMs)}</div>
+                  </div>
+                ))}
+              </div>
+              {previewResult.validationWarnings.length ? (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Validation warnings</div>
+                  {previewResult.validationWarnings.map((warning) => (
+                    <InlineNotice key={warning.code} tone="warning" message={`${warning.code}: ${warning.message}`} />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : previewError instanceof Error ? (
+            <EmptyState title="Preview を取得できません" description={previewError.message} />
+          ) : (
+            <EmptyState title="Preview はまだ未実行です" description="station と provider state を指定すると結果をここに表示します。" />
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function KeyValueGrid({ title, entries }: { title: string; entries: Array<[string, ReactNode]> }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{title}</div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {entries.map(([label, value]) => (
+          <div key={label}>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</div>
+            <div className="mt-1 text-sm leading-6 text-slate-700">{value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function createPreviewDraft(): PreviewDraft {
+  return {
+    at: toLocalDateTimeValue(new Date()),
+    pendingLetterCount: 0,
+    providerStates: {
+      musicGen: "UNKNOWN",
+      tts: "UNKNOWN",
+      llm: "UNKNOWN",
+    },
+  };
+}
+
+function toPreviewIso(value: string) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+  return date.toISOString();
+}
+
+function toLocalDateTimeValue(date: Date) {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function formatDurationMs(value: number) {
+  const totalSeconds = Math.max(0, Math.round(value / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatSegmentTypes(values: readonly string[]) {
+  return values.length ? values.join(", ") : "-";
+}
+
+function formatShareMap(value: Record<string, number>) {
+  return Object.entries(value)
+    .map(([key, share]) => `${key}:${share}`)
+    .join(" / ");
+}
+
+function formatJson(value: Record<string, unknown>) {
+  const entries = Object.entries(value);
+  if (!entries.length) {
+    return "{}";
+  }
+  return entries
+    .map(([key, entryValue]) => `${key}=${String(entryValue)}`)
+    .join(", ");
 }

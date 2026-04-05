@@ -39,6 +39,96 @@ export interface StationDetail {
   programming: StationProgrammingProfile;
 }
 
+export interface StationProgrammingResponse {
+  stationId: string;
+  version: number;
+  enabled: boolean;
+  defaultTemplateId: string | null;
+  fallbackStrategy: string;
+  planningHorizonMinutes: number;
+  preGeneration: PreGenerationProfile;
+  replay: ReplayProfile;
+  composition: CompositionProfile;
+  updatedAt: string;
+  rules: ProgramRuleSummary[];
+}
+
+export interface ProgramRuleSummary {
+  id: string;
+  priority: number;
+  days: string[];
+  startTime: string;
+  endTime: string;
+  minimumPendingLetters: number;
+  requiredProviderStates: string[];
+  templateId: string;
+}
+
+export interface ProgramTemplateSummary {
+  id: string;
+  scope: string;
+  stationId: string | null;
+  name: string;
+  version: number;
+  targetDurationMinutes: number;
+  planningHorizonMinutes: number;
+  isActive: boolean;
+  fallbackTemplateId: string | null;
+}
+
+export interface ProgramTemplateDetail extends ProgramTemplateSummary {
+  editorialPolicy: Record<string, unknown>;
+  slots: ProgramTemplateSlot[];
+}
+
+export interface ProgramTemplateSlot {
+  slotId: string;
+  role: SlotRole;
+  constraintMode: ConstraintMode;
+  candidateSegmentTypes: SegmentType[];
+  fallbackSegmentTypes: SegmentType[];
+  targetDurationMs: number;
+  slotPolicy: Record<string, unknown>;
+}
+
+export interface ProgrammingPreviewProviderStates {
+  musicGen: string;
+  tts: string;
+  llm: string;
+}
+
+export interface ProgrammingPreviewRequest {
+  at: string;
+  pendingLetterCount: number;
+  providerStates: ProgrammingPreviewProviderStates;
+}
+
+export interface ProgrammingPreviewProgram {
+  title: string;
+  plannedDurationMs: number;
+}
+
+export interface ProgrammingPreviewResponse {
+  stationId: string;
+  selectedTemplateId: string | null;
+  fallbackApplied: boolean;
+  program: ProgrammingPreviewProgram;
+  slots: ProgrammingPreviewSlot[];
+  validationWarnings: ValidationWarning[];
+}
+
+export interface ProgrammingPreviewSlot {
+  slotId: string;
+  role: SlotRole;
+  constraintMode: ConstraintMode;
+  targetDurationMs: number;
+}
+
+export interface ValidationWarning {
+  code: string;
+  message: string;
+}
+
 export interface RadioStatus {
   sessionId: string | null;
   stationId: string | null;
@@ -153,6 +243,31 @@ export interface LetterSubmissionRecord {
   subject: string;
   status: LetterStatus;
   createdAt: string;
+}
+
+export interface LetterPublicLookupResponse {
+  letters: LetterPublicSummary[];
+}
+
+export interface LetterPublicSummary {
+  id: string;
+  stationId: string | null;
+  radioName: string;
+  subject: string;
+  status: LetterStatus;
+  adoptedInSessionId: string | null;
+  createdAt: string;
+  playHistory: LetterPublicPlayHistorySummary[];
+}
+
+export interface LetterPublicPlayHistorySummary {
+  id: string;
+  sessionId: string;
+  stationId: string;
+  segmentType: SegmentType;
+  title: string;
+  resultStatus: string;
+  playedAt: string;
 }
 
 export interface PlayHistoryItem {

@@ -10,16 +10,14 @@ import uuid
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 
-PROVIDER_FINGERPRINT = "deterministic-worker:1.0"
 SAMPLE_RATE = 16_000
-DATA_ROOT = Path(os.environ.get("SEEDSHIFT_MUSICGEN_DATA_ROOT", "./data")).resolve()
-MUSIC_ROOT = DATA_ROOT / "assets" / "music"
+DEFAULT_DATA_ROOT = Path(os.environ.get("SEEDSHIFT_MUSICGEN_DATA_ROOT", "./data")).resolve()
 
 
 class MusicJobCreateRequest(BaseModel):
@@ -62,70 +60,141 @@ class WorkerJob:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
-app = FastAPI(title="SeedShiftRadio MusicGen Worker")
-jobs: dict[str, WorkerJob] = {}
+@dataclass(frozen=True)
+class GenerationResult:
+    asset_path: Path
+    duration_sec: int
+    provider_fingerprint: str
+    message: str = "generated"
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "UP", "providerFingerprint": PROVIDER_FINGERPRINT}
+class MusicBackendError(RuntimeError):
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
 
 
-@app.post("/music/jobs", response_model=MusicJobCreateResponse)
-def create_job(request: MusicJobCreateRequest) -> MusicJobCreateResponse:
-    job_id = f"worker-job-{uuid.uuid4().hex[:12]}"
-    job = WorkerJob(
-        job_id=job_id,
-        request=request,
-        prompt_hash=build_prompt_hash(request),
-    )
-    jobs[job_id] = job
-    thread = threading.Thread(target=run_generation, args=(job_id,), daemon=True)
-    thread.start()
-    return MusicJobCreateResponse(jobId=job_id, status="QUEUED")
+class MusicBackend(Protocol):
+    provider_fingerprint: str
+
+    def generate(self, job_id: str, request: MusicJobCreateRequest) -> GenerationResult:
+        ...
 
 
-@app.get("/music/jobs/{job_id}", response_model=MusicJobStatusResponse)
-def get_job(job_id: str) -> MusicJobStatusResponse:
-    job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-    with job.lock:
-        return MusicJobStatusResponse(
-            jobId=job.job_id,
-            status=job.status,
-            assetPath=job.asset_path,
-            durationSec=job.duration_sec,
-            providerFingerprint=job.provider_fingerprint,
-            promptHash=job.prompt_hash,
-            errorCode=job.error_code,
-            message=job.message,
+class DeterministicMusicBackend:
+    provider_fingerprint = "deterministic-worker:1.0"
+
+    def __init__(self, data_root: Path | None = None):
+        root = (data_root or DEFAULT_DATA_ROOT).resolve()
+        self.music_root = root / "assets" / "music"
+
+    def generate(self, job_id: str, request: MusicJobCreateRequest) -> GenerationResult:
+        seed = request.seed if request.seed is not None else 0
+        asset_path = synthesize_wav(
+            self.music_root,
+            job_id,
+            request.durationSec,
+            seed,
+            request.genre,
+            request.mood,
+        )
+        return GenerationResult(
+            asset_path=asset_path,
+            duration_sec=request.durationSec,
+            provider_fingerprint=self.provider_fingerprint,
         )
 
 
-def run_generation(job_id: str) -> None:
+class FailingMusicBackend:
+    provider_fingerprint = "failing-worker:1.0"
+
+    def generate(self, job_id: str, request: MusicJobCreateRequest) -> GenerationResult:
+        raise MusicBackendError("PROVIDER_BAD_RESPONSE", f"backend forced failure for {request.requestId}")
+
+
+def create_backend(backend_name: str | None = None) -> MusicBackend:
+    selected = (backend_name or os.environ.get("SEEDSHIFT_MUSICGEN_BACKEND", "deterministic")).strip().lower()
+    if selected == "deterministic":
+        return DeterministicMusicBackend()
+    if selected == "failing":
+        return FailingMusicBackend()
+    raise ValueError(f"Unsupported MusicGen backend: {selected}")
+
+
+def create_app(backend: MusicBackend | None = None) -> FastAPI:
+    selected_backend = backend or create_backend()
+    application = FastAPI(title="SeedShiftRadio MusicGen Worker")
+    application.state.jobs = {}
+    application.state.backend = selected_backend
+
+    @application.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "UP", "providerFingerprint": selected_backend.provider_fingerprint}
+
+    @application.post("/music/jobs", response_model=MusicJobCreateResponse)
+    def create_job(request: MusicJobCreateRequest) -> MusicJobCreateResponse:
+        job_id = f"worker-job-{uuid.uuid4().hex[:12]}"
+        job = WorkerJob(
+            job_id=job_id,
+            request=request,
+            prompt_hash=build_prompt_hash(request),
+        )
+        application.state.jobs[job_id] = job
+        thread = threading.Thread(target=run_generation, args=(application, job_id), daemon=True)
+        thread.start()
+        return MusicJobCreateResponse(jobId=job_id, status="QUEUED")
+
+    @application.get("/music/jobs/{job_id}", response_model=MusicJobStatusResponse)
+    def get_job(job_id: str) -> MusicJobStatusResponse:
+        job = application.state.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        with job.lock:
+            return MusicJobStatusResponse(
+                jobId=job.job_id,
+                status=job.status,
+                assetPath=job.asset_path,
+                durationSec=job.duration_sec,
+                providerFingerprint=job.provider_fingerprint,
+                promptHash=job.prompt_hash,
+                errorCode=job.error_code,
+                message=job.message,
+            )
+
+    return application
+
+
+def run_generation(application: FastAPI, job_id: str) -> None:
+    jobs: dict[str, WorkerJob] = application.state.jobs
+    backend: MusicBackend = application.state.backend
     job = jobs[job_id]
     with job.lock:
         job.status = "RUNNING"
     try:
-        seed = job.request.seed if job.request.seed is not None else 0
-        asset_path = synthesize_wav(job_id, job.request.durationSec, seed, job.request.genre, job.request.mood)
+        result = backend.generate(job_id, job.request)
         with job.lock:
             job.status = "SUCCEEDED"
-            job.asset_path = str(asset_path)
-            job.duration_sec = job.request.durationSec
-            job.provider_fingerprint = PROVIDER_FINGERPRINT
-            job.message = "generated"
+            job.asset_path = str(result.asset_path)
+            job.duration_sec = result.duration_sec
+            job.provider_fingerprint = result.provider_fingerprint
+            job.message = result.message
+    except MusicBackendError as exc:
+        with job.lock:
+            job.status = "FAILED"
+            job.error_code = exc.error_code
+            job.provider_fingerprint = backend.provider_fingerprint
+            job.message = str(exc)
     except Exception as exc:  # pragma: no cover
         with job.lock:
             job.status = "FAILED"
             job.error_code = "PROVIDER_BAD_RESPONSE"
+            job.provider_fingerprint = backend.provider_fingerprint
             job.message = str(exc)
 
 
-def synthesize_wav(job_id: str, duration_sec: int, seed: int, genre: str, mood: list[str]) -> Path:
-    MUSIC_ROOT.mkdir(parents=True, exist_ok=True)
-    path = MUSIC_ROOT / f"{job_id}.wav"
+def synthesize_wav(music_root: Path, job_id: str, duration_sec: int, seed: int, genre: str, mood: list[str]) -> Path:
+    music_root.mkdir(parents=True, exist_ok=True)
+    path = music_root / f"{job_id}.wav"
     base_frequency = 180 + (seed % 220)
     accent = 1 + (len(mood) % 3)
     genre_bias = (sum(ord(char) for char in genre) % 90) / 10.0
@@ -152,3 +221,6 @@ def build_prompt_hash(request: MusicJobCreateRequest) -> str:
     digest = hashlib.sha256()
     digest.update(request.model_dump_json().encode("utf-8"))
     return digest.hexdigest()
+
+
+app = create_app()

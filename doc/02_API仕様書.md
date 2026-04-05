@@ -16,7 +16,7 @@
 
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
 - 設定更新、局管理、番組編成管理、監視 API は `X-Admin-Token` による最小保護を推奨する
-- `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/playback-events`, `GET /api/health` は一般操作 API として扱う
+- `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `POST /api/letters/public/history`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/playback-events`, `GET /api/health` は一般操作 API として扱う
 - `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `GET /api/letters/{id}`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/play-history`, `GET /api/play-history/{id}`, `GET /api/monitor/summary` は `X-Admin-Token` 前提とする
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
@@ -161,7 +161,40 @@
 }
 ```
 
-### 4.6 PlayHistoryItem
+### 4.6 LetterPublicLookup
+
+```json
+{
+  "letters": [
+    {
+      "id": "letter-0001",
+      "stationId": "station-night",
+      "radioName": "夜更かしペンギン",
+      "subject": "最近の作業BGM",
+      "status": "ADOPTED",
+      "adoptedInSessionId": "playout-20260320-001",
+      "createdAt": "2026-03-20T09:00:00Z",
+      "playHistory": [
+        {
+          "id": "play-history-0001",
+          "sessionId": "playout-20260320-001",
+          "stationId": "station-night",
+          "segmentType": "LETTER",
+          "title": "レター",
+          "resultStatus": "DONE",
+          "playedAt": "2026-03-20T09:15:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- 公開側 `/letters` はこの最小 DTO を使って、自分が送ったレターの採用状況と放送履歴を参照する
+- `body` と `replies` は返さない
+- 未知の `letterId` は無視し、見つかったレターだけを返す
+
+### 4.7 PlayHistoryItem
 
 ```json
 {
@@ -273,9 +306,10 @@
 | `GET` | `/api/radio/next-segment` | 次の再生候補取得 |
 | `GET` | `/api/radio/next-speech-directive` | Client-side TTS 用指示取得。`clientId` 指定時は登録済み能力で `voiceHint` を最適化 |
 | `POST` | `/api/radio/playback-events` | クライアント再生イベント通知 |
+| `POST` | `/api/letters` | レター投稿 |
+| `POST` | `/api/letters/public/history` | 公開用レター採用履歴取得 |
 | `GET` | `/api/letters` | レター一覧取得 |
 | `GET` | `/api/letters/{id}` | レター詳細取得 |
-| `POST` | `/api/letters` | レター投稿 |
 | `POST` | `/api/letters/{id}/status` | レター状態更新 |
 | `POST` | `/api/letters/{id}/reply` | レター返信追加 |
 | `GET` | `/api/play-history` | 放送履歴一覧取得 |
@@ -358,7 +392,51 @@ Response:
 }
 ```
 
-### 6.3.1 `GET /letters/{id}`
+### 6.3.1 `POST /letters/public/history`
+
+公開側の採用履歴参照 API とする。`X-Admin-Token` は不要で、本文と返信は返さない。
+
+Request:
+
+```json
+{
+  "letterIds": ["letter-0001", "letter-0002"]
+}
+```
+
+Response:
+
+```json
+{
+  "letters": [
+    {
+      "id": "letter-0001",
+      "stationId": "station-night",
+      "radioName": "夜更かしペンギン",
+      "subject": "最近の作業BGM",
+      "status": "ADOPTED",
+      "adoptedInSessionId": "playout-20260320-001",
+      "createdAt": "2026-03-20T09:00:00Z",
+      "playHistory": [
+        {
+          "id": "play-history-0001",
+          "sessionId": "playout-20260320-001",
+          "stationId": "station-night",
+          "segmentType": "LETTER",
+          "title": "レター",
+          "resultStatus": "DONE",
+          "playedAt": "2026-03-20T09:15:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- 未知の `letterId` は無視し、見つかったレターだけを返す
+- `body` と `replies` は返さず、公開 UI で必要な最小要約だけを返す
+
+### 6.3.2 `GET /letters/{id}`
 
 管理者向けの詳細取得 API とする。`X-Admin-Token` が必要。
 
@@ -404,7 +482,7 @@ Response:
 - `playHistory` はこのレターに紐づく放送履歴を新しい順で返す
 - レター紐付けの正本は `queue_item.letter_id` と `play_history.letter_id` とし、`program_block_slot.slot_context` は件名など補助メタに使う
 
-### 6.3.2 `POST /letters/{id}/status`
+### 6.3.3 `POST /letters/{id}/status`
 
 `ADOPTED` へ更新する場合は採用先 `sessionId` を必須とする。
 
@@ -415,7 +493,7 @@ Response:
 }
 ```
 
-### 6.3.3 `POST /letters/{id}/reply`
+### 6.3.4 `POST /letters/{id}/reply`
 
 `X-Admin-Token` が必要。
 

@@ -80,6 +80,7 @@
 - `radioName` は直前値を LocalStorage に保持する
 - 投稿時は二重送信防止を行う
 - 公開側は投稿完了トーストと、この端末で送ったレターの簡易一覧を表示する
+- 放送採用履歴は `POST /api/letters/public/history` の最小要約 DTO を使い、本文や返信は公開しない
 
 ## 7. 設定画面
 
@@ -115,7 +116,7 @@
 - `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を編集できるようにする
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
 - 管理トークンがない場合は導線を非表示にし、直接開いた時は管理画面であることを案内する
-- `Stations`, `Program Templates`, `Programming Preview`, `Import / Export` は後続フェーズで追加する
+- `Stations`, `Program Templates`, `Programming Preview` は read / preview 中心で先行実装し、`Import / Export` は後続フェーズで追加する
 
 ## 8. 監視画面
 
@@ -127,6 +128,7 @@
 - 直近 10 件の監査イベント
 
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
+- summary は定期 refresh し、provider status, job, audit event を画面内で絞り込めるようにする
 
 ## 9. 状態管理
 

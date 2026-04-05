@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLetter, getLetter, getRadioStatus, listLetters, replyLetter, updateLetterStatus } from "@/lib/api";
+import { createLetter, getLetter, getRadioStatus, listLetters, lookupLetterPublicHistory, replyLetter, updateLetterStatus } from "@/lib/api";
 import { getAdminToken } from "@/lib/env";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Button, Card, EmptyState, Input, SectionHeader, Textarea } from "@/components/ui";
 import { useUiStore } from "@/stores/ui-store";
-import type { LetterStatus, LetterSubmissionRecord } from "@/lib/types";
+import type { LetterPublicSummary, LetterStatus, LetterSubmissionRecord } from "@/lib/types";
 
 const letterStatuses: LetterStatus[] = ["UNREAD", "PENDING", "ADOPTED", "REPLIED"];
 const MAX_SUBJECT_LENGTH = 255;
@@ -22,10 +22,12 @@ export function LettersDashboard() {
   const addLocalLetterSubmission = useUiStore((state) => state.addLocalLetterSubmission);
   const [selectedStatus, setSelectedStatus] = useState<LetterStatus | undefined>(undefined);
   const [selectedLetterId, setSelectedLetterId] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [replyText, setReplyText] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const deferredSearchText = useDeferredValue(searchText.trim().toLowerCase());
 
   const radioStatusQuery = useQuery({
     queryKey: ["radio", "status"],
@@ -45,21 +47,35 @@ export function LettersDashboard() {
     enabled: hasAdminToken && Boolean(selectedLetterId),
     retry: false,
   });
+  const publicHistoryQuery = useQuery({
+    queryKey: ["letters", "public-history", localLetterSubmissions.map((submission) => submission.id)],
+    queryFn: () => lookupLetterPublicHistory(localLetterSubmissions.map((submission) => submission.id)),
+    enabled: localLetterSubmissions.length > 0,
+    retry: false,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const visibleLetters = (lettersQuery.data ?? []).filter((letter) => matchesLetterSearch(letter, deferredSearchText));
+  const publicHistoryById = new Map((publicHistoryQuery.data?.letters ?? []).map((letter) => [letter.id, letter]));
+  const mergedLocalSubmissions = localLetterSubmissions.map((submission) => mergeLocalSubmission(submission, publicHistoryById.get(submission.id)));
+  const publicAdoptionEntries = mergedLocalSubmissions.filter((submission) => submission.playHistory.length > 0 || submission.adoptedInSessionId);
 
   useEffect(() => {
     if (!hasAdminToken) {
       setSelectedLetterId(null);
       setSelectedStatus(undefined);
+      setSearchText("");
       return;
     }
-    if (!lettersQuery.data || lettersQuery.data.length === 0) {
+    if (visibleLetters.length === 0) {
       setSelectedLetterId(null);
       return;
     }
-    if (!selectedLetterId || !lettersQuery.data.some((letter) => letter.id === selectedLetterId)) {
-      setSelectedLetterId(lettersQuery.data[0].id);
+    if (!selectedLetterId || !visibleLetters.some((letter) => letter.id === selectedLetterId)) {
+      setSelectedLetterId(visibleLetters[0].id);
     }
-  }, [hasAdminToken, lettersQuery.data, selectedLetterId]);
+  }, [hasAdminToken, selectedLetterId, visibleLetters]);
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -87,6 +103,7 @@ export function LettersDashboard() {
       setSubject("");
       setBody("");
       setToastMessage("レターを送信しました");
+      await queryClient.invalidateQueries({ queryKey: ["letters", "public-history"] });
       if (hasAdminToken) {
         await queryClient.invalidateQueries({ queryKey: ["letters"] });
       }
@@ -189,9 +206,9 @@ export function LettersDashboard() {
 
         <Card className="mt-4">
           <SectionHeader eyebrow="Local" title="Sent from this device" description="この端末で送ったレターをローカルに保存して見返せるようにします。" />
-          {localLetterSubmissions.length ? (
+          {mergedLocalSubmissions.length ? (
             <div className="space-y-3">
-              {localLetterSubmissions.map((submission) => (
+              {mergedLocalSubmissions.map((submission) => (
                 <div key={submission.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="font-semibold text-slate-950">{submission.subject}</div>
@@ -203,12 +220,64 @@ export function LettersDashboard() {
                     {submission.radioName}
                     {submission.stationId ? ` / ${submission.stationId}` : " / 共通宛"}
                   </div>
+                  {submission.adoptedInSessionId ? <div className="mt-1 text-xs text-slate-500">adopted in {submission.adoptedInSessionId}</div> : null}
                   <div className="mt-1 text-xs text-slate-500">{new Date(submission.createdAt).toLocaleString("ja-JP")}</div>
                 </div>
               ))}
             </div>
           ) : (
             <EmptyState title="まだ送信履歴はありません" description="最初のレターを送ると、ここにこの端末の履歴が残ります。" />
+          )}
+        </Card>
+
+        <Card className="mt-4">
+          <SectionHeader
+            eyebrow="Public"
+            title="Broadcast adoption history"
+            description="公開 API で自分が送ったレターの採用状況と放送履歴を確認します。本文や返信は含めず、最小要約だけを表示します。"
+          />
+          {!mergedLocalSubmissions.length ? (
+            <EmptyState title="採用履歴の対象はまだありません" description="この端末からレターを送ると、採用状況をここで追跡できます。" />
+          ) : publicHistoryQuery.isPending ? (
+            <EmptyState title="採用履歴を確認しています" description="公開用の履歴 API から最新状態を取得しています。" />
+          ) : publicHistoryQuery.error instanceof Error ? (
+            <EmptyState title="採用履歴を取得できません" description={publicHistoryQuery.error.message} />
+          ) : publicAdoptionEntries.length ? (
+            <div className="space-y-3">
+              {publicAdoptionEntries.map((submission) => (
+                <div key={submission.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-semibold text-slate-950">{submission.subject}</div>
+                    <Badge tone={submission.status === "ADOPTED" ? "accent" : submission.status === "REPLIED" ? "success" : "default"}>
+                      {submission.status}
+                    </Badge>
+                    {submission.adoptedInSessionId ? <Badge tone="default">{submission.adoptedInSessionId}</Badge> : null}
+                  </div>
+                  <div className="mt-2 text-sm text-slate-600">
+                    {submission.radioName}
+                    {submission.stationId ? ` / ${submission.stationId}` : " / 共通宛"}
+                  </div>
+                  {submission.playHistory.length ? (
+                    <div className="mt-3 space-y-2">
+                      {submission.playHistory.map((entry) => (
+                        <div key={entry.id} className="rounded-2xl bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge tone="accent">{entry.segmentType}</Badge>
+                            <Badge tone={entry.resultStatus === "DONE" ? "success" : "default"}>{entry.resultStatus}</Badge>
+                          </div>
+                          <div className="mt-1 font-semibold text-slate-900">{entry.title}</div>
+                          <div className="mt-1 text-xs text-slate-500">{new Date(entry.playedAt).toLocaleString("ja-JP")}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">採用済みですが、まだ放送履歴はありません。</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="まだ採用履歴はありません" description="投稿済みレターの status が更新されると、ここに採用状況と放送履歴が表示されます。" />
           )}
         </Card>
 
@@ -231,46 +300,59 @@ export function LettersDashboard() {
         <PanelColumn className="xl:col-span-7">
           <Card>
             <SectionHeader eyebrow="Inbox" title="Management inbox" description="station と status で絞り、採用・返信・放送履歴をまとめて確認します。" />
-            <div className="mb-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(undefined)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === undefined ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
-              >
-                ALL
-              </button>
-              {letterStatuses.map((status) => (
+            <div className="mb-4 space-y-3">
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Keyword</label>
+                <Input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="件名 / radioName を検索" />
+              </div>
+              <div className="flex flex-wrap gap-2">
                 <button
-                  key={status}
                   type="button"
-                  onClick={() => setSelectedStatus(status)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === status ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
+                  onClick={() => setSelectedStatus(undefined)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === undefined ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
                 >
-                  {status}
+                  ALL
                 </button>
-              ))}
-            </div>
-            {lettersQuery.data?.length ? (
-              <div className="space-y-3">
-                {lettersQuery.data.map((letter) => (
+                {letterStatuses.map((status) => (
                   <button
-                    key={letter.id}
+                    key={status}
                     type="button"
-                    onClick={() => setSelectedLetterId(letter.id)}
-                    className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-                      selectedLetterId === letter.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-800"
-                    }`}
+                    onClick={() => setSelectedStatus(status)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === status ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-semibold">{letter.subject}</div>
-                      <Badge tone={letter.status === "ADOPTED" ? "accent" : letter.status === "REPLIED" ? "success" : "default"}>
-                        {letter.status}
-                      </Badge>
-                    </div>
-                    <div className="mt-1 text-sm opacity-80">{letter.radioName}</div>
+                    {status}
                   </button>
                 ))}
               </div>
+              <p className="text-xs text-slate-500">
+                {lettersQuery.data?.length ?? 0} 件中 {visibleLetters.length} 件を表示
+              </p>
+            </div>
+            {lettersQuery.data?.length ? (
+              visibleLetters.length ? (
+                <div className="space-y-3">
+                  {visibleLetters.map((letter) => (
+                    <button
+                      key={letter.id}
+                      type="button"
+                      onClick={() => setSelectedLetterId(letter.id)}
+                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                        selectedLetterId === letter.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-800"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-semibold">{letter.subject}</div>
+                        <Badge tone={letter.status === "ADOPTED" ? "accent" : letter.status === "REPLIED" ? "success" : "default"}>
+                          {letter.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-1 text-sm opacity-80">{letter.radioName}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState title="検索条件に一致するレターはありません" description="status と keyword を見直すと対象が表示されます。" />
+              )
             ) : (
               <EmptyState
                 title="レター一覧を取得できません"
@@ -378,4 +460,23 @@ function createIdempotencyKey() {
     return crypto.randomUUID();
   }
   return `letter-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function matchesLetterSearch(
+  letter: { subject: string; radioName: string; stationId: string | null },
+  searchText: string,
+) {
+  if (!searchText) {
+    return true;
+  }
+  return [letter.subject, letter.radioName, letter.stationId ?? ""].some((value) => value.toLowerCase().includes(searchText));
+}
+
+function mergeLocalSubmission(submission: LetterSubmissionRecord, publicLetter?: LetterPublicSummary) {
+  return {
+    ...submission,
+    status: publicLetter?.status ?? submission.status,
+    adoptedInSessionId: publicLetter?.adoptedInSessionId ?? null,
+    playHistory: publicLetter?.playHistory ?? [],
+  };
 }

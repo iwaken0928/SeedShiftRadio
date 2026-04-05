@@ -1,5 +1,6 @@
 package com.seedshiftradio.radio;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,4 +11,6 @@ public interface PlayHistoryRepository extends JpaRepository<PlayHistoryEntity, 
 	List<PlayHistoryEntity> findBySessionIdOrderByPlayedAtDesc(String sessionId);
 
 	List<PlayHistoryEntity> findByLetterIdOrderByPlayedAtDesc(String letterId);
+
+	List<PlayHistoryEntity> findByLetterIdInOrderByPlayedAtDesc(Collection<String> letterIds);
 }

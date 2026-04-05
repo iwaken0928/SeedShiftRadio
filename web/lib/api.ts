@@ -4,11 +4,16 @@ import {
   type ConnectionsTestResponse,
   type HealthResponse,
   type LetterDetail,
-  type LetterReplySummary,
+  type LetterPublicLookupResponse,
   type LetterStatus,
   type LetterSummary,
   type MonitorSummary,
   type PlaybackEventRequest,
+  type ProgramTemplateDetail,
+  type ProgramTemplateSummary,
+  type ProgrammingPreviewRequest,
+  type ProgrammingPreviewResponse,
+  type StationProgrammingResponse,
   type ProgramBlockSummary,
   type QueueSnapshot,
   type RadioStatus,
@@ -80,6 +85,24 @@ export function listStations() {
 
 export function getStation(stationId: string) {
   return requestJson<StationDetail>(`/api/stations/${encodeURIComponent(stationId)}`);
+}
+
+export function getStationProgramming(stationId: string) {
+  return requestJson<StationProgrammingResponse>(`/api/stations/${encodeURIComponent(stationId)}/programming`, {
+    headers: withAdminHeaders(),
+  });
+}
+
+export function listProgramTemplates() {
+  return requestJson<ProgramTemplateSummary[]>("/api/program-templates", {
+    headers: withAdminHeaders(),
+  });
+}
+
+export function getProgramTemplate(templateId: string) {
+  return requestJson<ProgramTemplateDetail>(`/api/program-templates/${encodeURIComponent(templateId)}`, {
+    headers: withAdminHeaders(),
+  });
 }
 
 export function getRadioStatus() {
@@ -171,6 +194,14 @@ export function createLetter(
   });
 }
 
+export function lookupLetterPublicHistory(letterIds: string[]) {
+  return requestJson<LetterPublicLookupResponse>("/api/letters/public/history", {
+    method: "POST",
+    body: JSON.stringify({ letterIds }),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export function updateLetterStatus(letterId: string, body: { status: LetterStatus; sessionId?: string | null }) {
   return requestJson(`/api/letters/${encodeURIComponent(letterId)}/status`, {
     method: "POST",
@@ -218,8 +249,8 @@ export function testConnections() {
   });
 }
 
-export function previewProgramming(stationId: string, body: { at: string; pendingLetterCount: number; providerStates?: { musicGen?: string; tts?: string; llm?: string } }) {
-  return requestJson(`/api/stations/${encodeURIComponent(stationId)}/programming/preview`, {
+export function previewProgramming(stationId: string, body: ProgrammingPreviewRequest) {
+  return requestJson<ProgrammingPreviewResponse>(`/api/stations/${encodeURIComponent(stationId)}/programming/preview`, {
     method: "POST",
     body: JSON.stringify(body),
     headers: withAdminHeaders({ "Content-Type": "application/json" }),

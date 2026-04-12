@@ -15,6 +15,9 @@ import com.seedshiftradio.common.api.ApiException;
 public class SettingsService {
 
 	private static final Set<String> CACHE_REUSE_SCOPES = Set.of("DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIVE_ONLY");
+	private static final Set<String> MUSIC_PROVIDER_ADAPTERS = Set.of("MUSICGEN_WORKER", "ACE_STEP");
+	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("flac", "mp3", "opus", "aac", "wav", "wav32");
+	private static final Set<String> LYRICS_TRANSLITERATION_MODES = Set.of("native", "kana", "romaji");
 
 	private final RadioSettingsStore settingsStore;
 	private final ProviderHealthService providerHealthService;
@@ -145,6 +148,69 @@ public class SettingsService {
 			if (endpoint.healthPath() == null || endpoint.healthPath().isBlank()) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + "." + entry.getKey() + ".healthPath は必須です。", Map.of("field", field + "." + entry.getKey() + ".healthPath"));
 			}
+			if ("providers.musicGen".equals(field)) {
+				validateMusicProviderEndpoint(field + "." + entry.getKey(), endpoint);
+			}
+		}
+	}
+
+	private void validateMusicProviderEndpoint(String field, SettingsDocument.ProviderEndpoint endpoint) {
+		if (!MUSIC_PROVIDER_ADAPTERS.contains(endpoint.adapter())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".adapter は MUSICGEN_WORKER または ACE_STEP のいずれかで指定してください。",
+					Map.of("field", field + ".adapter", "value", endpoint.adapter()));
+		}
+		if (endpoint.apiKeyRef() != null && !endpoint.apiKeyRef().isBlank()
+				&& !endpoint.apiKeyRef().startsWith("env:")
+				&& !endpoint.apiKeyRef().startsWith("file:")) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".apiKeyRef は env: または file: 参照で指定してください。",
+					Map.of("field", field + ".apiKeyRef"));
+		}
+		Map<String, SettingsDocument.MusicGenerationModelProfile> profiles = endpoint.modelProfiles() == null ? Map.of() : endpoint.modelProfiles();
+		if (endpoint.defaultModelProfileId() != null && !endpoint.defaultModelProfileId().isBlank() && !profiles.containsKey(endpoint.defaultModelProfileId())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".defaultModelProfileId が modelProfiles に存在しません。",
+					Map.of("field", field + ".defaultModelProfileId", "profileId", endpoint.defaultModelProfileId()));
+		}
+		for (Map.Entry<String, SettingsDocument.MusicGenerationModelProfile> entry : profiles.entrySet()) {
+			validateMusicGenerationProfile(field + ".modelProfiles." + entry.getKey(), entry.getValue());
+		}
+	}
+
+	private void validateMusicGenerationProfile(String field, SettingsDocument.MusicGenerationModelProfile profile) {
+		if (profile.model() == null || profile.model().isBlank()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + ".model は必須です。", Map.of("field", field + ".model"));
+		}
+		if (profile.lyricsLanguage() == null || profile.lyricsLanguage().isBlank()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + ".lyricsLanguage は必須です。", Map.of("field", field + ".lyricsLanguage"));
+		}
+		if (!LYRICS_TRANSLITERATION_MODES.contains(profile.lyricsTransliterationMode())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".lyricsTransliterationMode は native, kana, romaji のいずれかで指定してください。",
+					Map.of("field", field + ".lyricsTransliterationMode"));
+		}
+		if (!MUSIC_OUTPUT_FORMATS.contains(profile.outputFormat())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".outputFormat は flac, mp3, opus, aac, wav, wav32 のいずれかで指定してください。",
+					Map.of("field", field + ".outputFormat", "value", profile.outputFormat()));
+		}
+		if (profile.maxDurationSeconds() == null || profile.maxDurationSeconds() < 10 || profile.maxDurationSeconds() > 600) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".maxDurationSeconds は 10 から 600 の範囲で指定してください。",
+					Map.of("field", field + ".maxDurationSeconds"));
 		}
 	}
 

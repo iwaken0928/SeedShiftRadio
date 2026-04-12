@@ -95,7 +95,7 @@ class MusicGenerationRuntimeServiceTests {
 		assertNull(response.workerJobId());
 		verify(providerJobService).markRunning("provider-job-1", "ace-step", "cache-hit:asset-existing");
 		verify(providerJobService).markSucceeded("provider-job-1");
-		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any());
+		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any(MusicGenerationRequest.class));
 		verify(musicGenWorkerGateway, never()).awaitCompletion(any(), anyString());
 	}
 
@@ -119,7 +119,7 @@ class MusicGenerationRuntimeServiceTests {
 				"queue-1",
 				"corr-1")).thenReturn(providerJob);
 		when(generatedAssetService.findReusableAsset(eq(GeneratedAssetType.MUSIC), anyString())).thenReturn(Optional.empty());
-		when(musicGenWorkerGateway.submitWithFallback(any(), any(MusicGenWorkerGateway.MusicJobRequest.class)))
+		when(musicGenWorkerGateway.submitWithFallback(any(), any(MusicGenerationRequest.class)))
 				.thenReturn(new MusicGenWorkerGateway.SubmittedMusicJob("worker-job-1", "QUEUED", provider));
 		when(musicGenWorkerGateway.awaitCompletion(eq(provider), eq("worker-job-1")))
 				.thenReturn(new MusicGenWorkerGateway.MusicJobStatus(
@@ -130,7 +130,10 @@ class MusicGenerationRuntimeServiceTests {
 						"ace-step:1.0",
 						"prompt-hash-1",
 						null,
-						"generated"));
+						"generated",
+						"acestep-v15-turbo",
+						"acestep-5Hz-lm-0.6B",
+						"12345"));
 		when(generatedAssetService.registerExistingAsset(
 				eq(GeneratedAssetType.MUSIC),
 				eq(Path.of("/tmp/music-created.wav")),
@@ -191,7 +194,7 @@ class MusicGenerationRuntimeServiceTests {
 		assertTrue(response.assetUrl().endsWith("asset-cloned.wav"));
 		verify(providerJobService).markRunning("provider-job-1", "ace-step-fallback", "cache-hit:asset-fallback-cache");
 		verify(providerJobService).markSucceeded("provider-job-1");
-		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any());
+		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any(MusicGenerationRequest.class));
 		verify(musicGenWorkerGateway, never()).awaitCompletion(any(), anyString());
 	}
 
@@ -215,7 +218,7 @@ class MusicGenerationRuntimeServiceTests {
 				"ace-step",
 				"queue-1",
 				"corr-1")).thenReturn(providerJob);
-		when(musicGenWorkerGateway.submitWithFallback(any(), any(MusicGenWorkerGateway.MusicJobRequest.class)))
+		when(musicGenWorkerGateway.submitWithFallback(any(), any(MusicGenerationRequest.class)))
 				.thenReturn(new MusicGenWorkerGateway.SubmittedMusicJob("worker-job-1", "QUEUED", provider));
 		when(musicGenWorkerGateway.awaitCompletion(eq(provider), eq("worker-job-1")))
 				.thenReturn(new MusicGenWorkerGateway.MusicJobStatus(
@@ -226,7 +229,10 @@ class MusicGenerationRuntimeServiceTests {
 						"ace-step:1.0",
 						"prompt-hash-1",
 						null,
-						"generated"));
+						"generated",
+						"acestep-v15-turbo",
+						"acestep-5Hz-lm-0.6B",
+						"12345"));
 		when(generatedAssetService.registerExistingAsset(
 				eq(GeneratedAssetType.MUSIC),
 				eq(Path.of("/tmp/music-created.wav")),

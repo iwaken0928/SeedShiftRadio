@@ -854,10 +854,33 @@ Response:
       "fallbackProviders": [],
       "providers": {
         "ace-step": {
-          "baseUrl": "http://127.0.0.1:8000",
+          "baseUrl": "http://127.0.0.1:8001",
           "healthPath": "/health",
-          "timeoutMs": 5000,
-          "capabilities": ["MUSIC_GEN"]
+          "timeoutMs": 10000,
+          "capabilities": ["MUSIC_GEN", "ACE_STEP", "JAPANESE_LYRICS"],
+          "adapter": "ACE_STEP",
+          "apiKeyRef": "env:ACESTEP_API_KEY",
+          "defaultModelProfileId": "ace-ja-fast",
+          "modelProfiles": {
+            "ace-ja-fast": {
+              "model": "acestep-v15-turbo",
+              "lmModel": "acestep-5Hz-lm-0.6B",
+              "thinking": true,
+              "lyricsLanguage": "ja",
+              "lyricsTransliterationMode": "native",
+              "outputFormat": "wav",
+              "maxDurationSeconds": 120
+            },
+            "ace-ja-xl-fast": {
+              "model": "acestep-v15-xl-turbo",
+              "lmModel": "acestep-5Hz-lm-1.7B",
+              "thinking": true,
+              "lyricsLanguage": "ja",
+              "lyricsTransliterationMode": "native",
+              "outputFormat": "wav",
+              "maxDurationSeconds": 240
+            }
+          }
         }
       }
     }
@@ -896,7 +919,9 @@ Response:
 
 `playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は待機時 prefetch を許可するフラグです。
 
-`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、`providers.musicGen.providers.{key}` は追加で `adapter`, `apiKeyRef`, `defaultModelProfileId`, `modelProfiles` を持ちます。`adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+
+`modelProfiles` の各要素は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTransliterationMode`, `outputFormat`, `maxDurationSeconds` を持ちます。`lyricsTransliterationMode` は `native`, `kana`, `romaji`、`outputFormat` は `flac`, `mp3`, `opus`, `aac`, `wav`, `wav32` を受け付けます。未知 profile id や profile 上限を超える duration は Server 側 validation / 正規化で拒否または補正します。
 
 ### 6.10 `POST /api/settings/test-connections`
 
@@ -923,7 +948,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.12 Provider Health
 
-`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の `ProviderHealthPayload` を返します。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities` を含み、SSE `provider.health.changed` と同じフォーマットでクライアントが再利用しやすくなっています。
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の `ProviderHealthPayload` を返します。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` と同じフォーマットでクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。
 
 ```json
 {
@@ -932,11 +957,26 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
   "lastCheckedAt": "2026-03-20T09:12:00Z",
   "responseTimeMs": 312,
   "message": "FastAPI worker がタイムアウト",
-  "capabilities": ["ace-step:fast"]
+  "capabilities": ["ace-step:fast"],
+  "metadata": {
+    "adapter": "ACE_STEP",
+    "defaultModelProfileId": "ace-ja-fast",
+    "queueSize": 4,
+    "runningJobs": 2,
+    "defaultModel": "acestep-v15-turbo"
+  }
 }
 ```
 
-### 6.13 MonitorSummary
+### 6.13 Music Generation Job Contract
+
+音楽生成ジョブの submit / poll / download は Server 内部の `MusicGenerationProvider` 契約で扱い、Web / C# Client は通常 `queue_item`, `generated_asset`, `provider_job`, `/api/assets/audio/{assetId}.wav`, `/api/monitor/summary` を通じて状態を参照します。外部公開 API として prompt / lyrics 本文を返さない方針を維持します。
+
+`MusicGenerationRequest` は `purpose`, `mode`, `prompt`, `lyrics`, `lyricsLanguage`, `durationSeconds`, `bpm`, `keyScale`, `timeSignature`, `seed`, `modelProfileId`, `outputFormat` を持ちます。`lyricsLanguage=ja` は ACE-Step で `vocal_language=ja` に写像され、既定 profile は `ace-ja-fast` です。
+
+`MusicGenerationJob` 相当の状態は `provider_job` と監視 DTO へ集約し、`queued/running/succeeded/failed/canceled/degraded`, `providerTaskId`, `assetId`, `model`, `lmModel`, `seed`, `duration`, `failureReason` を短い metadata として扱います。prompt / lyrics / letter body / radioName / API key は API response、SSE、標準ログへ生で出しません。
+
+### 6.14 MonitorSummary
 
 `GET /api/monitor/summary` は `ProviderHealth` に加えて、`provider_job` から復元した `runningJobs` / `recentErrors` と、SSE 履歴から抽出した `auditEvents` を返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
 
@@ -1004,6 +1044,7 @@ Event 種別:
 | `program.changed` | `ProgramBlockSummary` | 現在番組 block の切替・更新 |
 | `subtitle.updated` | `SubtitlePayload` | 字幕更新 |
 | `provider.health.changed` | `ProviderHealthPayload` | Provider 異常通知 |
+| `provider.job.queued/running/succeeded/failed` | `ProviderJobPayload` | 生成ジョブ状態。本文や秘密値は含めず id/status/errorCode のみ |
 | `buffer.warning` | `BufferWarningPayload` | 先読み不足通知 |
 | `letter.updated` | `LetterSummary` | レター一覧反映 |
 

@@ -8,12 +8,16 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.stream.StreamEventService;
@@ -23,6 +27,7 @@ public class ProviderHealthService {
 
 	private final ProviderRegistry providerRegistry;
 	private final StreamEventService streamEventService;
+	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	private volatile Map<String, SettingsDtos.ProviderHealthPayload> latestSnapshot = Map.of();
 
@@ -55,7 +60,7 @@ public class ProviderHealthService {
 
 	private SettingsDtos.ProviderHealthPayload probe(ProviderType providerType) {
 		List<ProbeResult> attempts = providerRegistry.resolveChain(providerType).stream()
-				.map(this::probeProvider)
+				.map(provider -> probeProvider(providerType, provider))
 				.toList();
 		String providerTypeKey = providerRegistry.providerGroupKey(providerType);
 		if (attempts.isEmpty()) {
@@ -82,7 +87,8 @@ public class ProviderHealthService {
 					"defaultProvider " + primary.provider().providerKey() + " が " + primary.payload().status()
 							+ " のため fallback " + fallbackUp.provider().providerKey() + " を使用します。",
 					fallbackUp.payload().capabilities(),
-					fallbackUp.payload().baseUrl());
+					fallbackUp.payload().baseUrl(),
+					fallbackUp.payload().metadata());
 		}
 
 		ProbeResult degraded = attempts.stream()
@@ -102,7 +108,8 @@ public class ProviderHealthService {
 					degraded.payload().responseTimeMs(),
 					message,
 					degraded.payload().capabilities(),
-					degraded.payload().baseUrl());
+					degraded.payload().baseUrl(),
+					degraded.payload().metadata());
 		}
 
 		ProbeResult lastFailure = attempts.getLast();
@@ -120,7 +127,7 @@ public class ProviderHealthService {
 				lastFailure.payload().capabilities());
 	}
 
-	private ProbeResult probeProvider(ProviderRegistry.ResolvedProvider provider) {
+	private ProbeResult probeProvider(ProviderType providerType, ProviderRegistry.ResolvedProvider provider) {
 		Instant checkedAt = Instant.now();
 		long startedAt = System.nanoTime();
 		try {
@@ -142,7 +149,8 @@ public class ProviderHealthService {
 						responseTimeMs,
 						"接続成功",
 						provider.capabilities(),
-						provider.baseUrl()));
+						provider.baseUrl(),
+						enrichProviderMetadata(providerType, provider)));
 			}
 			return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
 					provider.providerGroupKey(),
@@ -152,7 +160,8 @@ public class ProviderHealthService {
 					responseTimeMs,
 					"HTTP " + response.statusCode(),
 					provider.capabilities(),
-					provider.baseUrl()));
+					provider.baseUrl(),
+					enrichProviderMetadata(providerType, provider)));
 		} catch (IllegalArgumentException exception) {
 			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "無効な URL です。", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (HttpTimeoutException exception) {
@@ -163,6 +172,122 @@ public class ProviderHealthService {
 			Thread.currentThread().interrupt();
 			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "PROVIDER_INTERRUPTED", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		}
+	}
+
+	private Map<String, Object> enrichProviderMetadata(ProviderType providerType, ProviderRegistry.ResolvedProvider provider) {
+		if (providerType != ProviderType.MUSIC) {
+			return Map.of();
+		}
+		Map<String, Object> metadata = new LinkedHashMap<>();
+		metadata.put("adapter", provider.adapter());
+		if (provider.defaultModelProfileId() != null && !provider.defaultModelProfileId().isBlank()) {
+			metadata.put("defaultModelProfileId", provider.defaultModelProfileId());
+		}
+		if (provider.modelProfiles() != null && !provider.modelProfiles().isEmpty()) {
+			metadata.put("modelProfileIds", List.copyOf(provider.modelProfiles().keySet()));
+		}
+		if (!"ACE_STEP".equals(provider.adapter()) && !provider.capabilities().contains("ACE_STEP")) {
+			return metadata;
+		}
+		readAceStepStats(provider, metadata);
+		readAceStepModels(provider, metadata);
+		return metadata;
+	}
+
+	private void readAceStepStats(ProviderRegistry.ResolvedProvider provider, Map<String, Object> metadata) {
+		try {
+			JsonNode data = sendAceStepProbe(provider, "/v1/stats").path("data");
+			JsonNode jobs = data.path("jobs");
+			putIfPresent(metadata, "queuedJobs", jobs.path("queued"));
+			putIfPresent(metadata, "runningJobs", jobs.path("running"));
+			putIfPresent(metadata, "queueSize", data.path("queue_size"));
+			putIfPresent(metadata, "averageJobSeconds", data.path("avg_job_seconds"));
+		} catch (RuntimeException exception) {
+			metadata.put("statsStatus", "UNAVAILABLE");
+		}
+	}
+
+	private void readAceStepModels(ProviderRegistry.ResolvedProvider provider, Map<String, Object> metadata) {
+		try {
+			JsonNode data = sendAceStepProbe(provider, "/v1/models").path("data");
+			String defaultModel = textOrNull(data.path("default_model"));
+			if (defaultModel != null) {
+				metadata.put("defaultModel", defaultModel);
+			}
+			List<String> models = new ArrayList<>();
+			JsonNode modelNodes = data.path("models");
+			if (modelNodes.isArray()) {
+				for (JsonNode modelNode : modelNodes) {
+					String name = textOrNull(modelNode.path("name"));
+					if (name != null && !name.isBlank()) {
+						models.add(name);
+					}
+				}
+			}
+			if (!models.isEmpty()) {
+				metadata.put("models", List.copyOf(models));
+			}
+		} catch (RuntimeException exception) {
+			metadata.put("modelsStatus", "UNAVAILABLE");
+		}
+	}
+
+	private JsonNode sendAceStepProbe(ProviderRegistry.ResolvedProvider provider, String path) {
+		try {
+			HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(provider.baseUrl() + path))
+					.GET()
+					.timeout(Duration.ofMillis(provider.timeoutMs()))
+					.header("Accept", "application/json");
+			String apiKey = resolveSecret(provider.apiKeyRef());
+			if (apiKey != null && !apiKey.isBlank()) {
+				builder.header("Authorization", "Bearer " + apiKey);
+			}
+			HttpClient client = HttpClient.newBuilder()
+					.connectTimeout(Duration.ofMillis(provider.timeoutMs()))
+					.build();
+			HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				throw new IllegalStateException("ACE-Step probe failed");
+			}
+			return objectMapper.readTree(response.body());
+		} catch (IOException exception) {
+			throw new IllegalStateException("ACE-Step probe failed", exception);
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("ACE-Step probe interrupted", exception);
+		}
+	}
+
+	private String resolveSecret(String secretRef) {
+		if (secretRef == null || secretRef.isBlank()) {
+			return null;
+		}
+		if (secretRef.startsWith("env:")) {
+			return System.getenv(secretRef.substring("env:".length()));
+		}
+		if (secretRef.startsWith("file:")) {
+			try {
+				return java.nio.file.Files.readString(java.nio.file.Path.of(secretRef.substring("file:".length()))).trim();
+			} catch (IOException exception) {
+				return null;
+			}
+		}
+		return null;
+	}
+
+	private void putIfPresent(Map<String, Object> metadata, String key, JsonNode value) {
+		if (value == null || value.isMissingNode() || value.isNull()) {
+			return;
+		}
+		if (value.isNumber()) {
+			metadata.put(key, value.numberValue());
+		} else {
+			metadata.put(key, value.asText());
+		}
+	}
+
+	private String textOrNull(JsonNode node) {
+		return node == null || node.isMissingNode() || node.isNull() ? null : node.asText();
 	}
 
 	private boolean hasMeaningfulChange(
@@ -200,7 +325,8 @@ public class ProviderHealthService {
 				responseTimeMs,
 				message,
 				capabilities == null ? List.of() : capabilities,
-				baseUrl);
+				baseUrl,
+				Map.of());
 	}
 
 	private long elapsedMillis(long startedAt) {

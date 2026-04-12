@@ -46,6 +46,10 @@ public class ProviderRegistry {
 					normalizeHealthPath(endpoint.healthPath()),
 					endpoint.timeoutMs(),
 					endpoint.capabilities(),
+					endpoint.adapter(),
+					endpoint.apiKeyRef(),
+					endpoint.defaultModelProfileId(),
+					endpoint.modelProfiles(),
 					!providerKey.equals(group.defaultProvider())));
 		}
 		return List.copyOf(resolved);
@@ -90,6 +94,22 @@ public class ProviderRegistry {
 			String healthPath,
 			int timeoutMs,
 			List<String> capabilities,
+			String adapter,
+			String apiKeyRef,
+			String defaultModelProfileId,
+			java.util.Map<String, SettingsDocument.MusicGenerationModelProfile> modelProfiles,
 			boolean fallback) {
+
+		public ResolvedProvider(
+				ProviderType providerType,
+				String providerGroupKey,
+				String providerKey,
+				String baseUrl,
+				String healthPath,
+				int timeoutMs,
+				List<String> capabilities,
+				boolean fallback) {
+			this(providerType, providerGroupKey, providerKey, baseUrl, healthPath, timeoutMs, capabilities, null, null, null, java.util.Map.of(), fallback);
+		}
 	}
 }

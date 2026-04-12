@@ -200,7 +200,7 @@ public record SettingsDocument(
 					new ProviderGroup(
 							"ace-step",
 							List.of(),
-							Map.of("ace-step", new ProviderEndpoint("http://127.0.0.1:8000", "/health", 5_000, List.of("MUSIC_GEN")))));
+							Map.of("ace-step", ProviderEndpoint.aceStepDefaults())));
 		}
 	}
 
@@ -234,18 +234,132 @@ public record SettingsDocument(
 		}
 	}
 
-	public record ProviderEndpoint(String baseUrl, String healthPath, Integer timeoutMs, List<String> capabilities) {
+	public record ProviderEndpoint(
+			String baseUrl,
+			String healthPath,
+			Integer timeoutMs,
+			List<String> capabilities,
+			String adapter,
+			String apiKeyRef,
+			String defaultModelProfileId,
+			Map<String, MusicGenerationModelProfile> modelProfiles) {
+
+		public ProviderEndpoint(String baseUrl, String healthPath, Integer timeoutMs, List<String> capabilities) {
+			this(baseUrl, healthPath, timeoutMs, capabilities, null, null, null, null);
+		}
 
 		public ProviderEndpoint normalize() {
+			Map<String, MusicGenerationModelProfile> normalizedProfiles = modelProfiles == null || modelProfiles.isEmpty()
+					? Map.of()
+					: new LinkedHashMap<>(modelProfiles.entrySet().stream()
+							.collect(java.util.stream.Collectors.toMap(
+									Map.Entry::getKey,
+									entry -> entry.getValue() == null
+											? MusicGenerationModelProfile.aceJaFast()
+											: entry.getValue().normalize(),
+									(left, right) -> right,
+									LinkedHashMap::new)));
+			String normalizedDefaultProfileId = defaultModelProfileId == null || defaultModelProfileId.isBlank()
+					? normalizedProfiles.keySet().stream().findFirst().orElse(null)
+					: defaultModelProfileId;
 			return new ProviderEndpoint(
 					(baseUrl == null || baseUrl.isBlank()) ? "http://127.0.0.1" : baseUrl,
 					(healthPath == null || healthPath.isBlank()) ? "/health" : healthPath,
 					timeoutMs == null || timeoutMs < 100 ? 5_000 : timeoutMs,
-					capabilities == null ? List.of() : List.copyOf(capabilities));
+					capabilities == null ? List.of() : List.copyOf(capabilities),
+					(adapter == null || adapter.isBlank()) ? "MUSICGEN_WORKER" : adapter.toUpperCase(),
+					apiKeyRef == null || apiKeyRef.isBlank() ? null : apiKeyRef,
+					normalizedDefaultProfileId,
+					normalizedProfiles);
 		}
 
 		static ProviderEndpoint defaults() {
 			return new ProviderEndpoint("http://127.0.0.1", "/health", 5_000, List.of());
+		}
+
+		static ProviderEndpoint aceStepDefaults() {
+			return new ProviderEndpoint(
+					"http://127.0.0.1:8001",
+					"/health",
+					10_000,
+					List.of("MUSIC_GEN", "ACE_STEP", "JAPANESE_LYRICS"),
+					"ACE_STEP",
+					"env:ACESTEP_API_KEY",
+					"ace-ja-fast",
+					MusicGenerationModelProfile.defaultAceStepProfiles());
+		}
+	}
+
+	public record MusicGenerationModelProfile(
+			String model,
+			String lmModel,
+			Boolean thinking,
+			String lyricsLanguage,
+			String lyricsTransliterationMode,
+			String outputFormat,
+			Integer maxDurationSeconds) {
+
+		public MusicGenerationModelProfile normalize() {
+			return new MusicGenerationModelProfile(
+					(model == null || model.isBlank()) ? "acestep-v15-turbo" : model,
+					(lmModel == null || lmModel.isBlank()) ? "acestep-5Hz-lm-0.6B" : lmModel,
+					thinking == null ? Boolean.TRUE : thinking,
+					(lyricsLanguage == null || lyricsLanguage.isBlank()) ? "ja" : lyricsLanguage,
+					normalizeTransliterationMode(lyricsTransliterationMode),
+					(outputFormat == null || outputFormat.isBlank()) ? "wav" : outputFormat.toLowerCase(),
+					maxDurationSeconds == null || maxDurationSeconds < 10 ? 120 : Math.min(maxDurationSeconds, 600));
+		}
+
+		static Map<String, MusicGenerationModelProfile> defaultAceStepProfiles() {
+			Map<String, MusicGenerationModelProfile> profiles = new LinkedHashMap<>();
+			profiles.put("ace-ja-fast", aceJaFast());
+			profiles.put("ace-ja-balanced", new MusicGenerationModelProfile(
+					"acestep-v15-turbo",
+					"acestep-5Hz-lm-1.7B",
+					true,
+					"ja",
+					"native",
+					"wav",
+					180));
+			profiles.put("ace-ja-xl-fast", new MusicGenerationModelProfile(
+					"acestep-v15-xl-turbo",
+					"acestep-5Hz-lm-1.7B",
+					true,
+					"ja",
+					"native",
+					"wav",
+					240));
+			profiles.put("ace-ja-xl-quality", new MusicGenerationModelProfile(
+					"acestep-v15-xl-sft",
+					"acestep-5Hz-lm-4B",
+					true,
+					"ja",
+					"native",
+					"wav",
+					300));
+			return profiles;
+		}
+
+		static MusicGenerationModelProfile aceJaFast() {
+			return new MusicGenerationModelProfile(
+					"acestep-v15-turbo",
+					"acestep-5Hz-lm-0.6B",
+					true,
+					"ja",
+					"native",
+					"wav",
+					120);
+		}
+
+		private static String normalizeTransliterationMode(String value) {
+			if (value == null || value.isBlank()) {
+				return "native";
+			}
+			String normalized = value.toLowerCase();
+			return switch (normalized) {
+				case "native", "kana", "romaji" -> normalized;
+				default -> "native";
+			};
 		}
 	}
 

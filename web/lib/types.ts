@@ -331,6 +331,7 @@ export interface ProviderHealthPayload {
   message: string;
   capabilities: string[];
   baseUrl: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface HealthResponse {
@@ -430,6 +431,20 @@ export interface ProviderEndpoint {
   healthPath: string;
   timeoutMs: number;
   capabilities: string[];
+  adapter?: string;
+  apiKeyRef?: string | null;
+  defaultModelProfileId?: string | null;
+  modelProfiles?: Record<string, MusicGenerationModelProfile>;
+}
+
+export interface MusicGenerationModelProfile {
+  model: string;
+  lmModel: string;
+  thinking: boolean;
+  lyricsLanguage: string;
+  lyricsTransliterationMode: string;
+  outputFormat: string;
+  maxDurationSeconds: number;
 }
 
 export interface SecuritySettings {

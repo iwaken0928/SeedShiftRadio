@@ -35,6 +35,12 @@ class ProviderHealthServiceTests {
 		httpServer = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		httpServer.createContext("/up", new FixedResponseHandler(200, "ok"));
 		httpServer.createContext("/error", new FixedResponseHandler(503, "error"));
+		httpServer.createContext("/v1/stats", new FixedResponseHandler(
+				200,
+				"{\"data\":{\"queue_size\":4,\"avg_job_seconds\":12.5,\"jobs\":{\"queued\":1,\"running\":2}}}"));
+		httpServer.createContext("/v1/models", new FixedResponseHandler(
+				200,
+				"{\"data\":{\"default_model\":\"acestep-v15-turbo\",\"models\":[{\"name\":\"acestep-v15-turbo\"}]}}"));
 		httpServer.start();
 
 		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort();
@@ -55,7 +61,15 @@ class ProviderHealthServiceTests {
 								List.of("ace-step-fallback"),
 								Map.of(
 										"ace-step-primary", new SettingsDocument.ProviderEndpoint("http://127.0.0.1:1", "/health", 1_000, List.of("MUSIC_GEN")),
-										"ace-step-fallback", new SettingsDocument.ProviderEndpoint(baseUrl, "/up", 1_000, List.of("MUSIC_GEN"))))),
+										"ace-step-fallback", new SettingsDocument.ProviderEndpoint(
+												baseUrl,
+												"/up",
+												1_000,
+												List.of("MUSIC_GEN", "ACE_STEP", "JAPANESE_LYRICS"),
+												"ACE_STEP",
+												null,
+												"ace-ja-fast",
+												SettingsDocument.MusicGenerationModelProfile.defaultAceStepProfiles())))),
 				SettingsDocument.SecuritySettings.defaults(),
 				SettingsDocument.FeatureSettings.defaults())
 				.normalize();
@@ -82,6 +96,8 @@ class ProviderHealthServiceTests {
 		assertEquals("DEGRADED", response.get("tts").status());
 		assertEquals("DEGRADED", response.get("musicGen").status());
 		assertEquals("ace-step-fallback", response.get("musicGen").providerKey());
+		assertEquals(4, response.get("musicGen").metadata().get("queueSize"));
+		assertEquals("acestep-v15-turbo", response.get("musicGen").metadata().get("defaultModel"));
 		assertEquals(1, events.size());
 		assertEquals("provider.health.changed", events.getFirst().eventType());
 		assertEquals(response, events.getFirst().payload());

@@ -45,7 +45,7 @@ public class MusicGenerationRuntimeService {
 
 	public GeneratedMusicAsset generate(String stationId, QueueItemEntity item) {
 		List<MusicGenWorkerGateway.ResolvedMusicProvider> providers = musicGenWorkerGateway.resolveProviders();
-		MusicGenWorkerGateway.MusicJobRequest request = buildRequest(stationId, item);
+		MusicGenerationRequest request = buildRequest(stationId, item);
 		String reuseScope = settingsStore.load().cache().musicReuseScope();
 		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
 				ProviderJobType.MUSIC_GEN,
@@ -84,7 +84,7 @@ public class MusicGenerationRuntimeService {
 					item.getId(),
 					providerJob.getId(),
 					cacheKey,
-					buildGeneratedMetadata(stationId, item, submittedJob.provider(), providerJob, completedJob, cacheKey));
+					buildGeneratedMetadata(stationId, item, request, submittedJob.provider(), providerJob, completedJob, cacheKey));
 			providerJobService.markSucceeded(providerJob.getId());
 			return new GeneratedMusicAsset(
 					asset.getId(),
@@ -102,7 +102,7 @@ public class MusicGenerationRuntimeService {
 
 	private CachedAssetHit findReusableAsset(
 			List<MusicGenWorkerGateway.ResolvedMusicProvider> providers,
-			MusicGenWorkerGateway.MusicJobRequest request,
+			MusicGenerationRequest request,
 			QueueItemEntity item,
 			String reuseScope) {
 		if (NO_REUSE_SCOPES.contains(reuseScope)) {
@@ -118,20 +118,32 @@ public class MusicGenerationRuntimeService {
 		return null;
 	}
 
-	private MusicGenWorkerGateway.MusicJobRequest buildRequest(String stationId, QueueItemEntity item) {
-		return new MusicGenWorkerGateway.MusicJobRequest(
+	private MusicGenerationRequest buildRequest(String stationId, QueueItemEntity item) {
+		String genre = resolveGenre(stationId);
+		List<String> mood = resolveMood(item.getSlotRole());
+		String prompt = buildPrompt(genre, mood, item);
+		String lyrics = buildSafeJapaneseLyrics(genre, mood, item);
+		return new MusicGenerationRequest(
 				item.getCorrelationId() + ":" + item.getId(),
 				stationId,
-				"BGM",
-				resolveGenre(stationId),
-				resolveMood(item.getSlotRole()),
+				"radio",
+				"JAPANESE_SONG",
+				prompt,
+				lyrics,
+				"ja",
 				normalizeDurationSec(item.getDurationMs()),
-				resolveSeed(item));
+				resolveBpm(item.getSlotRole()),
+				"",
+				"4",
+				resolveSeed(item),
+				null,
+				"wav");
 	}
 
 	private Map<String, Object> buildGeneratedMetadata(
 			String stationId,
 			QueueItemEntity item,
+			MusicGenerationRequest request,
 			MusicGenWorkerGateway.ResolvedMusicProvider provider,
 			ProviderJobEntity providerJob,
 			MusicGenWorkerGateway.MusicJobStatus completedJob,
@@ -147,8 +159,18 @@ public class MusicGenerationRuntimeService {
 		metadata.put("segmentType", item.getSegmentType().name());
 		metadata.put("slotRole", item.getSlotRole().name());
 		metadata.put("durationSec", completedJob.durationSec());
-		if (completedJob.promptHash() != null && !completedJob.promptHash().isBlank()) {
-			metadata.put("promptHash", completedJob.promptHash());
+		metadata.put("modelProfileId", request.modelProfileId());
+		metadata.put("lyricsLanguage", request.lyricsLanguage());
+		metadata.put("promptHash", completedJob.promptHash() == null || completedJob.promptHash().isBlank() ? sha256(request.prompt()) : completedJob.promptHash());
+		metadata.put("lyricsHash", sha256(request.lyrics()));
+		if (completedJob.model() != null && !completedJob.model().isBlank()) {
+			metadata.put("model", completedJob.model());
+		}
+		if (completedJob.lmModel() != null && !completedJob.lmModel().isBlank()) {
+			metadata.put("lmModel", completedJob.lmModel());
+		}
+		if (completedJob.seed() != null && !completedJob.seed().isBlank()) {
+			metadata.put("seed", completedJob.seed());
 		}
 		return metadata;
 	}
@@ -170,6 +192,52 @@ public class MusicGenerationRuntimeService {
 		metadata.put("segmentType", item.getSegmentType().name());
 		metadata.put("slotRole", item.getSlotRole().name());
 		return metadata;
+	}
+
+	private String buildPrompt(String genre, List<String> mood, QueueItemEntity item) {
+		return "Japanese original radio song, "
+				+ "genre=" + sanitizePromptToken(genre)
+				+ ", mood=" + String.join(",", mood.stream().map(this::sanitizePromptToken).toList())
+				+ ", clear Japanese vocal, no artist imitation, no copyrighted song reference, "
+				+ "fits a local AI radio music break titled " + sanitizePromptToken(item.getTitle());
+	}
+
+	private String buildSafeJapaneseLyrics(String genre, List<String> mood, QueueItemEntity item) {
+		String tone = mood.contains("bright") || mood.contains("intro") ? "新しい朝" : mood.contains("closing") ? "静かな夜" : "ゆるやかな時間";
+		String scene = sanitizeJapaneseText(item.getTitle());
+		if (scene.isBlank()) {
+			scene = sanitizeJapaneseText(genre);
+		}
+		return String.join("\n",
+				"[Verse]",
+				"窓辺をすべる " + tone + "の風",
+				"名前のないリズムが 胸でほどけていく",
+				"[Chorus]",
+				"この街の音に 耳を澄ませば",
+				"小さな願いが メロディーになる",
+				"[Bridge]",
+				scene + "を越えて まだ見ぬ方へ",
+				"[Outro]",
+				"また次の曲で 会えますように");
+	}
+
+	private Integer resolveBpm(SlotRole slotRole) {
+		return switch (slotRole) {
+			case OPENING -> 124;
+			case TOPIC -> 108;
+			case LETTER -> 92;
+			case MUSIC_BREAK -> 112;
+			case ENDING -> 88;
+		};
+	}
+
+	private String sanitizePromptToken(String value) {
+		return value == null ? "" : value.replaceAll("[\r\n\t]+", " ").replaceAll("[^A-Za-z0-9ぁ-んァ-ン一-龠ー _,-]", " ").trim();
+	}
+
+	private String sanitizeJapaneseText(String value) {
+		String sanitized = value == null ? "" : value.replaceAll("[\r\n\t]+", " ").replaceAll("[<>\\[\\]{}]", " ").trim();
+		return sanitized.length() > 16 ? sanitized.substring(0, 16) : sanitized;
 	}
 
 	private String resolveGenre(String stationId) {
@@ -199,32 +267,39 @@ public class MusicGenerationRuntimeService {
 
 	private String buildCacheKey(
 			MusicGenWorkerGateway.ResolvedMusicProvider provider,
-			MusicGenWorkerGateway.MusicJobRequest request,
+			MusicGenerationRequest request,
 			QueueItemEntity item,
 			String reuseScope) {
 		if (NO_REUSE_SCOPES.contains(reuseScope)) {
 			return null;
 		}
-		List<String> normalizedMood = request.mood() == null
-				? List.of()
-				: request.mood().stream().map(this::normalize).toList();
+		SettingsDocument.MusicGenerationModelProfile profile = provider.profile(request.modelProfileId());
+		MusicGenerationRequest normalizedRequest = request.normalize(profile);
 		String scopePartition = switch (reuseScope) {
 			case "GLOBAL" -> "global";
 			case "SESSION" -> normalize(item.getSessionId());
-			case "STATION" -> normalize(request.stationId());
-			default -> normalize(request.stationId());
+			case "STATION" -> normalize(normalizedRequest.stationId());
+			default -> normalize(normalizedRequest.stationId());
 		};
 		String raw = String.join(
 				"|",
 				normalize(provider.providerKey()),
 				normalize(provider.baseUrl()),
+				normalize(profile.model()),
+				normalize(profile.lmModel()),
 				normalize(reuseScope),
 				scopePartition,
-				normalize(request.mode()),
-				normalize(request.genre()),
-				String.join(",", normalizedMood),
-				String.valueOf(request.durationSec()),
-				String.valueOf(request.seed() == null ? 0 : request.seed()));
+				normalize(normalizedRequest.purpose()),
+				normalize(normalizedRequest.mode()),
+				normalize(normalizedRequest.lyricsLanguage()),
+				sha256(normalizedRequest.prompt()),
+				sha256(normalizedRequest.lyrics()),
+				normalize(normalizedRequest.keyScale()),
+				normalize(normalizedRequest.timeSignature()),
+				String.valueOf(normalizedRequest.bpm() == null ? 0 : normalizedRequest.bpm()),
+				String.valueOf(normalizedRequest.durationSeconds()),
+				String.valueOf(normalizedRequest.seed() == null ? 0 : normalizedRequest.seed()),
+				normalize(normalizedRequest.outputFormat()));
 		return sha256(raw);
 	}
 

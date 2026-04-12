@@ -22,6 +22,7 @@ import type {
   ProgrammingPreviewResponse,
   FeatureSettings,
   ProviderCatalog,
+  ProviderEndpoint,
   ProviderGroup,
   ProviderHealthPayload,
   SettingsResponse,
@@ -42,6 +43,9 @@ const PROVIDER_LABELS: Record<keyof ProviderCatalog, string> = {
   musicGen: "MusicGen",
 };
 const PROGRAMMING_STATE_OPTIONS = ["UP", "DEGRADED", "DOWN", "UNKNOWN"] as const;
+const PROVIDER_ADAPTER_OPTIONS = ["MUSICGEN_WORKER", "ACE_STEP"] as const;
+type ProviderEndpointField = "baseUrl" | "healthPath" | "timeoutMs" | "capabilities" | "adapter" | "apiKeyRef" | "defaultModelProfileId";
+type ProviderEndpointValue = string | number | string[] | null;
 const SELECT_CLASS_NAME =
   "w-full rounded-2xl border border-slate-300 bg-white/85 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-200";
 
@@ -734,7 +738,7 @@ function ProviderGroupEditor({
   health?: ProviderHealthPayload;
   onDefaultChange: (providerKey: string) => void;
   onFallbackToggle: (providerKey: string, checked: boolean) => void;
-  onEndpointChange: (providerKey: string, field: "baseUrl" | "healthPath" | "timeoutMs" | "capabilities", value: string | number | string[]) => void;
+  onEndpointChange: (providerKey: string, field: ProviderEndpointField, value: ProviderEndpointValue) => void;
 }) {
   const providerKeys = Object.keys(group.providers);
 
@@ -790,43 +794,97 @@ function ProviderGroupEditor({
       </div>
 
       <div className="mt-4 space-y-3">
-        {providerKeys.map((providerKey) => (
-          <div key={providerKey} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="font-semibold text-slate-950">{providerKey}</div>
-              {providerKey === group.defaultProvider ? <Badge tone="success">default</Badge> : null}
-              {group.fallbackProviders.includes(providerKey) ? <Badge tone="warning">fallback</Badge> : null}
+        {providerKeys.map((providerKey) => {
+          const endpoint = group.providers[providerKey];
+          const profileEntries = Object.entries(endpoint.modelProfiles ?? {});
+          return (
+            <div key={providerKey} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-semibold text-slate-950">{providerKey}</div>
+                {providerKey === group.defaultProvider ? <Badge tone="success">default</Badge> : null}
+                {group.fallbackProviders.includes(providerKey) ? <Badge tone="warning">fallback</Badge> : null}
+                {groupKey === "musicGen" ? <Badge tone="accent">{endpoint.adapter ?? "MUSICGEN_WORKER"}</Badge> : null}
+              </div>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                <TextField
+                  id={`${groupKey}-${providerKey}-baseUrl`}
+                  label="Base URL"
+                  value={endpoint.baseUrl}
+                  onChange={(value) => onEndpointChange(providerKey, "baseUrl", value)}
+                />
+                <TextField
+                  id={`${groupKey}-${providerKey}-healthPath`}
+                  label="Health Path"
+                  value={endpoint.healthPath}
+                  onChange={(value) => onEndpointChange(providerKey, "healthPath", value)}
+                />
+                <NumberField
+                  id={`${groupKey}-${providerKey}-timeoutMs`}
+                  label="Timeout (ms)"
+                  value={endpoint.timeoutMs}
+                  min={100}
+                  onChange={(value) => onEndpointChange(providerKey, "timeoutMs", value)}
+                />
+                <TextField
+                  id={`${groupKey}-${providerKey}-capabilities`}
+                  label="Capabilities"
+                  value={endpoint.capabilities.join(", ")}
+                  placeholder="MUSIC_GEN, ACE_STEP, JAPANESE_LYRICS"
+                  onChange={(value) => onEndpointChange(providerKey, "capabilities", splitCsv(value))}
+                />
+                {groupKey === "musicGen" ? (
+                  <>
+                    <SelectField
+                      id={`${groupKey}-${providerKey}-adapter`}
+                      label="Adapter"
+                      value={endpoint.adapter ?? "MUSICGEN_WORKER"}
+                      options={PROVIDER_ADAPTER_OPTIONS}
+                      onChange={(value) => onEndpointChange(providerKey, "adapter", value)}
+                    />
+                    <TextField
+                      id={`${groupKey}-${providerKey}-apiKeyRef`}
+                      label="API Key Ref"
+                      value={endpoint.apiKeyRef ?? ""}
+                      placeholder="env:ACESTEP_API_KEY"
+                      onChange={(value) => onEndpointChange(providerKey, "apiKeyRef", value.trim() ? value : null)}
+                    />
+                    <TextField
+                      id={`${groupKey}-${providerKey}-defaultProfile`}
+                      label="Default Profile"
+                      value={endpoint.defaultModelProfileId ?? ""}
+                      placeholder="ace-ja-fast"
+                      onChange={(value) => onEndpointChange(providerKey, "defaultModelProfileId", value.trim() ? value : null)}
+                    />
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-sm leading-6 text-slate-600 md:col-span-2">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Model Profiles</div>
+                      {profileEntries.length > 0 ? (
+                        <div className="grid gap-2 lg:grid-cols-2">
+                          {profileEntries.map(([profileId, profile]) => (
+                            <div key={profileId} className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                              <div className="font-semibold text-slate-950">{profileId}</div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {profile.model} / {profile.lmModel}
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <Badge tone="accent">{profile.lyricsLanguage}</Badge>
+                                <Badge tone="accent">{profile.lyricsTransliterationMode}</Badge>
+                                <Badge tone="accent">{profile.outputFormat}</Badge>
+                                <Badge tone={profile.thinking ? "success" : "warning"}>{profile.thinking ? "thinking" : "no thinking"}</Badge>
+                                <Badge tone="accent">max {profile.maxDurationSeconds}s</Badge>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>profile metadata は保存済み設定にありません。</div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </div>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <TextField
-                id={`${groupKey}-${providerKey}-baseUrl`}
-                label="Base URL"
-                value={group.providers[providerKey].baseUrl}
-                onChange={(value) => onEndpointChange(providerKey, "baseUrl", value)}
-              />
-              <TextField
-                id={`${groupKey}-${providerKey}-healthPath`}
-                label="Health Path"
-                value={group.providers[providerKey].healthPath}
-                onChange={(value) => onEndpointChange(providerKey, "healthPath", value)}
-              />
-              <NumberField
-                id={`${groupKey}-${providerKey}-timeoutMs`}
-                label="Timeout (ms)"
-                value={group.providers[providerKey].timeoutMs}
-                min={100}
-                onChange={(value) => onEndpointChange(providerKey, "timeoutMs", value)}
-              />
-              <TextField
-                id={`${groupKey}-${providerKey}-capabilities`}
-                label="Capabilities"
-                value={group.providers[providerKey].capabilities.join(", ")}
-                placeholder="SCRIPT_GEN, TTS_GEN"
-                onChange={(value) => onEndpointChange(providerKey, "capabilities", splitCsv(value))}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Card>
   );
@@ -860,8 +918,31 @@ function ConnectionResultCard({ label, health }: { label: string; health: Provid
           <div className="mt-1">{health.responseTimeMs != null ? `${health.responseTimeMs} ms` : "-"}</div>
         </div>
       </div>
+      {health.metadata && Object.keys(health.metadata).length > 0 ? (
+        <div className="mt-3 grid gap-2 text-sm text-slate-500 md:grid-cols-2">
+          {Object.entries(health.metadata).map(([key, value]) => (
+            <div key={key} className="rounded-2xl border border-slate-200 bg-white/70 px-3 py-2">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{key}</div>
+              <div className="mt-1 break-words">{formatMetadataValue(value)}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function formatMetadataValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+  if (value == null) {
+    return "-";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 function createDraft(settings: SettingsResponse): SettingsUpdateRequest {
@@ -925,13 +1006,31 @@ function cloneProviderGroup(group: ProviderGroup): ProviderGroup {
     defaultProvider: group.defaultProvider,
     fallbackProviders: [...group.fallbackProviders],
     providers: Object.fromEntries(
-      Object.entries(group.providers).map(([providerKey, endpoint]) => [
-        providerKey,
+      Object.entries(group.providers).map(([providerKey, endpoint]) => [providerKey, cloneProviderEndpoint(endpoint)]),
+    ),
+  };
+}
+
+function cloneProviderEndpoint(endpoint: ProviderEndpoint): ProviderEndpoint {
+  return {
+    baseUrl: endpoint.baseUrl,
+    healthPath: endpoint.healthPath,
+    timeoutMs: endpoint.timeoutMs,
+    capabilities: [...endpoint.capabilities],
+    adapter: endpoint.adapter,
+    apiKeyRef: endpoint.apiKeyRef ?? null,
+    defaultModelProfileId: endpoint.defaultModelProfileId ?? null,
+    modelProfiles: Object.fromEntries(
+      Object.entries(endpoint.modelProfiles ?? {}).map(([profileId, profile]) => [
+        profileId,
         {
-          baseUrl: endpoint.baseUrl,
-          healthPath: endpoint.healthPath,
-          timeoutMs: endpoint.timeoutMs,
-          capabilities: [...endpoint.capabilities],
+          model: profile.model,
+          lmModel: profile.lmModel,
+          thinking: profile.thinking,
+          lyricsLanguage: profile.lyricsLanguage,
+          lyricsTransliterationMode: profile.lyricsTransliterationMode,
+          outputFormat: profile.outputFormat,
+          maxDurationSeconds: profile.maxDurationSeconds,
         },
       ]),
     ),

@@ -67,7 +67,24 @@ public final class SettingsDtos {
 			Long responseTimeMs,
 			String message,
 			List<String> capabilities,
-			String baseUrl) {
+			String baseUrl,
+			Map<String, Object> metadata) {
+
+		public ProviderHealthPayload(
+				String providerType,
+				String providerKey,
+				String status,
+				Instant lastCheckedAt,
+				Long responseTimeMs,
+				String message,
+				List<String> capabilities,
+				String baseUrl) {
+			this(providerType, providerKey, status, lastCheckedAt, responseTimeMs, message, capabilities, baseUrl, Map.of());
+		}
+
+		public ProviderHealthPayload {
+			metadata = metadata == null ? Map.of() : Map.copyOf(new LinkedHashMap<>(metadata));
+		}
 	}
 
 	public record ConnectionTestResponse(Instant checkedAt, Map<String, ProviderHealthPayload> providers) {

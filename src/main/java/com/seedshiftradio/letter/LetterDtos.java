@@ -43,7 +43,7 @@ public final class LetterDtos {
 			LetterStatus status,
 			String adoptedInSessionId,
 			Instant createdAt,
-			List<LetterReplySummary> replies) {
+			List<LetterReplyListSummary> replies) {
 	}
 
 	public record LetterDetailResponse(
@@ -60,5 +60,8 @@ public final class LetterDtos {
 	}
 
 	public record LetterReplySummary(String id, String replyText, Instant createdAt) {
+	}
+
+	public record LetterReplyListSummary(String id, Instant createdAt) {
 	}
 }

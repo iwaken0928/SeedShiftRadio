@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterChangedEvent;
-import com.seedshiftradio.letter.LetterDtos.LetterReplySummary;
+import com.seedshiftradio.letter.LetterDtos.LetterReplyListSummary;
 import com.seedshiftradio.letter.LetterDtos.LetterSummaryResponse;
 import com.seedshiftradio.radio.RadioEventRecord;
 
@@ -39,7 +39,7 @@ class StreamEventServiceTests {
 				LetterStatus.UNREAD,
 				null,
 				Instant.parse("2026-03-20T09:00:00Z"),
-				List.of(new LetterReplySummary("reply-001", "ありがとうございます。", Instant.parse("2026-03-20T10:00:00Z"))));
+				List.of(new LetterReplyListSummary("reply-001", Instant.parse("2026-03-20T10:00:00Z"))));
 
 		service.onLetterChanged(new LetterChangedEvent(summary));
 

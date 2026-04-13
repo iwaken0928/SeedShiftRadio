@@ -44,7 +44,6 @@ class LetterPublicControllerTests {
 		LetterPublicDtos.LetterPublicSummary summary = new LetterPublicDtos.LetterPublicSummary(
 				"letter-001",
 				"station-night",
-				"夜更かしペンギン",
 				"最近の作業BGM",
 				LetterStatus.ADOPTED,
 				"playout-001",
@@ -68,6 +67,7 @@ class LetterPublicControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.letters[0].id").value("letter-001"))
 				.andExpect(jsonPath("$.letters[0].subject").value("最近の作業BGM"))
+				.andExpect(jsonPath("$.letters[0].radioName").doesNotExist())
 				.andExpect(jsonPath("$.letters[0].playHistory[0].id").value("play-001"));
 	}
 }

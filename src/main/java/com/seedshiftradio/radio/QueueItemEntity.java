@@ -73,6 +73,12 @@ public class QueueItemEntity {
 	@Column(name = "speech_directive_id")
 	private String speechDirectiveId;
 
+	@Column(name = "content_origin", nullable = false)
+	private String contentOrigin;
+
+	@Column(name = "replay_of_play_history_id")
+	private String replayOfPlayHistoryId;
+
 	@Column(name = "duration_ms", nullable = false)
 	private Integer durationMs;
 
@@ -93,10 +99,16 @@ public class QueueItemEntity {
 		Instant now = Instant.now();
 		createdAt = now;
 		updatedAt = now;
+		if (contentOrigin == null || contentOrigin.isBlank()) {
+			contentOrigin = "LIVE_GEN";
+		}
 	}
 
 	@PreUpdate
 	void onUpdate() {
 		updatedAt = Instant.now();
+		if (contentOrigin == null || contentOrigin.isBlank()) {
+			contentOrigin = "LIVE_GEN";
+		}
 	}
 }

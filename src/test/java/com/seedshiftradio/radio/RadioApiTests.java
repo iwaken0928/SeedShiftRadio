@@ -166,7 +166,16 @@ class RadioApiTests {
 		mockMvc.perform(get("/api/radio/next-segment"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").exists())
-				.andExpect(jsonPath("$.status").value("READY"));
+				.andExpect(jsonPath("$.status").value("READY"))
+				.andExpect(jsonPath("$.contentOrigin").value("LIVE_GEN"))
+				.andExpect(jsonPath("$.preparedAt").exists())
+				.andExpect(jsonPath("$.replayOfPlayHistoryId").doesNotExist())
+				.andExpect(jsonPath("$.letterId").doesNotExist());
+
+		mockMvc.perform(get("/api/radio/program"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.slots[0].id").exists())
+				.andExpect(jsonPath("$.slots[0].slotId").exists());
 	}
 
 	@Test
@@ -382,7 +391,8 @@ class RadioApiTests {
 
 		assertTrue(playHistoryRepository.findBySessionIdOrderByPlayedAtDesc(session.getId()).stream()
 				.anyMatch(history -> history.getQueueItemId().equals(item.getId())
-						&& history.getResultStatus() == PlayHistoryResultStatus.DONE));
+						&& history.getResultStatus() == PlayHistoryResultStatus.DONE
+						&& "LIVE_GEN".equals(history.getContentOrigin())));
 	}
 
 	@Test
@@ -458,6 +468,7 @@ class RadioApiTests {
 		history.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
 		history.setResultStatus(PlayHistoryResultStatus.DONE);
 		history.setCorrelationId(session.getCorrelationId());
+		history.setContentOrigin("PLACEHOLDER");
 		history.setPlayedAt(java.time.Instant.parse("2026-03-29T10:00:05Z"));
 		playHistoryRepository.save(history);
 
@@ -468,7 +479,9 @@ class RadioApiTests {
 				.andExpect(jsonPath("$[0].id").value(history.getId()))
 				.andExpect(jsonPath("$[0].letter.letterId").value(letter.getId()))
 				.andExpect(jsonPath("$[0].letter.subject").value("今夜のおすすめ曲"))
-				.andExpect(jsonPath("$[0].resultStatus").value("DONE"));
+				.andExpect(jsonPath("$[0].resultStatus").value("DONE"))
+				.andExpect(jsonPath("$[0].contentOrigin").value("PLACEHOLDER"))
+				.andExpect(jsonPath("$[0].replayOfPlayHistoryId").doesNotExist());
 
 		mockMvc.perform(get("/api/play-history/{id}", history.getId())
 						.header("X-Admin-Token", "test-admin-token"))

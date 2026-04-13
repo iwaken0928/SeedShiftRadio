@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -54,6 +55,7 @@ public class RadioService {
 	private final SpeechDirectiveAssembler speechDirectiveAssembler;
 	private final PlayHistoryService playHistoryService;
 	private final LetterSegmentBinder letterSegmentBinder;
+	private final BroadcastArchiveService broadcastArchiveService;
 	private final ApplicationEventPublisher eventPublisher;
 	private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
 
@@ -71,6 +73,7 @@ public class RadioService {
 			SpeechDirectiveAssembler speechDirectiveAssembler,
 			PlayHistoryService playHistoryService,
 			LetterSegmentBinder letterSegmentBinder,
+			BroadcastArchiveService broadcastArchiveService,
 			ApplicationEventPublisher eventPublisher) {
 		this.stationRepository = stationRepository;
 		this.programmingService = programmingService;
@@ -85,6 +88,7 @@ public class RadioService {
 		this.speechDirectiveAssembler = speechDirectiveAssembler;
 		this.playHistoryService = playHistoryService;
 		this.letterSegmentBinder = letterSegmentBinder;
+		this.broadcastArchiveService = broadcastArchiveService;
 		this.eventPublisher = eventPublisher;
 	}
 
@@ -118,7 +122,13 @@ public class RadioService {
 
 	@Transactional
 	public RadioStatusResponse play() {
-		PlayoutSessionEntity session = getLatestSessionOrThrow();
+		String sessionId = getLatestSessionOrThrow().getId();
+		return withSessionLock(sessionId, () -> playLocked(sessionId));
+	}
+
+	private RadioStatusResponse playLocked(String sessionId) {
+		PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "再生セッションが見つかりません。", Map.of("sessionId", sessionId)));
 		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
 		QueueItemEntity item = items.stream()
 				.filter(candidate -> candidate.getStatus() == QueueItemStatus.PLAYING)
@@ -147,7 +157,13 @@ public class RadioService {
 
 	@Transactional
 	public RadioStatusResponse stop() {
-		PlayoutSessionEntity session = getLatestSessionOrThrow();
+		String sessionId = getLatestSessionOrThrow().getId();
+		return withSessionLock(sessionId, () -> stopLocked(sessionId));
+	}
+
+	private RadioStatusResponse stopLocked(String sessionId) {
+		PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId)
+				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "再生セッションが見つかりません。", Map.of("sessionId", sessionId)));
 		QueueItemEntity currentItem = getCurrentQueueItem(session);
 		stopPlayback(session);
 		if (currentItem != null) {
@@ -216,6 +232,7 @@ public class RadioService {
 				slots.stream()
 						.map(slot -> new ProgramBlockSlotResponse(
 								slot.getId(),
+								slot.getId(),
 								slot.getRole(),
 								slot.getConstraintMode(),
 								slot.getResolvedSegmentType().name(),
@@ -245,6 +262,13 @@ public class RadioService {
 
 	@Transactional
 	public void recordPlaybackEvent(PlaybackEventRequest request) {
+		withSessionLock(request.sessionId(), () -> {
+			recordPlaybackEventLocked(request);
+			return null;
+		});
+	}
+
+	private void recordPlaybackEventLocked(PlaybackEventRequest request) {
 		PlayoutSessionEntity session = playoutSessionRepository.findById(request.sessionId())
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "再生セッションが見つかりません。", Map.of("sessionId", request.sessionId())));
 		QueueItemEntity item = queueItemRepository.findById(request.itemId())
@@ -461,9 +485,26 @@ public class RadioService {
 		entity.setTitle(buildTitle(blockSlot));
 		entity.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
 		entity.setSpeechDirectiveId("sd-" + entity.getId());
+		entity.setContentOrigin("LIVE_GEN");
 		entity.setDurationMs(blockSlot.getTargetDurationMs());
 		entity.setCorrelationId(session.getCorrelationId());
+		applyArchiveReplay(session, blockSlot, entity);
 		return entity;
+	}
+
+	private void applyArchiveReplay(PlayoutSessionEntity session, ProgramBlockSlotEntity blockSlot, QueueItemEntity item) {
+		if (blockSlot.getConstraintMode() != com.seedshiftradio.domain.ConstraintMode.SOFT
+				|| item.getSegmentType() == SegmentType.LETTER) {
+			return;
+		}
+		broadcastArchiveService.findReplayCandidate(session.getStationId(), item.getSegmentType()).ifPresent(archive -> {
+			item.setAssetId(archive.getPrimaryAssetId());
+			item.setAssetUrl("/api/assets/audio/" + archive.getPrimaryAssetId() + ".wav");
+			item.setContentOrigin("ARCHIVE_REPLAY");
+			item.setReplayOfPlayHistoryId(archive.getSourcePlayHistoryId());
+			item.setTitle(archive.getTitle());
+			item.setStatus(QueueItemStatus.READY);
+		});
 	}
 
 	private String buildTitle(ProgramBlockSlotEntity slot) {
@@ -705,6 +746,7 @@ public class RadioService {
 		entity.setTitle("フォールバックジングル");
 		entity.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
 		entity.setSpeechDirectiveId("sd-" + entity.getId());
+		entity.setContentOrigin("PLACEHOLDER");
 		entity.setDurationMs(15_000);
 		entity.setCorrelationId(session.getCorrelationId());
 		return entity;
@@ -727,13 +769,16 @@ public class RadioService {
 		}
 		List<QueueItemEntity> changedItems = new ArrayList<>();
 		for (QueueItemEntity item : items) {
-			if (item.getSegmentType() == SegmentType.MUSIC_AI) {
+			if (item.getSegmentType() == SegmentType.MUSIC_AI && (item.getAssetId() == null || item.getAssetId().isBlank())) {
 				requestGenerateMusic(item);
 				continue;
 			}
-				assetService.ensureQueueAudioAsset(item);
-				changedItems.add(item);
+			if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
+				continue;
 			}
+			assetService.ensureQueueAudioAsset(item);
+			changedItems.add(item);
+		}
 		if (!changedItems.isEmpty()) {
 			queueItemRepository.saveAll(changedItems);
 		}
@@ -817,10 +862,17 @@ public class RadioService {
 	}
 
 	private void withSessionLock(String sessionId, Runnable action) {
+		withSessionLock(sessionId, () -> {
+			action.run();
+			return null;
+		});
+	}
+
+	private <T> T withSessionLock(String sessionId, Supplier<T> action) {
 		ReentrantLock lock = sessionLocks.computeIfAbsent(sessionId, ignored -> new ReentrantLock());
 		lock.lock();
 		try {
-			action.run();
+			return action.get();
 		} finally {
 			lock.unlock();
 			if (!lock.hasQueuedThreads()) {
@@ -920,7 +972,15 @@ public class RadioService {
 				item.getDurationMs(),
 				item.getStatus(),
 				item.getCorrelationId(),
-				item.isAssetBanned());
+				item.isAssetBanned(),
+				normalizeContentOrigin(item.getContentOrigin()),
+				item.getCreatedAt(),
+				item.getReplayOfPlayHistoryId(),
+				item.getLetterId());
+	}
+
+	private String normalizeContentOrigin(String contentOrigin) {
+		return contentOrigin == null || contentOrigin.isBlank() ? "LIVE_GEN" : contentOrigin;
 	}
 
 	private PlayoutSessionEntity getLatestSessionOrThrow() {

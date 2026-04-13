@@ -14,6 +14,8 @@ import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.radio.QueueItemEntity;
+import com.seedshiftradio.radio.ScriptGenerationService;
+import com.seedshiftradio.radio.SpeechDirectiveResponse;
 
 @Service
 public class AssetService {
@@ -21,6 +23,7 @@ public class AssetService {
 	private final RadioSettingsStore settingsStore;
 	private final ProviderRegistry providerRegistry;
 	private final TtsProvider ttsProvider;
+	private final ScriptGenerationService scriptGenerationService;
 	private final GeneratedAssetService generatedAssetService;
 	private final ProviderJobService providerJobService;
 	private final PlaceholderAudioFactory placeholderAudioFactory;
@@ -29,12 +32,14 @@ public class AssetService {
 			RadioSettingsStore settingsStore,
 			ProviderRegistry providerRegistry,
 			TtsProvider ttsProvider,
+			ScriptGenerationService scriptGenerationService,
 			GeneratedAssetService generatedAssetService,
 			ProviderJobService providerJobService,
 			PlaceholderAudioFactory placeholderAudioFactory) {
 		this.settingsStore = settingsStore;
 		this.providerRegistry = providerRegistry;
 		this.ttsProvider = ttsProvider;
+		this.scriptGenerationService = scriptGenerationService;
 		this.generatedAssetService = generatedAssetService;
 		this.providerJobService = providerJobService;
 		this.placeholderAudioFactory = placeholderAudioFactory;
@@ -53,7 +58,8 @@ public class AssetService {
 				item.getId(),
 				item.getCorrelationId());
 		providerJobService.markRunning(providerJob.getId(), provider.providerKey(), "placeholder-" + item.getId());
-		TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item);
+		SpeechDirectiveResponse directive = toSpeechDirective(item, scriptGenerationService.ensureScriptAsset(item));
+		TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item, directive);
 		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
 				synthesizedAudio.audioBytes(),
 				synthesizedAudio.providerFingerprint(),
@@ -63,6 +69,20 @@ public class AssetService {
 		providerJobService.markSucceeded(providerJob.getId());
 		item.setAssetId(asset.getId());
 		item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+	}
+
+	private SpeechDirectiveResponse toSpeechDirective(QueueItemEntity item, com.seedshiftradio.radio.ScriptDirectiveSnapshot snapshot) {
+		return new SpeechDirectiveResponse(
+				item.getSpeechDirectiveId() == null ? "sd-" + item.getId() : item.getSpeechDirectiveId(),
+				snapshot.text(),
+				snapshot.normalizedText(),
+				snapshot.pronunciationHints(),
+				snapshot.emotion(),
+				snapshot.tempo(),
+				snapshot.pauseHints(),
+				snapshot.personaRef(),
+				snapshot.voiceHint(),
+				item.getCorrelationId());
 	}
 
 	public byte[] loadAudio(String assetId) {

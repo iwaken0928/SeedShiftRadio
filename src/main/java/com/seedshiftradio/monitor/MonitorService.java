@@ -1,5 +1,8 @@
 package com.seedshiftradio.monitor;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -146,10 +149,10 @@ public class MonitorService {
 	private static String summarizeSubtitle(Object payload) {
 		if (payload instanceof SubtitlePayload subtitle) {
 			String text = subtitle.text() == null ? "" : subtitle.text().replaceAll("\\s+", " ").trim();
-			if (text.length() > 80) {
-				text = text.substring(0, 77) + "...";
-			}
-			return valueOrNone(subtitle.itemId()) + " / " + text;
+			return "item=" + valueOrNone(subtitle.itemId())
+					+ ", directive=" + valueOrNone(subtitle.speechDirectiveId())
+					+ ", textLength=" + text.length()
+					+ ", textHash=" + shortHash(text);
 		}
 		return "subtitle updated";
 	}
@@ -187,5 +190,22 @@ public class MonitorService {
 			return "none";
 		}
 		return value;
+	}
+
+	private static String shortHash(String value) {
+		if (value == null || value.isBlank()) {
+			return "none";
+		}
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+			StringBuilder builder = new StringBuilder(16);
+			for (int i = 0; i < 8 && i < hash.length; i++) {
+				builder.append(String.format("%02x", hash[i]));
+			}
+			return builder.toString();
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 が利用できません。", exception);
+		}
 	}
 }

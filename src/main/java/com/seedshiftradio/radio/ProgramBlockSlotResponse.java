@@ -7,6 +7,7 @@ import com.seedshiftradio.domain.SlotRole;
 
 public record ProgramBlockSlotResponse(
 		String id,
+		String slotId,
 		SlotRole role,
 		ConstraintMode constraintMode,
 		String resolvedSegmentType,

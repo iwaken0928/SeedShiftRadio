@@ -162,7 +162,7 @@ public class MusicGenerationRuntimeService {
 		metadata.put("modelProfileId", request.modelProfileId());
 		metadata.put("lyricsLanguage", request.lyricsLanguage());
 		metadata.put("promptHash", completedJob.promptHash() == null || completedJob.promptHash().isBlank() ? sha256(request.prompt()) : completedJob.promptHash());
-		metadata.put("lyricsHash", sha256(request.lyrics()));
+		metadata.put("lyricsHash", completedJob.lyricsHash() == null || completedJob.lyricsHash().isBlank() ? sha256(request.lyrics()) : completedJob.lyricsHash());
 		if (completedJob.model() != null && !completedJob.model().isBlank()) {
 			metadata.put("model", completedJob.model());
 		}

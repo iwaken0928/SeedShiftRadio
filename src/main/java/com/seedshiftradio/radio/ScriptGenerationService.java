@@ -1,0 +1,263 @@
+package com.seedshiftradio.radio;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.ProviderJobType;
+import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.domain.SegmentType;
+import com.seedshiftradio.settings.GeneratedAssetEntity;
+import com.seedshiftradio.settings.GeneratedAssetService;
+import com.seedshiftradio.settings.ProviderJobEntity;
+import com.seedshiftradio.settings.ProviderJobService;
+import com.seedshiftradio.settings.ProviderRegistry;
+
+@Service
+public class ScriptGenerationService {
+
+	private final ContextAssembler contextAssembler;
+	private final ScriptProvider scriptProvider;
+	private final JapaneseScriptNormalizer normalizer;
+	private final SentenceSplitter sentenceSplitter;
+	private final PronunciationDictionaryService pronunciationDictionaryService;
+	private final JapaneseQualityGuard qualityGuard;
+	private final ClientCapabilitiesService clientCapabilitiesService;
+	private final PlayoutSessionRepository playoutSessionRepository;
+	private final GeneratedAssetService generatedAssetService;
+	private final ProviderRegistry providerRegistry;
+	private final ProviderJobService providerJobService;
+
+	public ScriptGenerationService(
+			ContextAssembler contextAssembler,
+			ScriptProvider scriptProvider,
+			JapaneseScriptNormalizer normalizer,
+			SentenceSplitter sentenceSplitter,
+			PronunciationDictionaryService pronunciationDictionaryService,
+			JapaneseQualityGuard qualityGuard,
+			ClientCapabilitiesService clientCapabilitiesService,
+			PlayoutSessionRepository playoutSessionRepository,
+			GeneratedAssetService generatedAssetService,
+			ProviderRegistry providerRegistry,
+			ProviderJobService providerJobService) {
+		this.contextAssembler = contextAssembler;
+		this.scriptProvider = scriptProvider;
+		this.normalizer = normalizer;
+		this.sentenceSplitter = sentenceSplitter;
+		this.pronunciationDictionaryService = pronunciationDictionaryService;
+		this.qualityGuard = qualityGuard;
+		this.clientCapabilitiesService = clientCapabilitiesService;
+		this.playoutSessionRepository = playoutSessionRepository;
+		this.generatedAssetService = generatedAssetService;
+		this.providerRegistry = providerRegistry;
+		this.providerJobService = providerJobService;
+	}
+
+	@Transactional
+	public ScriptDirectiveSnapshot ensureScriptAsset(QueueItemEntity item) {
+		return findPersistedSnapshot(item)
+				.orElseGet(() -> createScriptAsset(item));
+	}
+
+	@Transactional(readOnly = true)
+	public SpeechDirectiveResponse resolveDirective(PlayoutSessionEntity session, QueueItemEntity item, String clientId) {
+		ScriptGenerationContext context = contextAssembler.assemble(session, item);
+		ScriptDirectiveSnapshot snapshot = findPersistedSnapshot(item)
+				.orElseGet(() -> buildSnapshot(context, resolveVoiceHint(context, clientId)));
+		String voiceHint = resolveVoiceHint(context, clientId);
+		return new SpeechDirectiveResponse(
+				item.getSpeechDirectiveId() == null ? "sd-" + item.getId() : item.getSpeechDirectiveId(),
+				snapshot.text(),
+				snapshot.normalizedText(),
+				snapshot.pronunciationHints(),
+				snapshot.emotion(),
+				snapshot.tempo(),
+				snapshot.pauseHints(),
+				snapshot.personaRef(),
+				voiceHint == null ? snapshot.voiceHint() : voiceHint,
+				session.getCorrelationId());
+	}
+
+	private Optional<ScriptDirectiveSnapshot> findPersistedSnapshot(QueueItemEntity item) {
+		if (item.getId() == null || item.getId().isBlank()) {
+			return Optional.empty();
+		}
+		return generatedAssetService.findLatestScriptAssetForQueueItem(item.getId())
+				.map(GeneratedAssetEntity::getMetadata)
+				.map(ScriptDirectiveSnapshot::fromMetadata);
+	}
+
+	private ScriptDirectiveSnapshot createScriptAsset(QueueItemEntity item) {
+		PlayoutSessionEntity session = playoutSessionRepository.findById(item.getSessionId())
+				.orElseThrow(() -> new IllegalStateException("script generation target session is missing: " + item.getSessionId()));
+		ScriptGenerationContext context = contextAssembler.assemble(session, item);
+		String providerKey = resolveScriptProviderKey();
+		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
+				ProviderJobType.SCRIPT_GEN,
+				ProviderType.LLM,
+				providerKey,
+				item.getId(),
+				item.getCorrelationId());
+		providerJobService.markRunning(providerJob.getId(), providerKey, "script-" + item.getId());
+		try {
+			ScriptDirectiveSnapshot snapshot = buildSnapshot(context, resolveVoiceHint(context, null));
+			generatedAssetService.createScriptAsset(
+					snapshot.normalizedText(),
+					providerKey + ":template-script",
+					item.getId(),
+					providerJob.getId(),
+					metadata(item, context, snapshot, providerKey, providerJob.getId()));
+			providerJobService.markSucceeded(providerJob.getId());
+			return snapshot;
+		} catch (RuntimeException exception) {
+			providerJobService.markFailed(providerJob.getId(), "SCRIPT_GENERATION_FAILED");
+			throw exception;
+		}
+	}
+
+	private ScriptDirectiveSnapshot buildSnapshot(ScriptGenerationContext context, String voiceHint) {
+		GeneratedScript script = scriptProvider.generate(context);
+		String normalized = normalizer.normalize(script.text());
+		normalized = sentenceSplitter.splitLongSentences(normalized);
+		JapaneseQualityGuard.QualityResult quality = qualityGuard.inspect(normalized, context);
+		List<String> safetyFlags = java.util.stream.Stream.concat(script.safetyFlags().stream(), quality.safetyFlags().stream())
+				.distinct()
+				.toList();
+		return new ScriptDirectiveSnapshot(
+				script.text(),
+				quality.text(),
+				pronunciationDictionaryService.resolveHints(quality.text()),
+				resolveEmotion(context),
+				resolveTempo(context),
+				resolvePauseHints(context.item()),
+				context.personality() != null
+						? context.personality().getId()
+						: context.station() != null ? context.station().getLanguagePersonaId() : null,
+				voiceHint,
+				safetyFlags);
+	}
+
+	private Map<String, Object> metadata(
+			QueueItemEntity item,
+			ScriptGenerationContext context,
+			ScriptDirectiveSnapshot snapshot,
+			String providerKey,
+			String providerJobId) {
+		Map<String, Object> metadata = new LinkedHashMap<>();
+		metadata.put("queueItemId", item.getId());
+		metadata.put("providerKey", providerKey);
+		metadata.put("providerJobId", providerJobId);
+		metadata.put("segmentType", item.getSegmentType().name());
+		metadata.put("slotRole", item.getSlotRole().name());
+		metadata.put("text", snapshot.text());
+		metadata.put("normalizedText", snapshot.normalizedText());
+		metadata.put("textHash", sha256(snapshot.normalizedText()));
+		metadata.put("promptHash", sha256(context.prompt()));
+		metadata.put("pronunciationHints", snapshot.pronunciationHints().stream()
+				.map(hint -> Map.of("surface", hint.surface(), "reading", hint.reading()))
+				.toList());
+		metadata.put("pauseHints", snapshot.pauseHints().stream()
+				.map(hint -> Map.of("index", hint.index(), "durationMs", hint.durationMs()))
+				.toList());
+		metadata.put("emotion", snapshot.emotion());
+		metadata.put("tempo", snapshot.tempo());
+		metadata.put("personaRef", snapshot.personaRef());
+		metadata.put("voiceHint", snapshot.voiceHint());
+		metadata.put("safetyFlags", snapshot.safetyFlags());
+		metadata.put("archiveEligible", archiveEligible(item, snapshot));
+		if (item.getLetterId() != null && !item.getLetterId().isBlank()) {
+			metadata.put("letterId", item.getLetterId());
+		}
+		return metadata;
+	}
+
+	private boolean archiveEligible(QueueItemEntity item, ScriptDirectiveSnapshot snapshot) {
+		return item.getSegmentType() == SegmentType.TALK
+				&& (item.getLetterId() == null || item.getLetterId().isBlank())
+				&& snapshot.safetyFlags().stream().noneMatch(flag -> flag.contains("LETTER"));
+	}
+
+	private String resolveScriptProviderKey() {
+		return providerRegistry.resolveChain(ProviderType.LLM).stream()
+				.findFirst()
+				.map(ProviderRegistry.ResolvedProvider::providerKey)
+				.orElse("template-script");
+	}
+
+	private String resolveEmotion(ScriptGenerationContext context) {
+		String tone = context.personality() == null || context.personality().getLanguageTone() == null
+				? "calm"
+				: context.personality().getLanguageTone().toLowerCase(java.util.Locale.ROOT);
+		if (tone.contains("bright") || tone.contains("cheer") || tone.contains("happy")) {
+			return "bright";
+		}
+		if (tone.contains("energetic") || tone.contains("lively")) {
+			return "lively";
+		}
+		return "calm";
+	}
+
+	private String resolveTempo(ScriptGenerationContext context) {
+		if (context.item().getSegmentType() == SegmentType.MUSIC_AI || context.item().getSegmentType() == SegmentType.MUSIC_LOCAL) {
+			return "slow";
+		}
+		String tone = context.personality() == null || context.personality().getLanguageTone() == null
+				? ""
+				: context.personality().getLanguageTone().toLowerCase(java.util.Locale.ROOT);
+		if (tone.contains("energetic") || tone.contains("lively")) {
+			return "fast";
+		}
+		return "medium";
+	}
+
+	private List<PauseHint> resolvePauseHints(QueueItemEntity item) {
+		if (item.getSlotRole() == com.seedshiftradio.domain.SlotRole.OPENING
+				|| item.getSlotRole() == com.seedshiftradio.domain.SlotRole.ENDING) {
+			return List.of(new PauseHint(8, 200));
+		}
+		return List.of();
+	}
+
+	private String resolveVoiceHint(ScriptGenerationContext context, String clientId) {
+		ClientCapabilitiesRecord capabilities = clientId == null || clientId.isBlank()
+				? null
+				: clientCapabilitiesService.latest(clientId);
+		if (capabilities != null
+				&& capabilities.supportsClientSideTts()
+				&& capabilities.preferredPlaybackMode() == com.seedshiftradio.domain.PlaybackMode.CLIENT_TTS
+				&& capabilities.localVoiceProfiles() != null
+				&& !capabilities.localVoiceProfiles().isEmpty()) {
+			ClientCapabilitiesRequest.LocalVoiceProfile localVoiceProfile = capabilities.localVoiceProfiles().getFirst();
+			return localVoiceProfile.engine() + ":" + localVoiceProfile.profileKey();
+		}
+		if (context.voiceProfile() == null) {
+			return null;
+		}
+		String base = context.voiceProfile().getEngineType() + ":" + context.voiceProfile().getSpeakerKey();
+		return context.voiceProfile().getStyleKey() == null || context.voiceProfile().getStyleKey().isBlank()
+				? base
+				: base + ":" + context.voiceProfile().getStyleKey();
+	}
+
+	private String sha256(String value) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			byte[] bytes = digest.digest((value == null ? "" : value).getBytes(StandardCharsets.UTF_8));
+			StringBuilder builder = new StringBuilder(bytes.length * 2);
+			for (byte current : bytes) {
+				builder.append(String.format("%02x", current));
+			}
+			return builder.toString();
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 が利用できません。", exception);
+		}
+	}
+}

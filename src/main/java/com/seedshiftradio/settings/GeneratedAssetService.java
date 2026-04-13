@@ -36,6 +36,29 @@ public class GeneratedAssetService {
 	}
 
 	@Transactional
+	public GeneratedAssetEntity createScriptAsset(
+			String normalizedText,
+			String providerFingerprint,
+			String queueItemId,
+			String providerJobId,
+			Map<String, Object> metadata) {
+		String assetId = nextId();
+		byte[] bytes = (normalizedText == null ? "" : normalizedText).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		Path assetPath = resolveScriptPath(assetId);
+		write(assetPath, bytes);
+		return persistAsset(
+				assetId,
+				GeneratedAssetType.SCRIPT,
+				assetPath,
+				bytes.length,
+				providerFingerprint,
+				queueItemId,
+				providerJobId,
+				metadata == null ? null : stringValue(metadata.get("cacheKey")),
+				metadata);
+	}
+
+	@Transactional
 	public GeneratedAssetEntity createAudioAsset(
 			byte[] bytes,
 			String providerFingerprint,
@@ -117,6 +140,14 @@ public class GeneratedAssetService {
 				.filter(asset -> Files.isRegularFile(Path.of(asset.getStoragePath()).toAbsolutePath().normalize()));
 	}
 
+	@Transactional(readOnly = true)
+	public Optional<GeneratedAssetEntity> findLatestScriptAssetForQueueItem(String queueItemId) {
+		if (queueItemId == null || queueItemId.isBlank()) {
+			return Optional.empty();
+		}
+		return generatedAssetRepository.findFirstByAssetTypeAndQueueItemIdOrderByCreatedAtDesc(GeneratedAssetType.SCRIPT, queueItemId);
+	}
+
 	@Transactional
 	public GeneratedAssetEntity cloneAssetForQueue(
 			GeneratedAssetEntity source,
@@ -164,6 +195,16 @@ public class GeneratedAssetService {
 		Path audioRoot = dataRoot.resolve("assets").resolve("audio").normalize();
 		Path assetPath = audioRoot.resolve(assetId + ".wav").normalize();
 		if (!assetPath.startsWith(audioRoot)) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "assetId が不正です。", Map.of("assetId", assetId));
+		}
+		return assetPath;
+	}
+
+	private Path resolveScriptPath(String assetId) {
+		Path dataRoot = Path.of(settingsStore.load().paths().dataRoot()).toAbsolutePath().normalize();
+		Path scriptRoot = dataRoot.resolve("assets").resolve("scripts").normalize();
+		Path assetPath = scriptRoot.resolve(assetId + ".txt").normalize();
+		if (!assetPath.startsWith(scriptRoot)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "assetId が不正です。", Map.of("assetId", assetId));
 		}
 		return assetPath;
@@ -299,6 +340,10 @@ public class GeneratedAssetService {
 
 	private int normalizeReuseCount(Integer reuseCount) {
 		return reuseCount == null || reuseCount < 0 ? 0 : reuseCount;
+	}
+
+	private String stringValue(Object value) {
+		return value instanceof String string && !string.isBlank() ? string : null;
 	}
 
 	private String sha256(byte[] bytes) {

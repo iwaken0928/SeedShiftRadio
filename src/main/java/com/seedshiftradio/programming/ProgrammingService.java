@@ -50,7 +50,7 @@ import com.seedshiftradio.settings.ProviderHealthService;
 public class ProgrammingService {
 
 	private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
-	private static final EnumSet<LetterStatus> PENDING_LETTER_STATUSES = EnumSet.of(LetterStatus.UNREAD, LetterStatus.PENDING, LetterStatus.ADOPTED);
+	private static final EnumSet<LetterStatus> PENDING_LETTER_STATUSES = EnumSet.of(LetterStatus.UNREAD, LetterStatus.PENDING);
 
 	private final StationRepository stationRepository;
 	private final PersonalityRepository personalityRepository;

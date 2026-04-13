@@ -12,9 +12,11 @@ import com.seedshiftradio.domain.PlayHistoryResultStatus;
 public class PlayHistoryService {
 
 	private final PlayHistoryRepository playHistoryRepository;
+	private final BroadcastArchiveService broadcastArchiveService;
 
-	public PlayHistoryService(PlayHistoryRepository playHistoryRepository) {
+	public PlayHistoryService(PlayHistoryRepository playHistoryRepository, BroadcastArchiveService broadcastArchiveService) {
 		this.playHistoryRepository = playHistoryRepository;
+		this.broadcastArchiveService = broadcastArchiveService;
 	}
 
 	@Transactional
@@ -32,8 +34,14 @@ public class PlayHistoryService {
 		entity.setPlaybackMode(item.getPlaybackMode());
 		entity.setResultStatus(resultStatus);
 		entity.setCorrelationId(item.getCorrelationId());
+		entity.setContentOrigin(item.getContentOrigin() == null || item.getContentOrigin().isBlank() ? "LIVE_GEN" : item.getContentOrigin());
+		entity.setReplayOfPlayHistoryId(item.getReplayOfPlayHistoryId());
 		entity.setPlayedAt(Instant.now());
-		playHistoryRepository.save(entity);
+		PlayHistoryEntity saved = playHistoryRepository.save(entity);
+		if (resultStatus == PlayHistoryResultStatus.DONE) {
+			broadcastArchiveService.markReplayed(item.getReplayOfPlayHistoryId());
+			broadcastArchiveService.promoteIfEligible(saved, item);
+		}
 	}
 
 	private String nextId() {

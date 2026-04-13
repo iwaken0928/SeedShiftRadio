@@ -18,6 +18,7 @@ export function LettersDashboard() {
   const hasAdminToken = Boolean(getAdminToken());
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const radioName = useUiStore((state) => state.radioName);
+  const setRadioName = useUiStore((state) => state.setRadioName);
   const localLetterSubmissions = useUiStore((state) => state.localLetterSubmissions);
   const addLocalLetterSubmission = useUiStore((state) => state.addLocalLetterSubmission);
   const [selectedStatus, setSelectedStatus] = useState<LetterStatus | undefined>(undefined);
@@ -167,7 +168,7 @@ export function LettersDashboard() {
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">radioName</label>
-              <Input value={radioName} readOnly />
+              <Input value={radioName} maxLength={255} onChange={(event) => setRadioName(event.target.value)} />
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Subject</label>
@@ -385,7 +386,7 @@ export function LettersDashboard() {
                   >
                     Adopt To Current Session
                   </Button>
-                  <Button tone="primary" disabled={!selectedLetterId} onClick={() => statusMutation.mutate("REPLIED")}>
+                  <Button tone="primary" disabled={!selectedLetterId || detailQuery.data.status === "UNREAD"} onClick={() => statusMutation.mutate("REPLIED")}>
                     Mark Replied
                   </Button>
                 </div>
@@ -426,7 +427,11 @@ export function LettersDashboard() {
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reply draft</label>
                   <Textarea rows={5} value={replyText} onChange={(event) => setReplyText(event.target.value)} placeholder="ありがとうございます。" />
                   <div className="mt-3">
-                    <Button tone="secondary" disabled={!replyText.trim() || replyMutation.isPending} onClick={() => replyMutation.mutate()}>
+                    <Button
+                      tone="secondary"
+                      disabled={!replyText.trim() || replyMutation.isPending || !["PENDING", "ADOPTED"].includes(detailQuery.data.status)}
+                      onClick={() => replyMutation.mutate()}
+                    >
                       Add Reply
                     </Button>
                   </div>

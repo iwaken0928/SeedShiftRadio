@@ -47,10 +47,54 @@ def test_music_job_contract_returns_generated_asset_metadata(tmp_path: Path) -> 
     assert job_status["providerFingerprint"] == "deterministic-worker:1.0"
     assert job_status["promptHash"]
     assert len(job_status["promptHash"]) == 64
+    assert job_status["lyricsHash"]
+    assert len(job_status["lyricsHash"]) == 64
     assert job_status["message"] == "generated"
+    assert job_status["model"] == "deterministic-sine"
+    assert job_status["seed"] == "42"
     assert job_status["assetPath"]
     assert Path(job_status["assetPath"]).exists()
     assert Path(job_status["assetPath"]).parent == tmp_path / "assets" / "music"
+
+
+def test_music_job_accepts_generation_request_without_echoing_prompt_or_lyrics(tmp_path: Path) -> None:
+    client = TestClient(create_app(DeterministicMusicBackend(tmp_path)))
+    prompt = "clear Japanese vocal, genre=city pop"
+    lyrics = "[Verse]\n夜明けの窓辺で\n[Chorus]\nまた走り出す"
+
+    create_response = client.post(
+        "/music/jobs",
+        json={
+            "requestId": "req-generation-001",
+            "stationId": "station-night",
+            "purpose": "radio",
+            "mode": "JAPANESE_SONG",
+            "prompt": prompt,
+            "lyrics": lyrics,
+            "lyricsLanguage": "ja",
+            "durationSeconds": 5,
+            "bpm": 128,
+            "keyScale": "C major",
+            "timeSignature": "4",
+            "seed": 123,
+            "modelProfileId": "ace-ja-fast",
+            "outputFormat": "wav",
+        },
+    )
+
+    assert create_response.status_code == 200
+    job_status = wait_for_terminal_status(client, create_response.json()["jobId"])
+
+    assert job_status["status"] == "SUCCEEDED"
+    assert job_status["durationSec"] == 5
+    assert job_status["promptHash"] != prompt
+    assert job_status["lyricsHash"] != lyrics
+    assert len(job_status["promptHash"]) == 64
+    assert len(job_status["lyricsHash"]) == 64
+    assert "prompt" not in job_status
+    assert "lyrics" not in job_status
+    assert job_status["model"] == "ace-ja-fast"
+    assert job_status["seed"] == "123"
 
 
 def test_music_job_failure_exposes_error_metadata() -> None:
@@ -77,6 +121,7 @@ def test_music_job_failure_exposes_error_metadata() -> None:
     assert job_status["durationSec"] is None
     assert job_status["providerFingerprint"] == "failing-worker:1.0"
     assert job_status["promptHash"]
+    assert job_status["lyricsHash"]
     assert job_status["errorCode"] == "PROVIDER_BAD_RESPONSE"
     assert "backend forced failure" in job_status["message"]
 

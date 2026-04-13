@@ -1,6 +1,8 @@
 package com.seedshiftradio.monitor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -25,6 +27,7 @@ import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
 import com.seedshiftradio.radio.RadioEventRecord;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.RadioStatusResponse;
+import com.seedshiftradio.radio.SubtitlePayload;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobRepository;
 import com.seedshiftradio.settings.ProviderHealthService;
@@ -87,7 +90,9 @@ class MonitorServiceTests {
 						"errorCode", "PROVIDER_TIMEOUT")),
 				new RadioEventRecord("11", "buffer.warning", Instant.parse("2026-03-20T09:14:00Z"), Map.of(
 						"sessionId", "playout-001",
-						"readyCount", 1))));
+						"readyCount", 1)),
+				new RadioEventRecord("10", "subtitle.updated", Instant.parse("2026-03-20T09:13:00Z"),
+						new SubtitlePayload("playout-001", "queue-001", "sd-queue-001", "秘密の本文をここには残しません", Instant.parse("2026-03-20T09:13:00Z")))));
 
 		MonitorSummaryResponse summary = monitorService.summary();
 
@@ -99,9 +104,12 @@ class MonitorServiceTests {
 		assertEquals("job-running", summary.runningJobs().getFirst().id());
 		assertEquals(1, summary.recentErrors().size());
 		assertEquals("job-failed", summary.recentErrors().getFirst().id());
-		assertEquals(2, summary.auditEvents().size());
+		assertEquals(3, summary.auditEvents().size());
 		assertEquals("provider.job.failed", summary.auditEvents().getFirst().eventType());
-		assertEquals("buffer.warning", summary.auditEvents().getLast().eventType());
+		assertEquals("buffer.warning", summary.auditEvents().get(1).eventType());
+		assertEquals("subtitle.updated", summary.auditEvents().getLast().eventType());
+		assertTrue(summary.auditEvents().getLast().summary().contains("textHash="));
+		assertFalse(summary.auditEvents().getLast().summary().contains("秘密の本文"));
 	}
 
 	private ProviderJobEntity job(String id, ProviderJobStatus status, ProviderJobType jobType) {

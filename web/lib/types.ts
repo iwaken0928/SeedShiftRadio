@@ -1,10 +1,11 @@
 export type PlayoutState = "IDLE" | "PREPARING" | "PLAYING" | "DEGRADED" | "STOPPED" | "ERROR";
 export type PlaybackMode = "SERVER_AUDIO" | "CLIENT_TTS";
-export type QueueItemStatus = "GENERATING" | "READY" | "PLAYING" | "DONE" | "FAILED" | "SKIPPED";
+export type QueueItemStatus = "PLANNED" | "GENERATING" | "READY" | "PLAYING" | "DONE" | "FAILED" | "SKIPPED";
 export type ProgramBlockStatus = "PLANNED" | "ACTIVE" | "DONE" | "FAILED";
 export type ConstraintMode = "HARD" | "SOFT";
 export type SlotRole = "OPENING" | "TOPIC" | "LETTER" | "MUSIC_BREAK" | "ENDING";
-export type SegmentType = "TALK" | "LETTER" | "ANNOUNCEMENT" | "JINGLE" | "MUSIC_LOCAL" | "MUSIC_AI";
+export type SegmentType = "TALK" | "LETTER" | "JINGLE" | "MUSIC_LOCAL" | "MUSIC_AI";
+export type ContentOrigin = "LIVE_GEN" | "CACHE_REUSED" | "PLACEHOLDER" | "ARCHIVE_REPLAY" | "LOCAL_LIBRARY";
 export type LetterStatus = "UNREAD" | "PENDING" | "ADOPTED" | "REPLIED";
 
 export interface StationSummary {
@@ -164,6 +165,10 @@ export interface QueueItem {
   status: QueueItemStatus;
   correlationId: string;
   assetBanned: boolean;
+  contentOrigin: ContentOrigin;
+  preparedAt: string | null;
+  replayOfPlayHistoryId: string | null;
+  letterId: string | null;
 }
 
 export interface ProgramBlockSummary {
@@ -182,6 +187,7 @@ export interface ProgramBlockSummary {
 
 export interface ProgramBlockSlot {
   id: string;
+  slotId: string;
   role: SlotRole;
   constraintMode: ConstraintMode;
   resolvedSegmentType: SegmentType;
@@ -283,6 +289,8 @@ export interface PlayHistoryItem {
   playbackMode: PlaybackMode;
   resultStatus: string;
   correlationId: string;
+  contentOrigin: ContentOrigin;
+  replayOfPlayHistoryId: string | null;
   playedAt: string;
 }
 

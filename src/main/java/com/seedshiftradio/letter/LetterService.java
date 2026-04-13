@@ -20,6 +20,7 @@ import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterDetailResponse;
+import com.seedshiftradio.letter.LetterDtos.LetterReplyListSummary;
 import com.seedshiftradio.letter.LetterDtos.LetterReplyRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterReplyResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterReplySummary;
@@ -33,7 +34,7 @@ import com.seedshiftradio.station.StationRepository;
 @Service
 public class LetterService {
 
-	private static final EnumSet<LetterStatus> PENDING_POOL = EnumSet.of(LetterStatus.UNREAD, LetterStatus.PENDING, LetterStatus.ADOPTED);
+	private static final EnumSet<LetterStatus> PENDING_POOL = EnumSet.of(LetterStatus.UNREAD, LetterStatus.PENDING);
 
 	private final LetterRepository letterRepository;
 	private final LetterReplyRepository letterReplyRepository;
@@ -66,7 +67,7 @@ public class LetterService {
 		List<LetterEntity> letters = stationId == null
 				? letterRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
 				: letterRepository.findByStationIdOrderByCreatedAtDesc(stationId);
-		Map<String, List<LetterReplySummary>> repliesByLetterId = toReplyMap(letters);
+		Map<String, List<LetterReplyListSummary>> repliesByLetterId = toReplyMap(letters);
 		for (LetterEntity letter : letters) {
 			if (stationId != null && !stationId.equals(letter.getStationId())) {
 				continue;
@@ -140,7 +141,7 @@ public class LetterService {
 		if (saved.getStatus() == LetterStatus.ADOPTED && saved.getAdoptedInSessionId() != null) {
 			letterSegmentBinder.bindPendingSegments(saved.getAdoptedInSessionId());
 		}
-		LetterSummaryResponse summary = toSummary(saved, loadReplies(saved.getId()));
+		LetterSummaryResponse summary = toSummary(saved, loadReplySummaries(saved.getId()));
 		eventPublisher.publishEvent(new LetterChangedEvent(summary));
 		return summary;
 	}
@@ -148,15 +149,17 @@ public class LetterService {
 	@Transactional
 	public LetterReplyResponse addReply(String letterId, LetterReplyRequest request) {
 		LetterEntity letter = getLetter(letterId);
-		if (letter.getStatus() == LetterStatus.UNREAD) {
-			letter.setStatus(LetterStatus.REPLIED);
-			letterRepository.save(letter);
-		} else if (letter.getStatus() == LetterStatus.PENDING || letter.getStatus() == LetterStatus.ADOPTED) {
-			letter.setStatus(LetterStatus.REPLIED);
-			letterRepository.save(letter);
+		if (letter.getStatus() != LetterStatus.PENDING && letter.getStatus() != LetterStatus.ADOPTED) {
+			throw new ApiException(
+					HttpStatus.CONFLICT,
+					"CONFLICT",
+					"返信は PENDING または ADOPTED のレターにのみ追加できます。",
+					Map.of("letterId", letterId, "status", letter.getStatus().name()));
 		}
+		letter.setStatus(LetterStatus.REPLIED);
+		letterRepository.save(letter);
 		LetterReplyEntity reply = letterReplyRepository.save(new LetterReplyEntity(nextId("reply"), letter.getId(), request.replyText()));
-		eventPublisher.publishEvent(new LetterChangedEvent(toSummary(letter, loadReplies(letter.getId()))));
+		eventPublisher.publishEvent(new LetterChangedEvent(toSummary(letter, loadReplySummaries(letter.getId()))));
 		return new LetterReplyResponse(reply.getId(), reply.getCreatedAt());
 	}
 
@@ -203,16 +206,22 @@ public class LetterService {
 		}
 	}
 
-	private Map<String, List<LetterReplySummary>> toReplyMap(List<LetterEntity> letters) {
+	private Map<String, List<LetterReplyListSummary>> toReplyMap(List<LetterEntity> letters) {
 		if (letters.isEmpty()) {
 			return Map.of();
 		}
-		Map<String, List<LetterReplySummary>> repliesByLetterId = new LinkedHashMap<>();
+		Map<String, List<LetterReplyListSummary>> repliesByLetterId = new LinkedHashMap<>();
 		for (LetterReplyEntity reply : letterReplyRepository.findByLetterIdInOrderByCreatedAtAsc(letters.stream().map(LetterEntity::getId).toList())) {
 			repliesByLetterId.computeIfAbsent(reply.getLetterId(), ignored -> new ArrayList<>())
-					.add(new LetterReplySummary(reply.getId(), reply.getReplyText(), reply.getCreatedAt()));
+					.add(new LetterReplyListSummary(reply.getId(), reply.getCreatedAt()));
 		}
 		return Collections.unmodifiableMap(repliesByLetterId);
+	}
+
+	private List<LetterReplyListSummary> loadReplySummaries(String letterId) {
+		return letterReplyRepository.findByLetterIdOrderByCreatedAtAsc(letterId).stream()
+				.map(reply -> new LetterReplyListSummary(reply.getId(), reply.getCreatedAt()))
+				.toList();
 	}
 
 	private List<LetterReplySummary> loadReplies(String letterId) {
@@ -221,7 +230,7 @@ public class LetterService {
 				.toList();
 	}
 
-	private LetterSummaryResponse toSummary(LetterEntity letter, List<LetterReplySummary> replies) {
+	private LetterSummaryResponse toSummary(LetterEntity letter, List<LetterReplyListSummary> replies) {
 		return new LetterSummaryResponse(
 				letter.getId(),
 				letter.getStationId(),

@@ -154,11 +154,12 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 				response.durationSec(),
 				response.providerFingerprint(),
 				response.promptHash(),
+				response.lyricsHash(),
 				response.errorCode(),
 				response.message(),
-				null,
-				null,
-				null);
+				response.model(),
+				response.lmModel(),
+				response.seed());
 	}
 
 	@Override
@@ -166,11 +167,11 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 		if (provider.isAceStep()) {
 			return submitAceStep(provider, request);
 		}
-		WorkerSubmitResponse response = submitWorker(provider, MusicJobRequest.from(request));
+		WorkerSubmitResponse response = submitWorker(provider, request);
 		return new SubmittedMusicJob(response.jobId(), response.status(), provider);
 	}
 
-	private WorkerSubmitResponse submitWorker(ResolvedMusicProvider provider, MusicJobRequest request) {
+	private WorkerSubmitResponse submitWorker(ResolvedMusicProvider provider, MusicGenerationRequest request) {
 		HttpRequest httpRequest = jsonRequest(
 				provider,
 				"/music/jobs",
@@ -230,10 +231,10 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 		}
 		int status = first.path("status").asInt(0);
 		if (status == 0) {
-			return new MusicJobStatus(jobId, "RUNNING", null, null, null, null, null, null, null, null, null);
+			return new MusicJobStatus(jobId, "RUNNING", null, null, null, null, null, null, null, null, null, null);
 		}
 		if (status == 2) {
-			return new MusicJobStatus(jobId, "FAILED", null, null, null, null, "PROVIDER_BAD_RESPONSE", "ACE-Step task failed", null, null, null);
+			return new MusicJobStatus(jobId, "FAILED", null, null, null, null, null, "PROVIDER_BAD_RESPONSE", "ACE-Step task failed", null, null, null);
 		}
 		JsonNode result = parseAceResult(first.path("result"));
 		String audioUrl = textOrNull(result.path("file"));
@@ -251,6 +252,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 				intOrNull(metas.path("duration")),
 				provider.providerKey() + ":" + valueOrUnknown(ditModel) + ":" + valueOrUnknown(lmModel),
 				sha256(textOrNull(result.path("prompt")) + "\n" + textOrNull(result.path("lyrics"))),
+				sha256(textOrNull(result.path("lyrics"))),
 				null,
 				"generated",
 				ditModel,
@@ -426,11 +428,19 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			return null;
 		}
 		if (secretRef.startsWith("env:")) {
-			return System.getenv(secretRef.substring("env:".length()));
+			String value = System.getenv(secretRef.substring("env:".length()));
+			if (value == null || value.isBlank()) {
+				throw new MusicGenWorkerException("PROVIDER_AUTH_FAILED", "音楽生成 provider の環境変数参照を解決できません。");
+			}
+			return value;
 		}
 		if (secretRef.startsWith("file:")) {
 			try {
-				return Files.readString(Path.of(secretRef.substring("file:".length()))).trim();
+				String value = Files.readString(Path.of(secretRef.substring("file:".length()))).trim();
+				if (value.isBlank()) {
+					throw new MusicGenWorkerException("PROVIDER_AUTH_FAILED", "音楽生成 provider の秘密値参照が空です。");
+				}
+				return value;
 			} catch (IOException exception) {
 				throw new MusicGenWorkerException("PROVIDER_AUTH_FAILED", "音楽生成 provider の秘密値参照を解決できません。", exception);
 			}
@@ -577,6 +587,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			Integer durationSec,
 			String providerFingerprint,
 			String promptHash,
+			String lyricsHash,
 			String errorCode,
 			String message,
 			String model,
@@ -603,7 +614,11 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			Integer durationSec,
 			String providerFingerprint,
 			String promptHash,
+			String lyricsHash,
 			String errorCode,
-			String message) {
+			String message,
+			String model,
+			String lmModel,
+			String seed) {
 	}
 }

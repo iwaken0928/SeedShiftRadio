@@ -21,7 +21,6 @@ public final class LetterPublicDtos {
 	public record LetterPublicSummary(
 			String id,
 			String stationId,
-			String radioName,
 			String subject,
 			LetterStatus status,
 			String adoptedInSessionId,

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -22,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.seedshiftradio.domain.ConstraintMode;
+import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.letter.LetterRepository;
@@ -102,6 +104,7 @@ class ProgrammingServiceTests {
 		assertEquals("Night Default", plan.title());
 		assertEquals(SegmentType.TALK, plan.slots().getFirst().resolvedSegmentType());
 		verify(providerHealthService).getLatestOrProbe();
+		verify(letterRepository).countByStationIdAndStatusIn(station.getId(), EnumSet.of(LetterStatus.UNREAD, LetterStatus.PENDING));
 		verify(templateRepository, never()).findById("tmpl-rule");
 	}
 

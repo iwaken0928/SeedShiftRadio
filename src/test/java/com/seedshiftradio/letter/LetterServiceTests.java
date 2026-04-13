@@ -21,6 +21,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
+import com.seedshiftradio.letter.LetterDtos.LetterReplyRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterStatusUpdateRequest;
 import com.seedshiftradio.radio.LetterSegmentBinder;
 import com.seedshiftradio.radio.PlayoutSessionRepository;
@@ -144,5 +145,47 @@ class LetterServiceTests {
 		assertEquals(LetterStatus.ADOPTED, response.status());
 		assertEquals("playout-001", response.adoptedInSessionId());
 		verify(letterSegmentBinder).bindPendingSegments("playout-001");
+	}
+
+	@Test
+	void addReplyRejectsUnreadLetter() {
+		LetterEntity existing = new LetterEntity(
+				"letter-existing",
+				null,
+				"夜更かしペンギン",
+				"最近の作業BGM",
+				"深夜作業でおすすめの音を教えてください。",
+				LetterStatus.UNREAD,
+				null);
+		when(letterRepository.findById("letter-existing")).thenReturn(Optional.of(existing));
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> letterService.addReply("letter-existing", new LetterReplyRequest("ありがとうございます。")));
+
+		assertEquals("CONFLICT", exception.getCode());
+		verify(letterReplyRepository, never()).save(any());
+	}
+
+	@Test
+	void addReplyMovesPendingLetterToReplied() {
+		LetterEntity existing = new LetterEntity(
+				"letter-existing",
+				null,
+				"夜更かしペンギン",
+				"最近の作業BGM",
+				"深夜作業でおすすめの音を教えてください。",
+				LetterStatus.PENDING,
+				null);
+		LetterReplyEntity reply = new LetterReplyEntity("reply-001", "letter-existing", "ありがとうございます。");
+		when(letterRepository.findById("letter-existing")).thenReturn(Optional.of(existing));
+		when(letterRepository.save(any(LetterEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(letterReplyRepository.save(any(LetterReplyEntity.class))).thenReturn(reply);
+		when(letterReplyRepository.findByLetterIdOrderByCreatedAtAsc("letter-existing")).thenReturn(List.of(reply));
+
+		letterService.addReply("letter-existing", new LetterReplyRequest("ありがとうございます。"));
+
+		assertEquals(LetterStatus.REPLIED, existing.getStatus());
+		verify(letterRepository).save(existing);
 	}
 }

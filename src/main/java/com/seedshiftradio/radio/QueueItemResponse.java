@@ -1,5 +1,7 @@
 package com.seedshiftradio.radio;
 
+import java.time.Instant;
+
 import com.seedshiftradio.domain.PlaybackMode;
 import com.seedshiftradio.domain.QueueItemStatus;
 
@@ -16,5 +18,9 @@ public record QueueItemResponse(
 		Integer durationMs,
 		QueueItemStatus status,
 		String correlationId,
-		boolean assetBanned) {
+		boolean assetBanned,
+		String contentOrigin,
+		Instant preparedAt,
+		String replayOfPlayHistoryId,
+		String letterId) {
 }

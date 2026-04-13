@@ -121,6 +121,8 @@ public class PlayHistoryQueryService {
 				entity.getPlaybackMode(),
 				entity.getResultStatus(),
 				entity.getCorrelationId(),
+				entity.getContentOrigin(),
+				entity.getReplayOfPlayHistoryId(),
 				entity.getPlayedAt(),
 				letter);
 	}

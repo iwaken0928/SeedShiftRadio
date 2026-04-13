@@ -23,6 +23,8 @@ public final class PlayHistoryDtos {
 			PlaybackMode playbackMode,
 			PlayHistoryResultStatus resultStatus,
 			String correlationId,
+			String contentOrigin,
+			String replayOfPlayHistoryId,
 			Instant playedAt,
 			PlayHistoryLetterResponse letter) {
 	}

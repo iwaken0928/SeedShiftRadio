@@ -9,4 +9,8 @@ public interface GeneratedAssetRepository extends JpaRepository<GeneratedAssetEn
 	java.util.Optional<GeneratedAssetEntity> findFirstByAssetTypeAndCacheKeyOrderByCreatedAtDesc(
 			GeneratedAssetType assetType,
 			String cacheKey);
+
+	java.util.Optional<GeneratedAssetEntity> findFirstByAssetTypeAndQueueItemIdOrderByCreatedAtDesc(
+			GeneratedAssetType assetType,
+			String queueItemId);
 }

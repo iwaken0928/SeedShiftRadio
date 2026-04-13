@@ -24,6 +24,7 @@ import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.radio.QueueItemEntity;
+import com.seedshiftradio.radio.ScriptGenerationService;
 
 @ExtendWith(MockitoExtension.class)
 class AssetServiceTests {
@@ -39,6 +40,9 @@ class AssetServiceTests {
 
 	@Mock
 	TtsProvider ttsProvider;
+
+	@Mock
+	ScriptGenerationService scriptGenerationService;
 
 	@Mock
 	GeneratedAssetService generatedAssetService;
@@ -57,6 +61,7 @@ class AssetServiceTests {
 				settingsStore,
 				providerRegistry,
 				ttsProvider,
+				scriptGenerationService,
 				generatedAssetService,
 				providerJobService,
 				placeholderAudioFactory);

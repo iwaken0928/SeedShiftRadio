@@ -65,6 +65,12 @@ public class PlayHistoryEntity {
 	@Column(name = "correlation_id", nullable = false)
 	private String correlationId;
 
+	@Column(name = "content_origin", nullable = false)
+	private String contentOrigin;
+
+	@Column(name = "replay_of_play_history_id")
+	private String replayOfPlayHistoryId;
+
 	@Column(name = "played_at", nullable = false)
 	private Instant playedAt;
 
@@ -77,6 +83,9 @@ public class PlayHistoryEntity {
 		if (playedAt == null) {
 			playedAt = now;
 		}
+		if (contentOrigin == null || contentOrigin.isBlank()) {
+			contentOrigin = "LIVE_GEN";
+		}
 		createdAt = now;
 	}
 
@@ -84,6 +93,9 @@ public class PlayHistoryEntity {
 	void onUpdate() {
 		if (playedAt == null) {
 			playedAt = Instant.now();
+		}
+		if (contentOrigin == null || contentOrigin.isBlank()) {
+			contentOrigin = "LIVE_GEN";
 		}
 	}
 }

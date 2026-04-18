@@ -64,6 +64,7 @@ public class LetterPublicService {
 			summaries.add(new LetterPublicSummary(
 					letter.getId(),
 					letter.getStationId(),
+					letter.getRadioName(),
 					letter.getSubject(),
 					letter.getStatus(),
 					letter.getAdoptedInSessionId(),

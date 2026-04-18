@@ -16,7 +16,7 @@ public class SettingsService {
 
 	private static final Set<String> CACHE_REUSE_SCOPES = Set.of("DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIVE_ONLY");
 	private static final Set<String> MUSIC_PROVIDER_ADAPTERS = Set.of("MUSICGEN_WORKER", "ACE_STEP");
-	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("flac", "mp3", "opus", "aac", "wav", "wav32");
+	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("wav", "wav32");
 	private static final Set<String> LYRICS_TRANSLITERATION_MODES = Set.of("native", "kana", "romaji");
 
 	private final RadioSettingsStore settingsStore;
@@ -202,7 +202,7 @@ public class SettingsService {
 			throw new ApiException(
 					HttpStatus.BAD_REQUEST,
 					"VALIDATION_ERROR",
-					field + ".outputFormat は flac, mp3, opus, aac, wav, wav32 のいずれかで指定してください。",
+					field + ".outputFormat は wav または wav32 で指定してください。",
 					Map.of("field", field + ".outputFormat", "value", profile.outputFormat()));
 		}
 		if (profile.maxDurationSeconds() == null || profile.maxDurationSeconds() < 10 || profile.maxDurationSeconds() > 600) {

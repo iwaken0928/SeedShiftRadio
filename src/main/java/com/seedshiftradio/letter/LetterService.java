@@ -156,7 +156,9 @@ public class LetterService {
 					"返信は PENDING または ADOPTED のレターにのみ追加できます。",
 					Map.of("letterId", letterId, "status", letter.getStatus().name()));
 		}
-		letter.setStatus(LetterStatus.REPLIED);
+		if (letter.getStatus() == LetterStatus.PENDING || hasBroadcastHistory(letter.getId())) {
+			letter.setStatus(LetterStatus.REPLIED);
+		}
 		letterRepository.save(letter);
 		LetterReplyEntity reply = letterReplyRepository.save(new LetterReplyEntity(nextId("reply"), letter.getId(), request.replyText()));
 		eventPublisher.publishEvent(new LetterChangedEvent(toSummary(letter, loadReplySummaries(letter.getId()))));
@@ -216,6 +218,10 @@ public class LetterService {
 					.add(new LetterReplyListSummary(reply.getId(), reply.getCreatedAt()));
 		}
 		return Collections.unmodifiableMap(repliesByLetterId);
+	}
+
+	private boolean hasBroadcastHistory(String letterId) {
+		return !playHistoryQueryService.list(null, null, letterId, null, 1).isEmpty();
 	}
 
 	private List<LetterReplyListSummary> loadReplySummaries(String letterId) {

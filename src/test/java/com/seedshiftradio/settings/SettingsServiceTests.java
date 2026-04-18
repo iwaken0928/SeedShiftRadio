@@ -148,6 +148,46 @@ class SettingsServiceTests {
 	}
 
 	@Test
+	void updateSettingsRejectsNonWavMusicOutputFormat() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.ProviderEndpoint mp3Endpoint = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:8001",
+				"/health",
+				5_000,
+				List.of("MUSIC_GEN", "ACE_STEP"),
+				"ACE_STEP",
+				null,
+				"mp3-profile",
+				Map.of("mp3-profile", new SettingsDocument.MusicGenerationModelProfile(
+						"acestep-v15-turbo",
+						"acestep-5Hz-lm-0.6B",
+						true,
+						"ja",
+						"native",
+						"mp3",
+						120)));
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("data").resolve("library").resolve("music").toString()),
+						current.playout(),
+						current.cache(),
+						current.programming(),
+						new SettingsDocument.ProviderCatalog(
+								current.providers().llm(),
+								current.providers().tts(),
+								new SettingsDocument.ProviderGroup("mp3-profile", List.of(), Map.of("mp3-profile", mp3Endpoint))),
+						current.security(),
+						current.features())));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
 	void updateSettingsPreservesProviderFallbackProviders() {
 		SettingsDtos.SettingsResponse current = settingsService.getSettings();
 		SettingsDocument.ProviderEndpoint ollamaPrimary = new SettingsDocument.ProviderEndpoint(

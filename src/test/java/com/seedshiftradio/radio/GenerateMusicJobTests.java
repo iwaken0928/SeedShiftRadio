@@ -62,11 +62,13 @@ class GenerateMusicJobTests {
 						"asset-1",
 						"/api/assets/audio/asset-1.wav",
 						"provider-job-1",
-						"worker-job-1"));
+						"worker-job-1",
+						"CACHE_REUSED"));
 
 		generateMusicJob.run("queue-1", "corr-1");
 
 		verify(queueItemRepository).save(item);
+		org.junit.jupiter.api.Assertions.assertEquals("CACHE_REUSED", item.getContentOrigin());
 		verify(radioService).synchronizeSessionAfterAsyncUpdate("playout-1");
 		verify(radioService, never()).handleAsyncGenerationFailure(any(), any());
 	}
@@ -90,7 +92,7 @@ class GenerateMusicJobTests {
 		generateMusicJob.run("queue-1", "corr-1");
 
 		verify(queueItemRepository).save(item);
-		verify(radioService).handleAsyncGenerationFailure("playout-1", "PROVIDER_TIMEOUT");
+		verify(radioService).handleAsyncGenerationFailure("playout-1", "queue-1", "PROVIDER_TIMEOUT");
 		verify(radioService, never()).synchronizeSessionAfterAsyncUpdate(any());
 	}
 }

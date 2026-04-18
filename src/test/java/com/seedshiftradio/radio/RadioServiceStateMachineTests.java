@@ -84,7 +84,7 @@ class RadioServiceStateMachineTests {
 	ClientCapabilitiesService clientCapabilitiesService;
 
 	@Mock
-	SpeechDirectiveAssembler speechDirectiveAssembler;
+	ScriptGenerationService scriptGenerationService;
 
 	@Mock
 	PlayHistoryService playHistoryService;
@@ -113,14 +113,14 @@ class RadioServiceStateMachineTests {
 				settingsStore,
 				assetService,
 				clientCapabilitiesService,
-				speechDirectiveAssembler,
+				scriptGenerationService,
 				playHistoryService,
 				letterSegmentBinder,
 				broadcastArchiveService,
 				eventPublisher);
 		when(broadcastArchiveService.findReplayCandidate(anyString(), any(SegmentType.class))).thenReturn(Optional.empty());
 		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 2, true)));
-		when(speechDirectiveAssembler.assemble(any(PlayoutSessionEntity.class), any(QueueItemEntity.class), nullable(String.class))).thenAnswer(invocation -> {
+		when(scriptGenerationService.resolveDirective(any(PlayoutSessionEntity.class), any(QueueItemEntity.class), nullable(String.class))).thenAnswer(invocation -> {
 			PlayoutSessionEntity session = invocation.getArgument(0);
 			QueueItemEntity item = invocation.getArgument(1);
 			String speechDirectiveId = item.getSpeechDirectiveId() == null ? "sd-" + item.getId() : item.getSpeechDirectiveId();
@@ -216,7 +216,7 @@ class RadioServiceStateMachineTests {
 		QueueItemEntity item = queueItem("queue-001", "playout-001", QueueItemStatus.READY);
 		wireRepositoryState(session, List.of(), Map.of(), new ArrayList<>(List.of(item)));
 		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
-		when(speechDirectiveAssembler.assemble(session, item, null)).thenReturn(new SpeechDirectiveResponse(
+		when(scriptGenerationService.resolveDirective(session, item, null)).thenReturn(new SpeechDirectiveResponse(
 				"sd-queue-001",
 				"字幕テキストです。",
 				"字幕テキストです。",

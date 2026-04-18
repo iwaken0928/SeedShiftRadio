@@ -188,4 +188,28 @@ class LetterServiceTests {
 		assertEquals(LetterStatus.REPLIED, existing.getStatus());
 		verify(letterRepository).save(existing);
 	}
+
+	@Test
+	void addReplyKeepsUnbroadcastAdoptedLetterAdopted() {
+		LetterEntity existing = new LetterEntity(
+				"letter-existing",
+				null,
+				"夜更かしペンギン",
+				"最近の作業BGM",
+				"深夜作業でおすすめの音を教えてください。",
+				LetterStatus.ADOPTED,
+				null);
+		existing.setAdoptedInSessionId("playout-001");
+		LetterReplyEntity reply = new LetterReplyEntity("reply-001", "letter-existing", "採用します。");
+		when(letterRepository.findById("letter-existing")).thenReturn(Optional.of(existing));
+		when(playHistoryQueryService.list(null, null, "letter-existing", null, 1)).thenReturn(List.of());
+		when(letterRepository.save(any(LetterEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(letterReplyRepository.save(any(LetterReplyEntity.class))).thenReturn(reply);
+		when(letterReplyRepository.findByLetterIdOrderByCreatedAtAsc("letter-existing")).thenReturn(List.of(reply));
+
+		letterService.addReply("letter-existing", new LetterReplyRequest("採用します。"));
+
+		assertEquals(LetterStatus.ADOPTED, existing.getStatus());
+		verify(letterRepository).save(existing);
+	}
 }

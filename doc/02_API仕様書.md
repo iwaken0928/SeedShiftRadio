@@ -125,7 +125,33 @@
 }
 ```
 
-### 4.5 LetterDetail
+### 4.5 QueueSnapshot
+
+```json
+{
+  "sessionId": "playout-20260320-001",
+  "stationId": "station-night",
+  "items": [
+    {
+      "id": "queue-0012",
+      "programBlockId": "program-20260320-01",
+      "programSlotId": "slot-talk-open",
+      "slotRole": "OPENING",
+      "type": "TALK",
+      "title": "オープニングトーク",
+      "playbackMode": "SERVER_AUDIO",
+      "assetUrl": "/api/assets/audio/queue-0012.wav",
+      "contentOrigin": "CACHE_REUSED",
+      "preparedAt": "2026-03-20T08:58:00Z",
+      "durationMs": 28000,
+      "status": "READY"
+    }
+  ],
+  "correlationId": "corr-abc123"
+}
+```
+
+### 4.6 LetterDetail
 
 ```json
 {
@@ -161,7 +187,7 @@
 }
 ```
 
-### 4.6 LetterPublicLookup
+### 4.7 LetterPublicLookup
 
 ```json
 {
@@ -194,7 +220,7 @@
 - `body` と `replies` は返さない
 - 未知の `letterId` は無視し、見つかったレターだけを返す
 
-### 4.7 PlayHistoryItem
+### 4.8 PlayHistoryItem
 
 ```json
 {
@@ -216,7 +242,7 @@
 }
 ```
 
-### 4.7 ProgramBlockSummary
+### 4.9 ProgramBlockSummary
 
 ```json
 {
@@ -228,11 +254,25 @@
   "status": "ACTIVE",
   "plannedDurationMs": 1200000,
   "remainingSlotCount": 3,
-  "startedAt": "2026-03-20T09:00:00Z"
+  "startedAt": "2026-03-20T09:00:00Z",
+  "slots": [
+    {
+      "id": "block-slot-001",
+      "slotId": "slot-talk-open",
+      "role": "OPENING",
+      "constraintMode": "HARD",
+      "resolvedSegmentType": "TALK",
+      "targetDurationMs": 30000,
+      "status": "QUEUED",
+      "slotContext": {},
+      "title": "オープニング"
+    }
+  ],
+  "correlationId": "corr-abc123"
 }
 ```
 
-### 4.8 SpeechDirective
+### 4.10 SpeechDirective
 
 ```json
 {
@@ -252,7 +292,7 @@
 }
 ```
 
-### 4.9 SubtitlePayload
+### 4.11 SubtitlePayload
 
 ```json
 {
@@ -267,7 +307,17 @@
 - `itemId`, `speechDirectiveId` は再生中 item がない時は `null`
 - 再生停止や current item 消失時は `text` を空文字で送って字幕をクリアする
 
-### 4.10 ErrorResponse
+### 4.12 BufferWarningPayload
+
+```json
+{
+  "sessionId": "playout-20260320-001",
+  "readyCount": 1,
+  "occurredAt": "2026-03-20T09:14:00Z"
+}
+```
+
+### 4.13 ErrorResponse
 
 ```json
 {
@@ -563,6 +613,7 @@ Response は `GET /play-history` の各要素と同じ DTO を返す。
 
 - `sessionId` と `itemId` は同一 `playout_session` に属している必要がある
 - `SEGMENT_STARTED` は `READY` item、`SEGMENT_ENDED` と `PLAYBACK_STOPPED` は現在 `PLAYING` 中の item のみ受け付ける
+- `SEGMENT_ERROR` は再生開始前の `READY` item または現在 `PLAYING` 中の item を受け付け、対象 item を `FAILED` として縮退補充を試みる
 - 条件を満たさない場合は `409 CONFLICT` を返す
 
 ### 6.5 `GET /radio/program`
@@ -921,7 +972,7 @@ Response:
 
 `programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、`providers.musicGen.providers.{key}` は追加で `adapter`, `apiKeyRef`, `defaultModelProfileId`, `modelProfiles` を持ちます。`adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
 
-`modelProfiles` の各要素は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTransliterationMode`, `outputFormat`, `maxDurationSeconds` を持ちます。`lyricsTransliterationMode` は `native`, `kana`, `romaji`、`outputFormat` は `flac`, `mp3`, `opus`, `aac`, `wav`, `wav32` を受け付けます。未知 profile id や profile 上限を超える duration は Server 側 validation / 正規化で拒否または補正します。
+`modelProfiles` の各要素は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTransliterationMode`, `outputFormat`, `maxDurationSeconds` を持ちます。`lyricsTransliterationMode` は `native`, `kana`, `romaji`、`outputFormat` は v1 の `/api/assets/audio/{assetId}.wav` 契約に合わせて `wav` または `wav32` を受け付けます。未知 profile id や profile 上限を超える duration は Server 側 validation / 正規化で拒否または補正します。
 
 ### 6.10 `POST /api/settings/test-connections`
 
@@ -948,7 +999,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.12 Provider Health
 
-`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の `ProviderHealthPayload` を返します。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` と同じフォーマットでクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。
 
 ```json
 {
@@ -1039,11 +1090,12 @@ Event 種別:
 
 | Event | Payload | 用途 |
 |---|---|---|
+| `connected` | `{ "connectedAt": "..." }` | 初回接続確認。履歴再送対象ではない |
 | `radio.status.changed` | `RadioStatus` | 再生状態更新 |
 | `queue.updated` | `QueueSnapshot` | キュー差し替え・Ready数更新 |
 | `program.changed` | `ProgramBlockSummary` | 現在番組 block の切替・更新 |
 | `subtitle.updated` | `SubtitlePayload` | 字幕更新 |
-| `provider.health.changed` | `ProviderHealthPayload` | Provider 異常通知 |
+| `provider.health.changed` | `Record<string, ProviderHealthPayload>` | Provider health snapshot 更新 |
 | `provider.job.queued/running/succeeded/failed` | `ProviderJobPayload` | 生成ジョブ状態。本文や秘密値は含めず id/status/errorCode のみ |
 | `buffer.warning` | `BufferWarningPayload` | 先読み不足通知 |
 | `letter.updated` | `LetterSummary` | レター一覧反映 |

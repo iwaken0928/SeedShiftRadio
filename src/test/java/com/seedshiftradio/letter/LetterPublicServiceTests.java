@@ -52,7 +52,9 @@ class LetterPublicServiceTests {
 
 		assertEquals(2, response.letters().size());
 		assertEquals("letter-002", response.letters().get(0).id());
+		assertEquals("深夜ラジオ", response.letters().get(0).radioName());
 		assertEquals("letter-001", response.letters().get(1).id());
+		assertEquals("夜更かしペンギン", response.letters().get(1).radioName());
 		assertEquals(0, response.letters().get(1).playHistory().size());
 		assertEquals("station-night", response.letters().get(0).playHistory().getFirst().stationId());
 	}

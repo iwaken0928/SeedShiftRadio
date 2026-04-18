@@ -12,6 +12,7 @@ import com.seedshiftradio.letter.LetterService;
 import com.seedshiftradio.monitor.MonitorDtos.AuditEventSummary;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
+import com.seedshiftradio.radio.BufferWarningPayload;
 import com.seedshiftradio.radio.ProgramBlockResponse;
 import com.seedshiftradio.radio.QueueSnapshotResponse;
 import com.seedshiftradio.radio.RadioEventRecord;
@@ -158,6 +159,9 @@ public class MonitorService {
 	}
 
 	private static String summarizeBuffer(Object payload) {
+		if (payload instanceof BufferWarningPayload warning) {
+			return "session=" + valueOrNone(warning.sessionId()) + ", ready=" + warning.readyCount();
+		}
 		if (payload instanceof Map<?, ?> map) {
 			return "session=" + valueOrNone(stringValue(map.get("sessionId"))) + ", ready=" + valueOrNone(stringValue(map.get("readyCount")));
 		}

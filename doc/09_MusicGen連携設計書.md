@@ -36,7 +36,7 @@ public interface MusicGenerationProvider {
 | `bpm`, `keyScale`, `timeSignature` | 任意の音楽メタ |
 | `seed` | 再現性が必要な場合の seed |
 | `modelProfileId` | `ace-ja-fast` などの profile id |
-| `outputFormat` | `wav`, `flac`, `mp3`, `opus`, `aac`, `wav32` |
+| `outputFormat` | v1 の radio playback では `/api/assets/audio/{assetId}.wav` と `audio/wav` に合わせて `wav`, `wav32` のみ |
 
 `MusicJobStatus` は `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` を Server 内部状態として返す。`provider_job` では `queued/running/succeeded/failed/canceled/degraded` 相当へ集約し、`external_ref` に `providerTaskId`、`generated_asset` に `assetId`, `providerFingerprint`, `metadata.model`, `metadata.lmModel`, `metadata.seed`, `metadata.duration`, `metadata.promptHash`, `metadata.lyricsHash` を残す。prompt / lyrics 本文は保存メタ、SSE、標準ログへ含めない。
 
@@ -128,7 +128,7 @@ cache key は少なくとも以下を正規化して含める。
 - ACE-Step request mapping で `lyricsLanguage=ja` が `vocal_language=ja` になり、`thinking=true` と profile model が送られること
 - `/query_result` の result JSON string / array / object を parse し、audio URL、seed、model、metas、失敗状態を取り出せること
 - `429`, timeout, provider down で `DEGRADED` へ進み、playout が止まらないこと
-- config validation で未知 profile、不正 duration、秘密値直書き、未対応 outputFormat を検出すること
+- config validation で未知 profile、不正 duration、秘密値直書き、`wav` / `wav32` 以外の outputFormat を検出すること
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に生で出ないこと
 - fake ACE-Step HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現すること
 

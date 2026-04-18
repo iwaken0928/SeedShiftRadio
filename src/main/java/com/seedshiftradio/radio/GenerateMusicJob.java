@@ -43,6 +43,7 @@ public class GenerateMusicJob {
 			}
 			latestItem.setAssetId(generatedAsset.assetId());
 			latestItem.setAssetUrl(generatedAsset.assetUrl());
+			latestItem.setContentOrigin(generatedAsset.contentOrigin());
 			latestItem.setStatus(QueueItemStatus.READY);
 			queueItemRepository.save(latestItem);
 			radioService.synchronizeSessionAfterAsyncUpdate(latestItem.getSessionId());
@@ -61,6 +62,6 @@ public class GenerateMusicJob {
 		latestItem.setStatus(QueueItemStatus.FAILED);
 		latestItem.setAssetBanned(true);
 		queueItemRepository.save(latestItem);
-		radioService.handleAsyncGenerationFailure(sessionId, errorCode);
+		radioService.handleAsyncGenerationFailure(sessionId, queueItemId, errorCode);
 	}
 }

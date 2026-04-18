@@ -69,7 +69,8 @@ public class MusicGenerationRuntimeService {
 						asset.getId(),
 						"/api/assets/audio/" + asset.getId() + ".wav",
 						providerJob.getId(),
-						null);
+						null,
+						"CACHE_REUSED");
 			}
 			MusicGenWorkerGateway.SubmittedMusicJob submittedJob = musicGenWorkerGateway.submitWithFallback(providers, request);
 			providerJobService.markRunning(providerJob.getId(), submittedJob.provider().providerKey(), submittedJob.jobId());
@@ -90,7 +91,8 @@ public class MusicGenerationRuntimeService {
 					asset.getId(),
 					"/api/assets/audio/" + asset.getId() + ".wav",
 					providerJob.getId(),
-					submittedJob.jobId());
+					submittedJob.jobId(),
+					"LIVE_GEN");
 		} catch (MusicGenWorkerException exception) {
 			providerJobService.markFailed(providerJob.getId(), exception.errorCode());
 			throw exception;
@@ -158,7 +160,7 @@ public class MusicGenerationRuntimeService {
 		metadata.put("cacheHit", false);
 		metadata.put("segmentType", item.getSegmentType().name());
 		metadata.put("slotRole", item.getSlotRole().name());
-		metadata.put("durationSec", completedJob.durationSec());
+		metadata.put("duration", completedJob.durationSec());
 		metadata.put("modelProfileId", request.modelProfileId());
 		metadata.put("lyricsLanguage", request.lyricsLanguage());
 		metadata.put("promptHash", completedJob.promptHash() == null || completedJob.promptHash().isBlank() ? sha256(request.prompt()) : completedJob.promptHash());
@@ -285,10 +287,16 @@ public class MusicGenerationRuntimeService {
 				"|",
 				normalize(provider.providerKey()),
 				normalize(provider.baseUrl()),
+				normalize(provider.adapter()),
+				normalize(provider.resolvedProfileId(request.modelProfileId())),
 				normalize(profile.model()),
 				normalize(profile.lmModel()),
+				normalize(profile.lyricsTransliterationMode()),
 				normalize(reuseScope),
 				scopePartition,
+				normalize(normalizedRequest.stationId()),
+				normalize(item.getProgramBlockId()),
+				normalize(item.getProgramSlotId()),
 				normalize(normalizedRequest.purpose()),
 				normalize(normalizedRequest.mode()),
 				normalize(normalizedRequest.lyricsLanguage()),
@@ -321,7 +329,7 @@ public class MusicGenerationRuntimeService {
 		}
 	}
 
-	public record GeneratedMusicAsset(String assetId, String assetUrl, String providerJobId, String workerJobId) {
+	public record GeneratedMusicAsset(String assetId, String assetUrl, String providerJobId, String workerJobId, String contentOrigin) {
 	}
 
 	private record CachedAssetHit(

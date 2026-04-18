@@ -52,7 +52,7 @@ public class RadioService {
 	private final RadioSettingsStore settingsStore;
 	private final AssetService assetService;
 	private final ClientCapabilitiesService clientCapabilitiesService;
-	private final SpeechDirectiveAssembler speechDirectiveAssembler;
+	private final ScriptGenerationService scriptGenerationService;
 	private final PlayHistoryService playHistoryService;
 	private final LetterSegmentBinder letterSegmentBinder;
 	private final BroadcastArchiveService broadcastArchiveService;
@@ -70,7 +70,7 @@ public class RadioService {
 			RadioSettingsStore settingsStore,
 			AssetService assetService,
 			ClientCapabilitiesService clientCapabilitiesService,
-			SpeechDirectiveAssembler speechDirectiveAssembler,
+			ScriptGenerationService scriptGenerationService,
 			PlayHistoryService playHistoryService,
 			LetterSegmentBinder letterSegmentBinder,
 			BroadcastArchiveService broadcastArchiveService,
@@ -85,7 +85,7 @@ public class RadioService {
 		this.settingsStore = settingsStore;
 		this.assetService = assetService;
 		this.clientCapabilitiesService = clientCapabilitiesService;
-		this.speechDirectiveAssembler = speechDirectiveAssembler;
+		this.scriptGenerationService = scriptGenerationService;
 		this.playHistoryService = playHistoryService;
 		this.letterSegmentBinder = letterSegmentBinder;
 		this.broadcastArchiveService = broadcastArchiveService;
@@ -257,7 +257,7 @@ public class RadioService {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
 		QueueItemEntity item = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
 				.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "次のセグメントはまだ生成されていません。", Map.of("sessionId", session.getId())));
-		return speechDirectiveAssembler.assemble(session, item, clientId);
+		return scriptGenerationService.resolveDirective(session, item, clientId);
 	}
 
 	@Transactional
@@ -296,6 +296,7 @@ public class RadioService {
 				if (item.getId().equals(session.getCurrentQueueItemId())) {
 					session.setCurrentQueueItemId(null);
 				}
+				markSlotSkipped(item.getProgramSlotId());
 				session.setState(PlayoutState.DEGRADED);
 				session.setDegradedReason("SEGMENT_ERROR");
 				queueItemRepository.save(item);
@@ -374,10 +375,20 @@ public class RadioService {
 
 	@Transactional
 	public void handleAsyncGenerationFailure(String sessionId, String degradedReason) {
+		handleAsyncGenerationFailure(sessionId, null, degradedReason);
+	}
+
+	@Transactional
+	public void handleAsyncGenerationFailure(String sessionId, String queueItemId, String degradedReason) {
 		withSessionLock(sessionId, () -> {
 			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
 			if (session == null) {
 				return;
+			}
+			if (queueItemId != null && !queueItemId.isBlank()) {
+				queueItemRepository.findById(queueItemId)
+						.map(QueueItemEntity::getProgramSlotId)
+						.ifPresent(this::markSlotSkipped);
 			}
 			session.setDegradedReason(degradedReason);
 			requestQueueRefill(sessionId);
@@ -559,7 +570,7 @@ public class RadioService {
 			additions.add(createFallbackQueueItem(session, nextSequence));
 			session.setState(PlayoutState.DEGRADED);
 			session.setDegradedReason("LEGACY_RATIO");
-			streamEventService.publish("buffer.warning", Map.of("sessionId", session.getId(), "readyCount", readyCount));
+			streamEventService.publish("buffer.warning", new BufferWarningPayload(session.getId(), readyCount, Instant.now()));
 		}
 		queueItemRepository.saveAll(additions);
 		queueItemRepository.flush();
@@ -763,6 +774,17 @@ public class RadioService {
 		}
 	}
 
+	private void markSlotSkipped(String programSlotId) {
+		if (programSlotId == null) {
+			return;
+		}
+		ProgramBlockSlotEntity blockSlot = programBlockSlotRepository.findById(programSlotId).orElse(null);
+		if (blockSlot != null && blockSlot.getStatus() != ProgramBlockSlotStatus.DONE) {
+			blockSlot.setStatus(ProgramBlockSlotStatus.SKIPPED);
+			programBlockSlotRepository.save(blockSlot);
+		}
+	}
+
 	private void materializeQueueAssets(List<QueueItemEntity> items) {
 		if (items.isEmpty()) {
 			return;
@@ -912,7 +934,7 @@ public class RadioService {
 			streamEventService.publish("subtitle.updated", new SubtitlePayload(session.getId(), null, null, "", Instant.now()));
 			return;
 		}
-		SpeechDirectiveResponse directive = speechDirectiveAssembler.assemble(session, currentItem, null);
+		SpeechDirectiveResponse directive = scriptGenerationService.resolveDirective(session, currentItem, null);
 		String text = directive.normalizedText() != null && !directive.normalizedText().isBlank()
 				? directive.normalizedText()
 				: directive.text();

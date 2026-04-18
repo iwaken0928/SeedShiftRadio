@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -93,6 +94,7 @@ class MusicGenerationRuntimeServiceTests {
 		assertEquals("/api/assets/audio/asset-cloned.wav", response.assetUrl());
 		assertEquals("provider-job-1", response.providerJobId());
 		assertNull(response.workerJobId());
+		assertEquals("CACHE_REUSED", response.contentOrigin());
 		verify(providerJobService).markRunning("provider-job-1", "ace-step", "cache-hit:asset-existing");
 		verify(providerJobService).markSucceeded("provider-job-1");
 		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any(MusicGenerationRequest.class));
@@ -142,7 +144,8 @@ class MusicGenerationRuntimeServiceTests {
 				eq("queue-1"),
 				eq("provider-job-1"),
 				anyString(),
-				any(Map.class)))
+				argThat(metadata -> Integer.valueOf(30).equals(metadata.get("duration"))
+						&& !metadata.containsKey("durationSec"))))
 				.thenReturn(createdAsset);
 
 		MusicGenerationRuntimeService.GeneratedMusicAsset response = musicGenerationRuntimeService.generate("station-night", item);
@@ -151,6 +154,7 @@ class MusicGenerationRuntimeServiceTests {
 		assertEquals("/api/assets/audio/asset-created.wav", response.assetUrl());
 		assertEquals("provider-job-1", response.providerJobId());
 		assertEquals("worker-job-1", response.workerJobId());
+		assertEquals("LIVE_GEN", response.contentOrigin());
 		verify(providerJobService).markRunning("provider-job-1", "ace-step", "worker-job-1");
 		verify(providerJobService).markSucceeded("provider-job-1");
 		verify(generatedAssetService, never()).cloneAssetForQueue(any(), anyString(), anyString(), anyString(), any(Map.class));
@@ -192,6 +196,7 @@ class MusicGenerationRuntimeServiceTests {
 		assertEquals("asset-cloned", response.assetId());
 		assertEquals("provider-job-1", response.providerJobId());
 		assertNull(response.workerJobId());
+		assertEquals("CACHE_REUSED", response.contentOrigin());
 		assertTrue(response.assetUrl().endsWith("asset-cloned.wav"));
 		verify(providerJobService).markRunning("provider-job-1", "ace-step-fallback", "cache-hit:asset-fallback-cache");
 		verify(providerJobService).markSucceeded("provider-job-1");
@@ -248,6 +253,7 @@ class MusicGenerationRuntimeServiceTests {
 		MusicGenerationRuntimeService.GeneratedMusicAsset response = musicGenerationRuntimeService.generate("station-night", item);
 
 		assertEquals("asset-created", response.assetId());
+		assertEquals("LIVE_GEN", response.contentOrigin());
 		verify(generatedAssetService, never()).findReusableAsset(any(), anyString());
 	}
 

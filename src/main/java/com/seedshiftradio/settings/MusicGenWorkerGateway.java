@@ -519,14 +519,19 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 		}
 
 		SettingsDocument.MusicGenerationModelProfile profile(String requestedProfileId) {
-			String profileId = requestedProfileId == null || requestedProfileId.isBlank()
-					? defaultModelProfileId
-					: requestedProfileId;
+			String profileId = resolvedProfileId(requestedProfileId);
 			SettingsDocument.MusicGenerationModelProfile profile = profileId == null ? null : modelProfiles.get(profileId);
 			if (profile == null) {
 				profile = modelProfiles.get("ace-ja-fast");
 			}
 			return (profile == null ? SettingsDocument.MusicGenerationModelProfile.aceJaFast() : profile).normalize();
+		}
+
+		String resolvedProfileId(String requestedProfileId) {
+			String profileId = requestedProfileId == null || requestedProfileId.isBlank()
+					? defaultModelProfileId
+					: requestedProfileId;
+			return profileId == null || profileId.isBlank() ? "ace-ja-fast" : profileId;
 		}
 	}
 

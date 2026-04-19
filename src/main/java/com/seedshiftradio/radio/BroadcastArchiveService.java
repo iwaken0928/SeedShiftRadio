@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.PlayHistoryResultStatus;
@@ -77,7 +78,11 @@ public class BroadcastArchiveService {
 		archive.setEligibleFrom(Instant.now().plus(Math.max(0, replayProfile.minimumAssetAgeHours()), ChronoUnit.HOURS));
 		archive.setExpiresAt(primaryAsset.getExpiresAt());
 		archive.setMetadata(metadata(history, item, primaryAsset));
-		return Optional.of(archiveRepository.save(archive));
+		try {
+			return Optional.of(archiveRepository.save(archive));
+		} catch (DataIntegrityViolationException exception) {
+			return Optional.empty();
+		}
 	}
 
 	@Transactional(readOnly = true)

@@ -3,6 +3,7 @@ package com.seedshiftradio.radio;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,11 +13,13 @@ import com.seedshiftradio.domain.PlayHistoryResultStatus;
 public class PlayHistoryService {
 
 	private final PlayHistoryRepository playHistoryRepository;
-	private final BroadcastArchiveService broadcastArchiveService;
+	private final ApplicationEventPublisher eventPublisher;
 
-	public PlayHistoryService(PlayHistoryRepository playHistoryRepository, BroadcastArchiveService broadcastArchiveService) {
+	public PlayHistoryService(
+			PlayHistoryRepository playHistoryRepository,
+			ApplicationEventPublisher eventPublisher) {
 		this.playHistoryRepository = playHistoryRepository;
-		this.broadcastArchiveService = broadcastArchiveService;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@Transactional
@@ -39,8 +42,10 @@ public class PlayHistoryService {
 		entity.setPlayedAt(Instant.now());
 		PlayHistoryEntity saved = playHistoryRepository.save(entity);
 		if (resultStatus == PlayHistoryResultStatus.DONE) {
-			broadcastArchiveService.markReplayed(item.getReplayOfPlayHistoryId());
-			broadcastArchiveService.promoteIfEligible(saved, item);
+			eventPublisher.publishEvent(new BroadcastArchivePromotionRequested(
+					saved.getId(),
+					item.getId(),
+					item.getReplayOfPlayHistoryId()));
 		}
 	}
 

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.seedshiftradio.domain.PlayHistoryResultStatus;
 import com.seedshiftradio.domain.PlaybackMode;
@@ -92,6 +93,23 @@ class BroadcastArchiveServiceTests {
 
 		assertFalse(promoted.isPresent());
 		verifyNoInteractions(archiveRepository, generatedAssetRepository);
+	}
+
+	@Test
+	void promoteIfEligibleTreatsUniqueConflictAsAlreadyPromoted() {
+		PlayHistoryEntity history = playHistory("play-history-001", SegmentType.MUSIC_AI, PlayHistoryResultStatus.DONE);
+		QueueItemEntity item = queueItem("queue-001", SegmentType.MUSIC_AI);
+		item.setAssetId("asset-001");
+		GeneratedAssetEntity asset = generatedAsset("asset-001", true);
+		when(policyRepository.findByStationId("station-night")).thenReturn(Optional.empty());
+		when(archiveRepository.existsBySourcePlayHistoryId("play-history-001")).thenReturn(false);
+		when(generatedAssetRepository.findById("asset-001")).thenReturn(Optional.of(asset));
+		when(generatedAssetService.findLatestScriptAssetForQueueItem("queue-001")).thenReturn(Optional.empty());
+		when(archiveRepository.save(any(BroadcastArchiveEntity.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+		Optional<BroadcastArchiveEntity> promoted = service.promoteIfEligible(history, item);
+
+		assertFalse(promoted.isPresent());
 	}
 
 	@Test

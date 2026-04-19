@@ -19,6 +19,7 @@ import com.seedshiftradio.radio.RadioEventRecord;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.RadioStatusResponse;
 import com.seedshiftradio.radio.SubtitlePayload;
+import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobRepository;
 import com.seedshiftradio.settings.ProviderHealthService;
@@ -35,6 +36,7 @@ public class MonitorService {
 	private final LetterService letterService;
 	private final ProviderHealthService providerHealthService;
 	private final ProviderJobRepository providerJobRepository;
+	private final GeneratedAssetService generatedAssetService;
 	private final StreamEventService streamEventService;
 
 	public MonitorService(
@@ -42,11 +44,13 @@ public class MonitorService {
 			LetterService letterService,
 			ProviderHealthService providerHealthService,
 			ProviderJobRepository providerJobRepository,
+			GeneratedAssetService generatedAssetService,
 			StreamEventService streamEventService) {
 		this.radioService = radioService;
 		this.letterService = letterService;
 		this.providerHealthService = providerHealthService;
 		this.providerJobRepository = providerJobRepository;
+		this.generatedAssetService = generatedAssetService;
 		this.streamEventService = streamEventService;
 	}
 
@@ -72,6 +76,7 @@ public class MonitorService {
 				pendingLetters,
 				status.degraded(),
 				providerHealthService.getLatestOrProbe(),
+				generatedAssetService.cacheMetrics(),
 				runningJobs,
 				recentErrors,
 				auditEvents,

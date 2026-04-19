@@ -3,6 +3,7 @@ package com.seedshiftradio.settings;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -191,6 +192,128 @@ class GeneratedAssetServiceTests {
 		assertEquals(Files.size(sourcePath), captor.getAllValues().get(1).getByteSize());
 	}
 
+	@Test
+	void evictCacheRemovesExpiredPayloadWithoutDeletingMetadata() throws Exception {
+		when(settingsStore.load()).thenReturn(settingsDocument(
+				new SettingsDocument.CacheSettings(
+						1_000L,
+						1_000L,
+						1_000L,
+						7,
+						3,
+						9,
+						"STATION",
+						"SESSION",
+						"GLOBAL",
+						10)));
+		when(generatedAssetRepository.summarizeByAssetType()).thenReturn(List.of());
+		when(generatedAssetRepository.countExpiredEvictionCandidates(any())).thenReturn(0L);
+
+		Path expiredPath = tempDir.resolve("expired.wav");
+		Files.write(expiredPath, "expired-audio".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		GeneratedAssetEntity expired = asset(
+				"asset-expired",
+				GeneratedAssetType.AUDIO,
+				expiredPath,
+				Files.size(expiredPath),
+				"cache-key-expired",
+				Instant.parse("2026-03-19T09:00:00Z"),
+				false);
+		when(generatedAssetRepository.findExpiredEvictionCandidates(any(), any())).thenReturn(List.of(expired));
+
+		GeneratedAssetService.CacheEvictionResult result = generatedAssetService.evictCache();
+
+		assertFalse(Files.exists(expiredPath));
+		assertEquals(1, result.evictedAssetCount());
+		assertEquals(1, result.expiredAssetCount());
+		assertEquals("DISABLED", expired.getReuseScope());
+		assertEquals(0L, expired.getByteSize());
+		assertNull(expired.getCacheKey());
+		assertEquals("expired", expired.getMetadata().get("evictionReason"));
+		verify(generatedAssetRepository).save(expired);
+	}
+
+	@Test
+	void evictCacheKeepsPayloadFileWhenAnotherAssetRecordSharesStoragePath() throws Exception {
+		when(settingsStore.load()).thenReturn(settingsDocument(
+				new SettingsDocument.CacheSettings(
+						1_000L,
+						1_000L,
+						1_000L,
+						7,
+						3,
+						9,
+						"STATION",
+						"SESSION",
+						"GLOBAL",
+						10)));
+		when(generatedAssetRepository.summarizeByAssetType()).thenReturn(List.of());
+		when(generatedAssetRepository.countExpiredEvictionCandidates(any())).thenReturn(0L);
+		when(generatedAssetRepository.countActivePayloadReferences(any())).thenReturn(2L);
+
+		Path sharedPath = tempDir.resolve("shared.wav");
+		Files.write(sharedPath, "shared-audio".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		GeneratedAssetEntity expired = asset(
+				"asset-shared",
+				GeneratedAssetType.AUDIO,
+				sharedPath,
+				Files.size(sharedPath),
+				"cache-key-shared",
+				Instant.parse("2026-03-19T09:00:00Z"),
+				false);
+		when(generatedAssetRepository.findExpiredEvictionCandidates(any(), any())).thenReturn(List.of(expired));
+
+		GeneratedAssetService.CacheEvictionResult result = generatedAssetService.evictCache();
+
+		assertTrue(Files.exists(sharedPath));
+		assertEquals(1, result.evictedAssetCount());
+		assertFalse((Boolean) expired.getMetadata().get("payloadFileDeleted"));
+		assertNull(expired.getCacheKey());
+		verify(generatedAssetRepository).save(expired);
+	}
+
+	@Test
+	void evictCacheEnforcesTypeSizeCapUsingLeastRecentlyUsedCandidates() throws Exception {
+		when(settingsStore.load()).thenReturn(settingsDocument(
+				new SettingsDocument.CacheSettings(
+						1_000L,
+						1_000L,
+						10L,
+						7,
+						3,
+						9,
+						"STATION",
+						"SESSION",
+						"GLOBAL",
+						10)));
+		when(generatedAssetRepository.findExpiredEvictionCandidates(any(), any())).thenReturn(List.of());
+		when(generatedAssetRepository.countExpiredEvictionCandidates(any())).thenReturn(0L);
+		when(generatedAssetRepository.summarizeByAssetType())
+				.thenReturn(List.of(stats(GeneratedAssetType.MUSIC, 1L, 100L, 0L)))
+				.thenReturn(List.of(stats(GeneratedAssetType.MUSIC, 1L, 0L, 0L)));
+
+		Path musicPath = tempDir.resolve("music.wav");
+		Files.write(musicPath, "music-data-over-cap".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		GeneratedAssetEntity candidate = asset(
+				"asset-music",
+				GeneratedAssetType.MUSIC,
+				musicPath,
+				100L,
+				"cache-key-music",
+				Instant.parse("2026-03-30T09:00:00Z"),
+				false);
+		when(generatedAssetRepository.findCapacityEvictionCandidates(any(), any())).thenReturn(List.of(candidate));
+
+		GeneratedAssetService.CacheEvictionResult result = generatedAssetService.evictCache();
+
+		assertFalse(Files.exists(musicPath));
+		assertEquals(1, result.evictedAssetCount());
+		assertEquals(1, result.capacityAssetCount());
+		assertEquals(100L, result.reclaimedBytes());
+		assertEquals("capacity", candidate.getMetadata().get("evictionReason"));
+		verify(generatedAssetRepository).save(candidate);
+	}
+
 	private SettingsDocument settingsDocument(SettingsDocument.CacheSettings cacheSettings) {
 		return new SettingsDocument(
 				1,
@@ -205,5 +328,60 @@ class GeneratedAssetServiceTests {
 				SettingsDocument.SecuritySettings.defaults(),
 				SettingsDocument.FeatureSettings.defaults())
 				.normalize();
+	}
+
+	private GeneratedAssetEntity asset(
+			String id,
+			GeneratedAssetType assetType,
+			Path storagePath,
+			long byteSize,
+			String cacheKey,
+			Instant expiresAt,
+			boolean archiveEligible) {
+		GeneratedAssetEntity entity = new GeneratedAssetEntity();
+		entity.setId(id);
+		entity.setAssetType(assetType);
+		entity.setStoragePath(storagePath.toString());
+		entity.setContentHash("hash-" + id);
+		entity.setProviderFingerprint("provider:test");
+		entity.setCacheKey(cacheKey);
+		entity.setByteSize(byteSize);
+		entity.setReuseScope("GLOBAL");
+		entity.setReuseCount(0);
+		entity.setLastAccessedAt(Instant.parse("2026-03-20T09:00:00Z"));
+		entity.setExpiresAt(expiresAt);
+		entity.setArchiveEligible(archiveEligible);
+		entity.setMetadata(Map.of("source", "test"));
+		entity.setCreatedAt(Instant.parse("2026-03-20T09:00:00Z"));
+		entity.setUpdatedAt(Instant.parse("2026-03-20T09:00:00Z"));
+		return entity;
+	}
+
+	private GeneratedAssetRepository.AssetTypeStats stats(
+			GeneratedAssetType assetType,
+			long assetCount,
+			long byteSize,
+			long cacheHitCount) {
+		return new GeneratedAssetRepository.AssetTypeStats() {
+			@Override
+			public GeneratedAssetType getAssetType() {
+				return assetType;
+			}
+
+			@Override
+			public long getAssetCount() {
+				return assetCount;
+			}
+
+			@Override
+			public long getByteSize() {
+				return byteSize;
+			}
+
+			@Override
+			public long getCacheHitCount() {
+				return cacheHitCount;
+			}
+		};
 	}
 }

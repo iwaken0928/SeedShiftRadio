@@ -8,6 +8,7 @@ import com.seedshiftradio.domain.PlayoutState;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.settings.SettingsDtos;
 
 public final class MonitorDtos {
@@ -23,6 +24,7 @@ public final class MonitorDtos {
 			long pendingLetterCount,
 			boolean degraded,
 			Map<String, SettingsDtos.ProviderHealthPayload> providerHealth,
+			GeneratedAssetService.CacheMetricsSnapshot cache,
 			List<ProviderJobSummary> runningJobs,
 			List<ProviderJobSummary> recentErrors,
 			List<AuditEventSummary> auditEvents,

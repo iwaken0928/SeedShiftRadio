@@ -7,6 +7,7 @@ export type SlotRole = "OPENING" | "TOPIC" | "LETTER" | "MUSIC_BREAK" | "ENDING"
 export type SegmentType = "TALK" | "LETTER" | "JINGLE" | "MUSIC_LOCAL" | "MUSIC_AI";
 export type ContentOrigin = "LIVE_GEN" | "CACHE_REUSED" | "PLACEHOLDER" | "ARCHIVE_REPLAY" | "LOCAL_LIBRARY";
 export type LetterStatus = "UNREAD" | "PENDING" | "ADOPTED" | "REPLIED";
+export type GeneratedAssetType = "SCRIPT" | "AUDIO" | "MUSIC";
 
 export interface StationSummary {
   id: string;
@@ -302,10 +303,29 @@ export interface MonitorSummary {
   pendingLetterCount: number;
   degraded: boolean;
   providerHealth: Record<string, ProviderHealthPayload>;
+  cache: CacheMetricsSnapshot;
   runningJobs: MonitorProviderJob[];
   recentErrors: MonitorProviderJob[];
   auditEvents: MonitorAuditEvent[];
   updatedAt: string;
+}
+
+export interface CacheMetricsSnapshot {
+  checkedAt: string;
+  assetCount: number;
+  byteSize: number;
+  cacheHitCount: number;
+  cacheHitRate: number;
+  expiredAssetCount: number;
+  byType: Record<GeneratedAssetType, CacheTypeMetrics>;
+}
+
+export interface CacheTypeMetrics {
+  assetType: GeneratedAssetType;
+  assetCount: number;
+  byteSize: number;
+  cacheHitCount: number;
+  cacheHitRate: number;
 }
 
 export interface MonitorProviderJob {

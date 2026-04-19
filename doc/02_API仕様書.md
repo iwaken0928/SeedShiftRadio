@@ -949,7 +949,7 @@ Response:
 
 ### 6.9 `PUT /api/settings`
 
-クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`programming` は planning の既定値と legacy fallback の土台設定を保持し、`providers` は種別ごとの `defaultProvider`, `fallbackProviders`, endpoint map を一括更新します。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使いますが、現時点では retention/eviction の定期実行は未実装です。
+クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`programming` は planning の既定値と legacy fallback の土台設定を保持し、`providers` は種別ごとの `defaultProvider`, `fallbackProviders`, endpoint map を一括更新します。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使い、retention/eviction job は `expires_at`, 種別ごとの max bytes, `cleanupBatchSize` を参照します。
 
 ```json
 {
@@ -966,7 +966,7 @@ Response:
 }
 ```
 
-`cache` の `scriptMaxBytes`, `ttsMaxBytes`, `musicMaxBytes` は各 asset 種別ごとの保存上限を表します。`scriptReuseScope`, `ttsReuseScope`, `musicReuseScope` は `DISABLED`, `SESSION`, `STATION`, `GLOBAL`, `ARCHIVE_ONLY` のいずれかを取り、再利用候補の検索範囲を制御します。`cleanupBatchSize` は将来の eviction job の一回あたり処理量であり、現時点では処理本体は未実装です。
+`cache` の `scriptMaxBytes`, `ttsMaxBytes`, `musicMaxBytes` は各 asset 種別ごとの保存上限を表します。`scriptReuseScope`, `ttsReuseScope`, `musicReuseScope` は `DISABLED`, `SESSION`, `STATION`, `GLOBAL`, `ARCHIVE_ONLY` のいずれかを取り、再利用候補の検索範囲を制御します。`cleanupBatchSize` は eviction job の一回あたり処理量です。eviction は参照整合性を壊さないため DB record は残し、payload file を削除したうえで `byte_size=0`, `cache_key=null`, `reuse_scope=DISABLED` とし、短い eviction metadata だけを残します。
 
 `playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は待機時 prefetch を許可するフラグです。
 
@@ -1029,7 +1029,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.14 MonitorSummary
 
-`GET /api/monitor/summary` は `ProviderHealth` に加えて、`provider_job` から復元した `runningJobs` / `recentErrors` と、SSE 履歴から抽出した `auditEvents` を返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
+`GET /api/monitor/summary` は `ProviderHealth` に加えて、generated asset cache の集約値、`provider_job` から復元した `runningJobs` / `recentErrors`、SSE 履歴から抽出した `auditEvents` を返します。`cache` は prompt や本文を含まず、asset 件数、byte 数、`reuse_count` 由来の cache hit count / rate、期限切れ候補数、種別別内訳だけを返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
 
 ```json
 {
@@ -1039,6 +1039,19 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
   "bufferReadyCount": 2,
   "pendingLetterCount": 3,
   "degraded": false,
+  "cache": {
+    "checkedAt": "2026-03-20T09:14:00Z",
+    "assetCount": 42,
+    "byteSize": 128450560,
+    "cacheHitCount": 7,
+    "cacheHitRate": 0.1428,
+    "expiredAssetCount": 2,
+    "byType": {
+      "SCRIPT": { "assetType": "SCRIPT", "assetCount": 12, "byteSize": 102400, "cacheHitCount": 1, "cacheHitRate": 0.0769 },
+      "AUDIO": { "assetType": "AUDIO", "assetCount": 20, "byteSize": 28450160, "cacheHitCount": 2, "cacheHitRate": 0.0909 },
+      "MUSIC": { "assetType": "MUSIC", "assetCount": 10, "byteSize": 99998000, "cacheHitCount": 4, "cacheHitRate": 0.2857 }
+    }
+  },
   "runningJobs": [
     {
       "id": "provider-job-running-001",

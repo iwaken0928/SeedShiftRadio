@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.seedshiftradio.domain.PlayoutState;
+import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
@@ -28,6 +29,7 @@ import com.seedshiftradio.radio.RadioEventRecord;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.RadioStatusResponse;
 import com.seedshiftradio.radio.SubtitlePayload;
+import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobRepository;
 import com.seedshiftradio.settings.ProviderHealthService;
@@ -50,13 +52,22 @@ class MonitorServiceTests {
 	ProviderJobRepository providerJobRepository;
 
 	@Mock
+	GeneratedAssetService generatedAssetService;
+
+	@Mock
 	StreamEventService streamEventService;
 
 	MonitorService monitorService;
 
 	@BeforeEach
 	void setUp() {
-		monitorService = new MonitorService(radioService, letterService, providerHealthService, providerJobRepository, streamEventService);
+		monitorService = new MonitorService(
+				radioService,
+				letterService,
+				providerHealthService,
+				providerJobRepository,
+				generatedAssetService,
+				streamEventService);
 	}
 
 	@Test
@@ -80,6 +91,7 @@ class MonitorServiceTests {
 		when(radioService.getStatus()).thenReturn(status);
 		when(letterService.countPendingLetters("station-night")).thenReturn(5L);
 		when(providerHealthService.getLatestOrProbe()).thenReturn(providerHealth);
+		when(generatedAssetService.cacheMetrics()).thenReturn(cacheMetrics());
 		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING)).thenReturn(List.of(job("job-running", ProviderJobStatus.RUNNING, ProviderJobType.MUSIC_GEN)));
 		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.FAILED)).thenReturn(List.of(job("job-failed", ProviderJobStatus.FAILED, ProviderJobType.TTS_GEN)));
 		when(streamEventService.recentEvents(20)).thenReturn(List.of(
@@ -100,6 +112,9 @@ class MonitorServiceTests {
 		assertEquals(5L, summary.pendingLetterCount());
 		assertEquals(status.degraded(), summary.degraded());
 		assertEquals(providerHealth, summary.providerHealth());
+		assertEquals(12_345L, summary.cache().byteSize());
+		assertEquals(2, summary.cache().byType().get(GeneratedAssetType.MUSIC).assetCount());
+		assertEquals(0.25D, summary.cache().cacheHitRate());
 		assertEquals(1, summary.runningJobs().size());
 		assertEquals("job-running", summary.runningJobs().getFirst().id());
 		assertEquals(1, summary.recentErrors().size());
@@ -128,6 +143,20 @@ class MonitorServiceTests {
 		entity.setStartedAt(Instant.parse("2026-03-20T09:05:00Z"));
 		entity.setEndedAt(status == ProviderJobStatus.FAILED ? Instant.parse("2026-03-20T09:10:00Z") : null);
 		return entity;
+	}
+
+	private GeneratedAssetService.CacheMetricsSnapshot cacheMetrics() {
+		return new GeneratedAssetService.CacheMetricsSnapshot(
+				Instant.parse("2026-03-20T09:00:00Z"),
+				4L,
+				12_345L,
+				1L,
+				0.25D,
+				1L,
+				Map.of(
+						GeneratedAssetType.SCRIPT, new GeneratedAssetService.CacheTypeMetrics(GeneratedAssetType.SCRIPT, 1L, 123L, 0L, 0.0D),
+						GeneratedAssetType.AUDIO, new GeneratedAssetService.CacheTypeMetrics(GeneratedAssetType.AUDIO, 1L, 456L, 0L, 0.0D),
+						GeneratedAssetType.MUSIC, new GeneratedAssetService.CacheTypeMetrics(GeneratedAssetType.MUSIC, 2L, 11_766L, 1L, 0.33D)));
 	}
 
 	private ProviderJobEntity newProviderJobEntity() {

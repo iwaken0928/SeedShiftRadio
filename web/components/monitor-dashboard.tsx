@@ -6,7 +6,7 @@ import { getHealth, getMonitorSummary, getRadioProgram } from "@/lib/api";
 import { getAdminToken } from "@/lib/env";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Card, EmptyState, Input, Metric, SectionHeader } from "@/components/ui";
-import type { MonitorAuditEvent, MonitorProviderJob, ProviderHealthPayload } from "@/lib/types";
+import type { CacheTypeMetrics, MonitorAuditEvent, MonitorProviderJob, ProviderHealthPayload } from "@/lib/types";
 
 const LIVE_REFRESH_INTERVAL_MS = 10_000;
 const PROVIDER_STATUS_FILTERS = ["ALL", "UP", "DEGRADED", "DOWN"] as const;
@@ -117,6 +117,21 @@ export function MonitorDashboard() {
                     description={programQuery.error instanceof Error ? programQuery.error.message : "Tune 後に現在 block が表示されます。"}
                   />
                 )}
+              </section>
+
+              <section className="space-y-3">
+                <SectionHeader eyebrow="Cache" title="Generated assets" description="生成済み script / TTS / music の保存量と再利用状況を追跡します。" />
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Metric label="Bytes" value={formatBytes(summary.cache.byteSize)} tone="accent" />
+                  <Metric label="Assets" value={summary.cache.assetCount} />
+                  <Metric label="Cache Hit Rate" value={formatPercent(summary.cache.cacheHitRate)} />
+                  <Metric label="Expired" value={summary.cache.expiredAssetCount} tone={summary.cache.expiredAssetCount > 0 ? "warning" : "default"} />
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {Object.entries(summary.cache.byType).map(([assetType, metrics]) => (
+                    <CacheMetricCard key={assetType} metrics={metrics} />
+                  ))}
+                </div>
               </section>
 
               <section className="space-y-3">
@@ -236,6 +251,22 @@ export function MonitorDashboard() {
   );
 }
 
+function CacheMetricCard({ metrics }: { metrics: CacheTypeMetrics }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="font-semibold text-slate-950">{metrics.assetType}</div>
+        <Badge tone="default">{formatBytes(metrics.byteSize)}</Badge>
+      </div>
+      <div className="mt-2 grid gap-2 text-sm text-slate-600">
+        <div>Assets: {metrics.assetCount}</div>
+        <div>Hits: {metrics.cacheHitCount}</div>
+        <div>Rate: {formatPercent(metrics.cacheHitRate)}</div>
+      </div>
+    </div>
+  );
+}
+
 function MonitorJobCard({ job }: { job: MonitorProviderJob }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
@@ -297,4 +328,25 @@ function formatDurationMs(value: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 }

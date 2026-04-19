@@ -3,15 +3,19 @@ package com.seedshiftradio.settings;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.InvalidPathException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -129,6 +133,60 @@ public class GeneratedAssetService {
 	public Optional<GeneratedAssetEntity> touchAsset(String assetId) {
 		return generatedAssetRepository.findById(assetId)
 				.map(entity -> generatedAssetRepository.save(touch(entity)));
+	}
+
+	@Transactional(readOnly = true)
+	public CacheMetricsSnapshot cacheMetrics() {
+		return cacheMetrics(Instant.now());
+	}
+
+	@Transactional
+	public CacheEvictionResult evictCache() {
+		SettingsDocument.CacheSettings cache = settingsStore.load().cache();
+		Instant now = Instant.now();
+		int remainingBatch = cache.cleanupBatchSize();
+		EvictionAccumulator accumulator = new EvictionAccumulator(now);
+
+		List<GeneratedAssetEntity> expiredCandidates = generatedAssetRepository.findExpiredEvictionCandidates(
+				now,
+				PageRequest.of(0, remainingBatch));
+		for (GeneratedAssetEntity candidate : expiredCandidates) {
+			if (remainingBatch <= 0) {
+				break;
+			}
+			if (evictPayload(candidate, "expired", now, accumulator)) {
+				accumulator.expiredAssetCount++;
+				remainingBatch--;
+			}
+		}
+
+		CacheMetricsSnapshot metrics = cacheMetrics(now);
+		for (GeneratedAssetType assetType : GeneratedAssetType.values()) {
+			if (remainingBatch <= 0) {
+				break;
+			}
+			long maxBytes = maxBytesFor(cache, assetType);
+			long currentBytes = metrics.byType().get(assetType).byteSize();
+			if (currentBytes <= maxBytes) {
+				continue;
+			}
+			List<GeneratedAssetEntity> capacityCandidates = generatedAssetRepository.findCapacityEvictionCandidates(
+					assetType,
+					PageRequest.of(0, remainingBatch));
+			for (GeneratedAssetEntity candidate : capacityCandidates) {
+				if (remainingBatch <= 0 || currentBytes <= maxBytes) {
+					break;
+				}
+				long beforeBytes = normalizeByteSize(candidate.getByteSize());
+				if (evictPayload(candidate, "capacity", now, accumulator)) {
+					accumulator.capacityAssetCount++;
+					currentBytes = Math.max(0L, currentBytes - beforeBytes);
+					remainingBatch--;
+				}
+			}
+		}
+
+		return accumulator.toResult(cacheMetrics(Instant.now()));
 	}
 
 	@Transactional(readOnly = true)
@@ -296,6 +354,105 @@ public class GeneratedAssetService {
 		return entity;
 	}
 
+	private CacheMetricsSnapshot cacheMetrics(Instant checkedAt) {
+		Map<GeneratedAssetType, CacheTypeMetrics> byType = new EnumMap<>(GeneratedAssetType.class);
+		for (GeneratedAssetType assetType : GeneratedAssetType.values()) {
+			byType.put(assetType, new CacheTypeMetrics(assetType, 0L, 0L, 0L, 0.0D));
+		}
+		for (GeneratedAssetRepository.AssetTypeStats stats : generatedAssetRepository.summarizeByAssetType()) {
+			long assetCount = stats.getAssetCount();
+			long byteSize = stats.getByteSize();
+			long cacheHitCount = stats.getCacheHitCount();
+			byType.put(
+					stats.getAssetType(),
+					new CacheTypeMetrics(
+							stats.getAssetType(),
+							assetCount,
+							byteSize,
+							cacheHitCount,
+							cacheHitRate(assetCount, cacheHitCount)));
+		}
+		long assetCount = byType.values().stream().mapToLong(CacheTypeMetrics::assetCount).sum();
+		long byteSize = byType.values().stream().mapToLong(CacheTypeMetrics::byteSize).sum();
+		long cacheHitCount = byType.values().stream().mapToLong(CacheTypeMetrics::cacheHitCount).sum();
+		return new CacheMetricsSnapshot(
+				checkedAt,
+				assetCount,
+				byteSize,
+				cacheHitCount,
+				cacheHitRate(assetCount, cacheHitCount),
+				generatedAssetRepository.countExpiredEvictionCandidates(checkedAt),
+				Map.copyOf(byType));
+	}
+
+	private boolean evictPayload(
+			GeneratedAssetEntity entity,
+			String reason,
+			Instant now,
+			EvictionAccumulator accumulator) {
+		long byteSize = normalizeByteSize(entity.getByteSize());
+		try {
+			boolean fileDeleted = shouldDeletePayloadFile(entity) && deletePayloadFile(entity.getStoragePath());
+			Map<String, Object> metadata = new LinkedHashMap<>(entity.getMetadata() == null ? Map.of() : entity.getMetadata());
+			metadata.put("evictedAt", now.toString());
+			metadata.put("evictionReason", reason);
+			metadata.put("evictedByteSize", byteSize);
+			metadata.put("payloadFileDeleted", fileDeleted);
+			entity.setMetadata(metadata);
+			entity.setByteSize(0L);
+			entity.setCacheKey(null);
+			entity.setReuseScope("DISABLED");
+			entity.setExpiresAt(now);
+			generatedAssetRepository.save(entity);
+			accumulator.evictedAssetCount++;
+			accumulator.reclaimedBytes += byteSize;
+			return true;
+		} catch (IOException | InvalidPathException exception) {
+			accumulator.failedAssetCount++;
+			return false;
+		}
+	}
+
+	private boolean shouldDeletePayloadFile(GeneratedAssetEntity entity) {
+		String storagePath = entity.getStoragePath();
+		if (storagePath == null || storagePath.isBlank()) {
+			return false;
+		}
+		return generatedAssetRepository.countActivePayloadReferences(storagePath) <= 1L;
+	}
+
+	private boolean deletePayloadFile(String storagePath) throws IOException {
+		if (storagePath == null || storagePath.isBlank()) {
+			return false;
+		}
+		Path path = Path.of(storagePath).toAbsolutePath().normalize();
+		if (!Files.exists(path)) {
+			return false;
+		}
+		Files.delete(path);
+		return true;
+	}
+
+	private long maxBytesFor(SettingsDocument.CacheSettings cache, GeneratedAssetType assetType) {
+		return switch (assetType) {
+			case SCRIPT -> cache.scriptMaxBytes();
+			case AUDIO -> cache.ttsMaxBytes();
+			case MUSIC -> cache.musicMaxBytes();
+		};
+	}
+
+	private double cacheHitRate(long assetCount, long cacheHitCount) {
+		long denominator = assetCount + cacheHitCount;
+		if (denominator <= 0) {
+			return 0.0D;
+		}
+		return (double) cacheHitCount / (double) denominator;
+	}
+
+	private long normalizeByteSize(Long byteSize) {
+		return byteSize == null || byteSize < 0 ? 0L : byteSize;
+	}
+
 	private long resolveByteSize(Path assetPath, Long fallback) {
 		if (fallback != null && fallback >= 0) {
 			return fallback;
@@ -362,6 +519,59 @@ public class GeneratedAssetService {
 
 	private String nextId() {
 		return "asset-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+	}
+
+	public record CacheMetricsSnapshot(
+			Instant checkedAt,
+			long assetCount,
+			long byteSize,
+			long cacheHitCount,
+			double cacheHitRate,
+			long expiredAssetCount,
+			Map<GeneratedAssetType, CacheTypeMetrics> byType) {
+	}
+
+	public record CacheTypeMetrics(
+			GeneratedAssetType assetType,
+			long assetCount,
+			long byteSize,
+			long cacheHitCount,
+			double cacheHitRate) {
+	}
+
+	public record CacheEvictionResult(
+			Instant executedAt,
+			int evictedAssetCount,
+			int expiredAssetCount,
+			int capacityAssetCount,
+			int failedAssetCount,
+			long reclaimedBytes,
+			CacheMetricsSnapshot after) {
+	}
+
+	private static final class EvictionAccumulator {
+
+		private final Instant executedAt;
+		private int evictedAssetCount;
+		private int expiredAssetCount;
+		private int capacityAssetCount;
+		private int failedAssetCount;
+		private long reclaimedBytes;
+
+		private EvictionAccumulator(Instant executedAt) {
+			this.executedAt = executedAt;
+		}
+
+		private CacheEvictionResult toResult(CacheMetricsSnapshot after) {
+			return new CacheEvictionResult(
+					executedAt,
+					evictedAssetCount,
+					expiredAssetCount,
+					capacityAssetCount,
+					failedAssetCount,
+					reclaimedBytes,
+					after);
+		}
 	}
 
 	private record LifecycleDefaults(String reuseScope, int retentionDays) {

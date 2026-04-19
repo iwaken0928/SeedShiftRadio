@@ -1029,7 +1029,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.14 MonitorSummary
 
-`GET /api/monitor/summary` は `ProviderHealth` に加えて、generated asset cache の集約値、`provider_job` から復元した `runningJobs` / `recentErrors`、SSE 履歴から抽出した `auditEvents` を返します。`cache` は prompt や本文を含まず、asset 件数、byte 数、`reuse_count` 由来の cache hit count / rate、期限切れ候補数、種別別内訳だけを返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
+`GET /api/monitor/summary` は `ProviderHealth` に加えて、READY queue の合計 duration、generated asset cache の集約値、archive pool / replay 集約値、`provider_job` から復元した `runningJobs` / `recentErrors`、SSE 履歴から抽出した `auditEvents` を返します。`cache` と `archive` は prompt や本文を含まず、件数、byte 数、hit/replay rate などの数値だけを返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
 
 ```json
 {
@@ -1037,6 +1037,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
   "stationId": "station-night",
   "state": "PLAYING",
   "bufferReadyCount": 2,
+  "queueReadyDurationMs": 90000,
   "pendingLetterCount": 3,
   "degraded": false,
   "cache": {
@@ -1051,6 +1052,13 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
       "AUDIO": { "assetType": "AUDIO", "assetCount": 20, "byteSize": 28450160, "cacheHitCount": 2, "cacheHitRate": 0.0909 },
       "MUSIC": { "assetType": "MUSIC", "assetCount": 10, "byteSize": 99998000, "cacheHitCount": 4, "cacheHitRate": 0.2857 }
     }
+  },
+  "archive": {
+    "eligibleArchiveCount": 3,
+    "totalArchiveCount": 4,
+    "archiveReplayCount": 3,
+    "totalPlaybackCount": 12,
+    "archiveReplayRate": 0.25
   },
   "runningJobs": [
     {

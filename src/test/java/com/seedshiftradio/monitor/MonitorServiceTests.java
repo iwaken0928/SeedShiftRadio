@@ -3,6 +3,8 @@ package com.seedshiftradio.monitor;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -18,13 +20,18 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.seedshiftradio.domain.PlayoutState;
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.PlayHistoryResultStatus;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.letter.LetterService;
 import com.seedshiftradio.monitor.MonitorDtos.AuditEventSummary;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
+import com.seedshiftradio.radio.BroadcastArchiveRepository;
+import com.seedshiftradio.radio.PlayHistoryRepository;
+import com.seedshiftradio.radio.QueueItemRepository;
 import com.seedshiftradio.radio.RadioEventRecord;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.RadioStatusResponse;
@@ -57,6 +64,15 @@ class MonitorServiceTests {
 	@Mock
 	StreamEventService streamEventService;
 
+	@Mock
+	QueueItemRepository queueItemRepository;
+
+	@Mock
+	BroadcastArchiveRepository broadcastArchiveRepository;
+
+	@Mock
+	PlayHistoryRepository playHistoryRepository;
+
 	MonitorService monitorService;
 
 	@BeforeEach
@@ -67,7 +83,10 @@ class MonitorServiceTests {
 				providerHealthService,
 				providerJobRepository,
 				generatedAssetService,
-				streamEventService);
+				streamEventService,
+				queueItemRepository,
+				broadcastArchiveRepository,
+				playHistoryRepository);
 	}
 
 	@Test
@@ -92,6 +111,11 @@ class MonitorServiceTests {
 		when(letterService.countPendingLetters("station-night")).thenReturn(5L);
 		when(providerHealthService.getLatestOrProbe()).thenReturn(providerHealth);
 		when(generatedAssetService.cacheMetrics()).thenReturn(cacheMetrics());
+		when(queueItemRepository.sumDurationMsBySessionIdAndStatus("playout-001", QueueItemStatus.READY)).thenReturn(90_000L);
+		when(broadcastArchiveRepository.countEligibleArchivesByStationId(eq("station-night"), any(Instant.class))).thenReturn(3L);
+		when(broadcastArchiveRepository.countByStationId("station-night")).thenReturn(4L);
+		when(playHistoryRepository.countByStationIdAndResultStatus("station-night", PlayHistoryResultStatus.DONE)).thenReturn(12L);
+		when(playHistoryRepository.countByStationIdAndResultStatusAndContentOrigin("station-night", PlayHistoryResultStatus.DONE, "ARCHIVE_REPLAY")).thenReturn(3L);
 		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING)).thenReturn(List.of(job("job-running", ProviderJobStatus.RUNNING, ProviderJobType.MUSIC_GEN)));
 		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.FAILED)).thenReturn(List.of(job("job-failed", ProviderJobStatus.FAILED, ProviderJobType.TTS_GEN)));
 		when(streamEventService.recentEvents(20)).thenReturn(List.of(
@@ -109,12 +133,18 @@ class MonitorServiceTests {
 		MonitorSummaryResponse summary = monitorService.summary();
 
 		assertEquals("playout-001", summary.sessionId());
+		assertEquals(90_000L, summary.queueReadyDurationMs());
 		assertEquals(5L, summary.pendingLetterCount());
 		assertEquals(status.degraded(), summary.degraded());
 		assertEquals(providerHealth, summary.providerHealth());
 		assertEquals(12_345L, summary.cache().byteSize());
 		assertEquals(2, summary.cache().byType().get(GeneratedAssetType.MUSIC).assetCount());
 		assertEquals(0.25D, summary.cache().cacheHitRate());
+		assertEquals(3L, summary.archive().eligibleArchiveCount());
+		assertEquals(4L, summary.archive().totalArchiveCount());
+		assertEquals(3L, summary.archive().archiveReplayCount());
+		assertEquals(12L, summary.archive().totalPlaybackCount());
+		assertEquals(0.25D, summary.archive().archiveReplayRate());
 		assertEquals(1, summary.runningJobs().size());
 		assertEquals("job-running", summary.runningJobs().getFirst().id());
 		assertEquals(1, summary.recentErrors().size());

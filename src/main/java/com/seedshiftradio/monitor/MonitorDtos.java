@@ -21,14 +21,24 @@ public final class MonitorDtos {
 			String stationId,
 			PlayoutState state,
 			Integer bufferReadyCount,
+			long queueReadyDurationMs,
 			long pendingLetterCount,
 			boolean degraded,
 			Map<String, SettingsDtos.ProviderHealthPayload> providerHealth,
 			GeneratedAssetService.CacheMetricsSnapshot cache,
+			ArchiveMetrics archive,
 			List<ProviderJobSummary> runningJobs,
 			List<ProviderJobSummary> recentErrors,
 			List<AuditEventSummary> auditEvents,
 			Instant updatedAt) {
+	}
+
+	public record ArchiveMetrics(
+			long eligibleArchiveCount,
+			long totalArchiveCount,
+			long archiveReplayCount,
+			long totalPlaybackCount,
+			double archiveReplayRate) {
 	}
 
 	public record ProviderJobSummary(

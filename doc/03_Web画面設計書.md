@@ -122,14 +122,16 @@
 
 - Provider 状態
 - バッファ残量
+- READY queue の合計 duration
 - 現在番組 block と template version
 - generated asset cache の保存量、期限切れ候補、種別別 hit rate
+- archive pool 件数と archive replay rate
 - 進行中ジョブ
 - 直近エラー
 - 直近 10 件の監査イベント
 
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
-- summary は定期 refresh し、provider status, generated asset cache, job, audit event を画面内で絞り込めるようにする
+- summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
 
 ## 9. 状態管理
 

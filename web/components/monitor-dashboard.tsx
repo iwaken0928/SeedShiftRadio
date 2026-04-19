@@ -87,13 +87,24 @@ export function MonitorDashboard() {
           />
           {summary ? (
             <div className="space-y-6">
-              <div className="grid gap-3 md:grid-cols-5">
+              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                 <Metric label="State" value={summary.state ?? "IDLE"} tone={summary.degraded ? "warning" : "default"} />
                 <Metric label="Buffer Ready" value={summary.bufferReadyCount} tone="accent" />
+                <Metric label="Ready Duration" value={formatDurationMs(summary.queueReadyDurationMs)} tone="accent" />
                 <Metric label="Pending Letters" value={summary.pendingLetterCount} />
                 <Metric label="Station" value={summary.stationId ?? "none"} />
                 <Metric label="Updated" value={formatInstant(summary.updatedAt)} />
               </div>
+
+              <section className="space-y-3">
+                <SectionHeader eyebrow="Archive" title="Archive pool / replay" description="再放送候補と直近 playback に占める archive replay の割合です。" />
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Metric label="Eligible Pool" value={`${summary.archive.eligibleArchiveCount} / ${summary.archive.totalArchiveCount}`} tone="accent" />
+                  <Metric label="Replay Rate" value={formatPercent(summary.archive.archiveReplayRate)} />
+                  <Metric label="Archive Replays" value={summary.archive.archiveReplayCount} />
+                  <Metric label="Total Playback" value={summary.archive.totalPlaybackCount} />
+                </div>
+              </section>
 
               <section className="space-y-3">
                 <SectionHeader eyebrow="Program" title="Current program block" description="監視画面でも現在の block / template version を見える化します。" />

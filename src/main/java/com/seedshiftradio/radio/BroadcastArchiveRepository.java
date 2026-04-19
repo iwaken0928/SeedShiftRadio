@@ -16,6 +16,29 @@ public interface BroadcastArchiveRepository extends JpaRepository<BroadcastArchi
 
 	Optional<BroadcastArchiveEntity> findBySourcePlayHistoryId(String sourcePlayHistoryId);
 
+	long countByStationId(String stationId);
+
+	@Query("""
+			SELECT COUNT(archive)
+			FROM BroadcastArchiveEntity archive
+			WHERE archive.archiveStatus = 'ELIGIBLE'
+				AND archive.eligibleFrom <= :now
+				AND (archive.expiresAt IS NULL OR archive.expiresAt > :now)
+			""")
+	long countEligibleArchives(@Param("now") Instant now);
+
+	@Query("""
+			SELECT COUNT(archive)
+			FROM BroadcastArchiveEntity archive
+			WHERE archive.stationId = :stationId
+				AND archive.archiveStatus = 'ELIGIBLE'
+				AND archive.eligibleFrom <= :now
+				AND (archive.expiresAt IS NULL OR archive.expiresAt > :now)
+			""")
+	long countEligibleArchivesByStationId(
+			@Param("stationId") String stationId,
+			@Param("now") Instant now);
+
 	@Query("""
 			SELECT archive
 			FROM BroadcastArchiveEntity archive

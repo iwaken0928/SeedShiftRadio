@@ -300,14 +300,24 @@ export interface MonitorSummary {
   stationId: string | null;
   state: PlayoutState;
   bufferReadyCount: number;
+  queueReadyDurationMs: number;
   pendingLetterCount: number;
   degraded: boolean;
   providerHealth: Record<string, ProviderHealthPayload>;
   cache: CacheMetricsSnapshot;
+  archive: ArchiveMetricsSnapshot;
   runningJobs: MonitorProviderJob[];
   recentErrors: MonitorProviderJob[];
   auditEvents: MonitorAuditEvent[];
   updatedAt: string;
+}
+
+export interface ArchiveMetricsSnapshot {
+  eligibleArchiveCount: number;
+  totalArchiveCount: number;
+  archiveReplayCount: number;
+  totalPlaybackCount: number;
+  archiveReplayRate: number;
 }
 
 export interface CacheMetricsSnapshot {

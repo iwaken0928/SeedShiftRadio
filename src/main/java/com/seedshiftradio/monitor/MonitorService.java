@@ -3,17 +3,24 @@ package com.seedshiftradio.monitor;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
+import com.seedshiftradio.domain.PlayHistoryResultStatus;
 import com.seedshiftradio.domain.ProviderJobStatus;
+import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.letter.LetterService;
+import com.seedshiftradio.monitor.MonitorDtos.ArchiveMetrics;
 import com.seedshiftradio.monitor.MonitorDtos.AuditEventSummary;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
+import com.seedshiftradio.radio.BroadcastArchiveRepository;
 import com.seedshiftradio.radio.BufferWarningPayload;
+import com.seedshiftradio.radio.PlayHistoryRepository;
 import com.seedshiftradio.radio.ProgramBlockResponse;
+import com.seedshiftradio.radio.QueueItemRepository;
 import com.seedshiftradio.radio.QueueSnapshotResponse;
 import com.seedshiftradio.radio.RadioEventRecord;
 import com.seedshiftradio.radio.RadioService;
@@ -31,6 +38,7 @@ public class MonitorService {
 	private static final int JOB_LIMIT = 10;
 	private static final int AUDIT_FETCH_LIMIT = 20;
 	private static final int AUDIT_RESULT_LIMIT = 10;
+	private static final String ARCHIVE_REPLAY_ORIGIN = "ARCHIVE_REPLAY";
 
 	private final RadioService radioService;
 	private final LetterService letterService;
@@ -38,6 +46,9 @@ public class MonitorService {
 	private final ProviderJobRepository providerJobRepository;
 	private final GeneratedAssetService generatedAssetService;
 	private final StreamEventService streamEventService;
+	private final QueueItemRepository queueItemRepository;
+	private final BroadcastArchiveRepository broadcastArchiveRepository;
+	private final PlayHistoryRepository playHistoryRepository;
 
 	public MonitorService(
 			RadioService radioService,
@@ -45,18 +56,28 @@ public class MonitorService {
 			ProviderHealthService providerHealthService,
 			ProviderJobRepository providerJobRepository,
 			GeneratedAssetService generatedAssetService,
-			StreamEventService streamEventService) {
+			StreamEventService streamEventService,
+			QueueItemRepository queueItemRepository,
+			BroadcastArchiveRepository broadcastArchiveRepository,
+			PlayHistoryRepository playHistoryRepository) {
 		this.radioService = radioService;
 		this.letterService = letterService;
 		this.providerHealthService = providerHealthService;
 		this.providerJobRepository = providerJobRepository;
 		this.generatedAssetService = generatedAssetService;
 		this.streamEventService = streamEventService;
+		this.queueItemRepository = queueItemRepository;
+		this.broadcastArchiveRepository = broadcastArchiveRepository;
+		this.playHistoryRepository = playHistoryRepository;
 	}
 
 	public MonitorSummaryResponse summary() {
 		RadioStatusResponse status = radioService.getStatus();
 		long pendingLetters = status.stationId() == null ? 0 : letterService.countPendingLetters(status.stationId());
+		long queueReadyDurationMs = status.sessionId() == null
+				? 0L
+				: queueItemRepository.sumDurationMsBySessionIdAndStatus(status.sessionId(), QueueItemStatus.READY);
+		ArchiveMetrics archiveMetrics = archiveMetrics(status.stationId());
 		List<ProviderJobSummary> runningJobs = providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING).stream()
 				.map(MonitorService::toJobSummary)
 				.toList();
@@ -73,14 +94,42 @@ public class MonitorService {
 				status.stationId(),
 				status.state(),
 				status.bufferReadyCount(),
+				queueReadyDurationMs,
 				pendingLetters,
 				status.degraded(),
 				providerHealthService.getLatestOrProbe(),
 				generatedAssetService.cacheMetrics(),
+				archiveMetrics,
 				runningJobs,
 				recentErrors,
 				auditEvents,
 				status.updatedAt());
+	}
+
+	private ArchiveMetrics archiveMetrics(String stationId) {
+		Instant now = Instant.now();
+		long eligibleArchiveCount = stationId == null
+				? broadcastArchiveRepository.countEligibleArchives(now)
+				: broadcastArchiveRepository.countEligibleArchivesByStationId(stationId, now);
+		long totalArchiveCount = stationId == null
+				? broadcastArchiveRepository.count()
+				: broadcastArchiveRepository.countByStationId(stationId);
+		long totalPlaybackCount = stationId == null
+				? playHistoryRepository.countByResultStatus(PlayHistoryResultStatus.DONE)
+				: playHistoryRepository.countByStationIdAndResultStatus(stationId, PlayHistoryResultStatus.DONE);
+		long archiveReplayCount = stationId == null
+				? playHistoryRepository.countByResultStatusAndContentOrigin(PlayHistoryResultStatus.DONE, ARCHIVE_REPLAY_ORIGIN)
+				: playHistoryRepository.countByStationIdAndResultStatusAndContentOrigin(
+						stationId,
+						PlayHistoryResultStatus.DONE,
+						ARCHIVE_REPLAY_ORIGIN);
+		double archiveReplayRate = totalPlaybackCount == 0 ? 0.0D : (double) archiveReplayCount / (double) totalPlaybackCount;
+		return new ArchiveMetrics(
+				eligibleArchiveCount,
+				totalArchiveCount,
+				archiveReplayCount,
+				totalPlaybackCount,
+				archiveReplayRate);
 	}
 
 	private static ProviderJobSummary toJobSummary(ProviderJobEntity entity) {

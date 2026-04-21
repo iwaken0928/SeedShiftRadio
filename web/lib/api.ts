@@ -27,8 +27,12 @@ import {
 } from "@/lib/types";
 import { getAdminToken, getApiBaseUrl } from "@/lib/env";
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+export function buildApiUrl(path: string, apiBase = getApiBaseUrl()) {
+  return `${apiBase}${path}`;
+}
+
+export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(buildApiUrl(path), {
     cache: "no-store",
     ...init,
     headers: {
@@ -49,18 +53,21 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function withAdminHeaders(headers?: HeadersInit) {
-  const token = getAdminToken();
-  if (!token) {
+export function mergeAdminHeaders(adminToken: string | null, headers?: HeadersInit) {
+  if (!adminToken) {
     return headers;
   }
   return {
     ...(headers ?? {}),
-    "X-Admin-Token": token,
+    "X-Admin-Token": adminToken,
   };
 }
 
-async function safeReadError(response: Response) {
+export function withAdminHeaders(headers?: HeadersInit) {
+  return mergeAdminHeaders(getAdminToken(), headers);
+}
+
+export async function safeReadError(response: Response) {
   try {
     const payload = await response.json();
     if (typeof payload?.message === "string") {
@@ -77,6 +84,23 @@ async function safeReadError(response: Response) {
 
 export function getApiBase() {
   return getApiBaseUrl();
+}
+
+export function buildNextSpeechDirectivePath(clientId?: string) {
+  const suffix = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
+  return `/api/radio/next-speech-directive${suffix}`;
+}
+
+export function buildLettersPath(stationId?: string, status?: LetterStatus) {
+  const params = new URLSearchParams();
+  if (stationId) {
+    params.set("stationId", stationId);
+  }
+  if (status) {
+    params.set("status", status);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return `/api/letters${suffix}`;
 }
 
 export function listStations() {
@@ -118,8 +142,7 @@ export function getRadioProgram() {
 }
 
 export function getNextSpeechDirective(clientId?: string) {
-  const suffix = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
-  return requestJson<SpeechDirective>(`/api/radio/next-speech-directive${suffix}`);
+  return requestJson<SpeechDirective>(buildNextSpeechDirectivePath(clientId));
 }
 
 export function tuneRadio(request: TuneRequest) {
@@ -155,15 +178,7 @@ export function registerClientCapabilities(request: ClientCapabilitiesRequest) {
 }
 
 export function listLetters(stationId?: string, status?: LetterStatus) {
-  const params = new URLSearchParams();
-  if (stationId) {
-    params.set("stationId", stationId);
-  }
-  if (status) {
-    params.set("status", status);
-  }
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return requestJson<LetterSummary[]>(`/api/letters${suffix}`, {
+  return requestJson<LetterSummary[]>(buildLettersPath(stationId, status), {
     headers: withAdminHeaders(),
   });
 }

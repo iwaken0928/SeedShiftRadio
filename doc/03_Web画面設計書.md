@@ -18,7 +18,7 @@
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
 | `/settings` | 設定画面 | Provider 設定、局管理、番組管理、先行生成・再放送・キャッシュ設定、接続テスト |
-| `/monitor` | 監視画面 | Provider health, buffer, generated asset cache, running jobs, recent errors, audit events |
+| `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
 
 ## 4. レイアウト方針
 
@@ -126,12 +126,14 @@
 - 現在番組 block と template version
 - generated asset cache の保存量、期限切れ候補、種別別 hit rate
 - archive pool 件数と archive replay rate
+- musicGen worker の queue size, queued/running jobs, average job seconds, adapter, default model / profile
 - 進行中ジョブ
 - 直近エラー
 - 直近 10 件の監査イベント
 
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
+- worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
 
 ## 9. 状態管理
 

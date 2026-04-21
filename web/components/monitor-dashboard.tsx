@@ -4,6 +4,7 @@ import { useDeferredValue, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getHealth, getMonitorSummary, getRadioProgram } from "@/lib/api";
 import { getAdminToken } from "@/lib/env";
+import { extractWorkerStatusDetails, getProviderMetadataHighlights, type WorkerStatusDetails } from "@/lib/monitor-provider-health";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Card, EmptyState, Input, Metric, SectionHeader } from "@/components/ui";
 import type { CacheTypeMetrics, MonitorAuditEvent, MonitorProviderJob, ProviderHealthPayload } from "@/lib/types";
@@ -72,6 +73,13 @@ export function MonitorDashboard() {
   const providerEntries = Object.entries(summary?.providerHealth ?? {}).filter((entry) =>
     matchesProviderStatusFilter(entry[1], providerStatusFilter),
   );
+  const workerStatusEntries = providerEntries
+    .map(([key, health]) => ({
+      key,
+      health,
+      details: extractWorkerStatusDetails(health),
+    }))
+    .filter((entry): entry is { key: string; health: ProviderHealthPayload; details: WorkerStatusDetails } => entry.details != null);
   const runningJobs = (summary?.runningJobs ?? []).filter((job) => matchesJobSearch(job, deferredJobSearchText));
   const recentErrors = (summary?.recentErrors ?? []).filter((job) => matchesJobSearch(job, deferredJobSearchText));
   const auditEvents = (summary?.auditEvents ?? []).filter((event) => matchesAuditSearch(event, deferredAuditSearchText));
@@ -164,27 +172,32 @@ export function MonitorDashboard() {
                 {providerEntries.length ? (
                   <div className="grid gap-3">
                     {providerEntries.map(([key, value]) => (
-                      <div key={key} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="font-semibold text-slate-950">{key}</div>
-                          <Badge tone={value.status === "UP" ? "success" : value.status === "DEGRADED" ? "warning" : "danger"}>
-                            {value.status}
-                          </Badge>
-                          {value.providerKey ? <Badge tone="default">{value.providerKey}</Badge> : null}
-                        </div>
-                        <div className="mt-2 text-sm leading-6 text-slate-600">{value.message}</div>
-                        <div className="mt-3 grid gap-3 text-sm text-slate-500 md:grid-cols-2 xl:grid-cols-4">
-                          <Metric label="Last Checked" value={value.lastCheckedAt ? formatInstant(value.lastCheckedAt) : "-"} />
-                          <Metric label="Response" value={value.responseTimeMs != null ? `${value.responseTimeMs} ms` : "-"} />
-                          <Metric label="Capabilities" value={value.capabilities.length ? value.capabilities.join(", ") : "-"} />
-                          <Metric label="Base URL" value={value.baseUrl ?? "-"} />
-                        </div>
-                      </div>
+                      <ProviderHealthCard key={key} label={key} health={value} />
                     ))}
                   </div>
                 ) : (
                   <EmptyState title="条件に一致する provider はありません" description="status フィルタを戻すと表示対象を増やせます。" />
                 )}
+
+                <div className="space-y-3 pt-2">
+                  <SectionHeader
+                    eyebrow="Workers"
+                    title="Worker status detail"
+                    description="musicGen worker の queue / model profile / adapter 状態を monitor から確認できます。"
+                  />
+                  {workerStatusEntries.length ? (
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      {workerStatusEntries.map(({ key, health, details }) => (
+                        <WorkerStatusCard key={key} label={key} health={health} details={details} />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="表示できる worker status はありません"
+                      description="provider health metadata に worker 詳細が入っている provider だけを表示します。"
+                    />
+                  )}
+                </div>
               </section>
 
               <section className="space-y-3">
@@ -278,6 +291,123 @@ function CacheMetricCard({ metrics }: { metrics: CacheTypeMetrics }) {
   );
 }
 
+function ProviderHealthCard({ label, health }: { label: string; health: ProviderHealthPayload }) {
+  const highlights = getProviderMetadataHighlights(health);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="font-semibold text-slate-950">{label}</div>
+        <Badge tone={statusTone(health.status)}>{health.status}</Badge>
+        {health.providerKey ? <Badge tone="default">{health.providerKey}</Badge> : null}
+        {highlights.map((highlight) => (
+          <Badge key={`${label}-${highlight.label}`} tone="accent">
+            {highlight.label}: {highlight.value}
+          </Badge>
+        ))}
+      </div>
+      <div className="mt-2 text-sm leading-6 text-slate-600">{health.message}</div>
+      <div className="mt-3 grid gap-3 text-sm text-slate-500 md:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Last Checked" value={health.lastCheckedAt ? formatInstant(health.lastCheckedAt) : "-"} />
+        <Metric label="Response" value={health.responseTimeMs != null ? `${health.responseTimeMs} ms` : "-"} />
+        <Metric label="Capabilities" value={health.capabilities.length ? health.capabilities.join(", ") : "-"} />
+        <Metric label="Base URL" value={health.baseUrl ?? "-"} />
+      </div>
+    </div>
+  );
+}
+
+function WorkerStatusCard({
+  label,
+  health,
+  details,
+}: {
+  label: string;
+  health: ProviderHealthPayload;
+  details: WorkerStatusDetails;
+}) {
+  const modelValues = details.models.length ? details.models : details.defaultModel ? [details.defaultModel] : [];
+  const profileValues = details.modelProfileIds.length
+    ? details.modelProfileIds
+    : details.defaultModelProfileId
+      ? [details.defaultModelProfileId]
+      : [];
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="font-semibold text-slate-950">{label}</div>
+        <Badge tone={statusTone(health.status)}>{health.status}</Badge>
+        <Badge tone="accent">{details.adapter ?? "adapter unknown"}</Badge>
+        {details.statsStatus ? <StatusBadge label="Stats" value={details.statsStatus} /> : null}
+        {details.modelsStatus ? <StatusBadge label="Models" value={details.modelsStatus} /> : null}
+      </div>
+
+      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Queue Size" value={formatCount(details.queueSize)} tone="accent" />
+        <Metric label="Queued Jobs" value={formatCount(details.queuedJobs)} tone={metricTone(details.queuedJobs)} />
+        <Metric label="Running Jobs" value={formatCount(details.runningJobs)} tone={metricTone(details.runningJobs)} />
+        <Metric label="Avg Seconds" value={formatSeconds(details.averageJobSeconds)} />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <DetailGroup
+          label="Default Model"
+          description={details.defaultModel ? details.defaultModel : "未取得"}
+          footer={details.defaultModelProfileId ? `profile: ${details.defaultModelProfileId}` : "default profile 未取得"}
+        />
+        <DetailGroup
+          label="Provider Context"
+          description={health.providerKey ?? "provider key なし"}
+          footer={health.baseUrl ?? "base URL 未設定"}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <PillList label="Model Profiles" values={profileValues} emptyLabel="profile 情報なし" />
+        <PillList label="Available Models" values={modelValues} emptyLabel="model 情報なし" />
+      </div>
+    </div>
+  );
+}
+
+function DetailGroup({ label, description, footer }: { label: string; description: string; footer: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</div>
+      <div className="mt-2 text-sm font-semibold text-slate-950">{description}</div>
+      <div className="mt-1 text-xs leading-5 text-slate-500">{footer}</div>
+    </div>
+  );
+}
+
+function PillList({ label, values, emptyLabel }: { label: string; values: string[]; emptyLabel: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</div>
+      {values.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {values.map((value) => (
+            <Badge key={`${label}-${value}`} tone="default">
+              {value}
+            </Badge>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 text-sm text-slate-500">{emptyLabel}</div>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <Badge tone={healthIndicatorTone(value)}>
+      {label}: {value}
+    </Badge>
+  );
+}
+
 function MonitorJobCard({ job }: { job: MonitorProviderJob }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
@@ -360,4 +490,52 @@ function formatPercent(value: number) {
     return "0%";
   }
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+}
+
+function formatCount(value: number | null) {
+  return value != null ? String(Math.round(value)) : "-";
+}
+
+function formatSeconds(value: number | null) {
+  if (value == null || !Number.isFinite(value)) {
+    return "-";
+  }
+  return value >= 10 ? `${value.toFixed(0)} s` : `${value.toFixed(1)} s`;
+}
+
+function statusTone(status: ProviderHealthPayload["status"]) {
+  if (status === "UP") {
+    return "success";
+  }
+  if (status === "DEGRADED") {
+    return "warning";
+  }
+  return "danger";
+}
+
+function healthIndicatorTone(value: string): "default" | "success" | "warning" | "danger" | "accent" {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "UP" || normalized === "OK" || normalized === "READY" || normalized === "SUCCESS") {
+    return "success";
+  }
+  if (normalized === "DOWN" || normalized === "ERROR" || normalized === "FAILED") {
+    return "danger";
+  }
+  if (normalized === "DEGRADED" || normalized === "WARN" || normalized === "WARNING") {
+    return "warning";
+  }
+  return "default";
+}
+
+function metricTone(value: number | null): "default" | "accent" | "warning" | "success" {
+  if (value == null) {
+    return "default";
+  }
+  if (value === 0) {
+    return "success";
+  }
+  if (value >= 5) {
+    return "warning";
+  }
+  return "accent";
 }

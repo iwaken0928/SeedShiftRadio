@@ -17,7 +17,7 @@
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
 - 設定更新、局管理、番組編成管理、監視 API は `X-Admin-Token` による最小保護を推奨する
 - `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `POST /api/letters/public/history`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/playback-events`, `GET /api/health` は一般操作 API として扱う
-- `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `GET /api/letters/{id}`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/play-history`, `GET /api/play-history/{id}`, `GET /api/monitor/summary` は `X-Admin-Token` 前提とする
+- `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `GET /api/letters/{id}`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/play-history`, `GET /api/play-history/{id}`, `GET /api/monitor/summary`, `GET /api/monitor/assets/consistency` は `X-Admin-Token` 前提とする
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
 ## 4. 主要DTO
@@ -369,6 +369,7 @@
 | `POST` | `/api/settings/test-connections` | Provider 接続テスト |
 | `GET` | `/api/health` | ヘルス参照 |
 | `GET` | `/api/monitor/summary` | 監視サマリ参照 |
+| `GET` | `/api/monitor/assets/consistency` | generated asset 整合性検査 |
 
 ## 6. 主要API詳細
 
@@ -1100,6 +1101,43 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 ```
 
 `auditEvents` は監査用の要約であり、レター本文全文やプロンプト全文は含めません。
+
+### 6.15 Asset Consistency
+
+`GET /api/monitor/assets/consistency` は管理者向けの read-only 検査 API として、`generated_asset` の DB metadata と `dataRoot/assets/{audio,scripts,music}` 配下の payload file の不整合を返します。`byteSize=0` の asset は eviction 済み payload として扱い、missing file には数えません。
+
+Response:
+
+```json
+{
+  "checkedAt": "2026-03-20T09:30:00Z",
+  "assetCount": 42,
+  "checkedAssetCount": 36,
+  "missingFileCount": 1,
+  "byteSizeMismatchCount": 1,
+  "contentHashMismatchCount": 1,
+  "orphanFileCount": 2,
+  "unreadableFileCount": 0,
+  "issueCount": 5,
+  "issuesTruncated": false,
+  "issues": [
+    {
+      "issueType": "MISSING_FILE",
+      "assetId": "asset-missing",
+      "assetType": "AUDIO",
+      "storagePath": "assets/audio/asset-missing.wav",
+      "expectedByteSize": 123456,
+      "actualByteSize": null,
+      "message": "payload file が通常ファイルとして存在しません。"
+    }
+  ]
+}
+```
+
+- `issueType` は `MISSING_FILE`, `BYTE_SIZE_MISMATCH`, `CONTENT_HASH_MISMATCH`, `ORPHAN_FILE`, `UNREADABLE_FILE` のいずれか
+- `storagePath` は `dataRoot` からの相対パスまたは data root 外を示す短い表示用パスであり、絶対パスは返さない
+- `issues` は最大 100 件のサンプルとし、超過時は `issuesTruncated=true` を返す
+- raw metadata、prompt、lyrics、letter body、radioName、API key、管理トークンは返さない
 
 ## 7. SSE仕様
 

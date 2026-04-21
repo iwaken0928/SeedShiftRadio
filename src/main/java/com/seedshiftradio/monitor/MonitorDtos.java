@@ -62,4 +62,33 @@ public final class MonitorDtos {
 			Instant occurredAt,
 			String summary) {
 	}
+
+	public record AssetConsistencyResponse(
+			Instant checkedAt,
+			long assetCount,
+			long checkedAssetCount,
+			long missingFileCount,
+			long byteSizeMismatchCount,
+			long contentHashMismatchCount,
+			long orphanFileCount,
+			long unreadableFileCount,
+			long issueCount,
+			boolean issuesTruncated,
+			List<GeneratedAssetService.AssetConsistencyIssue> issues) {
+
+		public static AssetConsistencyResponse from(GeneratedAssetService.AssetConsistencyReport report) {
+			return new AssetConsistencyResponse(
+					report.checkedAt(),
+					report.assetCount(),
+					report.checkedAssetCount(),
+					report.missingFileCount(),
+					report.byteSizeMismatchCount(),
+					report.contentHashMismatchCount(),
+					report.orphanFileCount(),
+					report.unreadableFileCount(),
+					report.issueCount(),
+					report.issuesTruncated(),
+					report.issues());
+		}
+	}
 }

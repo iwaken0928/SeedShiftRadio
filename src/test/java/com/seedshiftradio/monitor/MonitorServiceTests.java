@@ -2,9 +2,11 @@ package com.seedshiftradio.monitor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -27,6 +29,7 @@ import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.letter.LetterService;
 import com.seedshiftradio.monitor.MonitorDtos.AuditEventSummary;
+import com.seedshiftradio.monitor.MonitorDtos.AssetConsistencyResponse;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
 import com.seedshiftradio.radio.BroadcastArchiveRepository;
@@ -155,6 +158,37 @@ class MonitorServiceTests {
 		assertEquals("subtitle.updated", summary.auditEvents().getLast().eventType());
 		assertTrue(summary.auditEvents().getLast().summary().contains("textHash="));
 		assertFalse(summary.auditEvents().getLast().summary().contains("秘密の本文"));
+	}
+
+	@Test
+	void assetConsistencyDelegatesToGeneratedAssetService() {
+		GeneratedAssetService.AssetConsistencyReport report = new GeneratedAssetService.AssetConsistencyReport(
+				Instant.parse("2026-03-20T09:30:00Z"),
+				1L,
+				1L,
+				1L,
+				0L,
+				0L,
+				0L,
+				0L,
+				1L,
+				false,
+				List.of(new GeneratedAssetService.AssetConsistencyIssue(
+						GeneratedAssetService.AssetConsistencyIssueType.MISSING_FILE,
+						"asset-missing",
+						GeneratedAssetType.AUDIO,
+						"assets/audio/missing.wav",
+						123L,
+						null,
+						"payload file が通常ファイルとして存在しません。")));
+		when(generatedAssetService.assetConsistency()).thenReturn(report);
+
+		AssetConsistencyResponse response = monitorService.assetConsistency();
+
+		assertEquals(report.checkedAt(), response.checkedAt());
+		assertEquals(report.assetCount(), response.assetCount());
+		assertSame(report.issues().getFirst(), response.issues().getFirst());
+		verify(generatedAssetService).assetConsistency();
 	}
 
 	private ProviderJobEntity job(String id, ProviderJobStatus status, ProviderJobType jobType) {

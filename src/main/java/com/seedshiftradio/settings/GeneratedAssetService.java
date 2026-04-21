@@ -1,19 +1,25 @@
 package com.seedshiftradio.settings;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -25,6 +31,9 @@ import com.seedshiftradio.domain.GeneratedAssetType;
 
 @Service
 public class GeneratedAssetService {
+
+	private static final int ASSET_CONSISTENCY_ISSUE_LIMIT = 100;
+	private static final List<String> ASSET_PAYLOAD_DIRECTORIES = List.of("audio", "scripts", "music");
 
 	private final GeneratedAssetRepository generatedAssetRepository;
 	private final RadioSettingsStore settingsStore;
@@ -138,6 +147,60 @@ public class GeneratedAssetService {
 	@Transactional(readOnly = true)
 	public CacheMetricsSnapshot cacheMetrics() {
 		return cacheMetrics(Instant.now());
+	}
+
+	@Transactional(readOnly = true)
+	public AssetConsistencyReport assetConsistency() {
+		Instant checkedAt = Instant.now();
+		List<GeneratedAssetEntity> assets = generatedAssetRepository.findAll();
+		Path dataRoot = Path.of(settingsStore.load().paths().dataRoot()).toAbsolutePath().normalize();
+		AssetConsistencyAccumulator accumulator = new AssetConsistencyAccumulator(
+				checkedAt,
+				assets.size(),
+				ASSET_CONSISTENCY_ISSUE_LIMIT);
+		Set<Path> referencedPayloads = new HashSet<>();
+
+		for (GeneratedAssetEntity asset : assets) {
+			Optional<Path> storagePath = resolveStoredPath(asset.getStoragePath());
+
+			long expectedByteSize = normalizeByteSize(asset.getByteSize());
+			if (expectedByteSize <= 0L) {
+				continue;
+			}
+			storagePath.ifPresent(referencedPayloads::add);
+			accumulator.checkedAssetCount++;
+
+			if (storagePath.isEmpty()) {
+				accumulator.addMissingFile(asset, null, expectedByteSize, "storagePath が空または不正です。");
+				continue;
+			}
+
+			Path payloadPath = storagePath.get();
+			String displayPath = displayPath(dataRoot, payloadPath);
+			if (!Files.isRegularFile(payloadPath)) {
+				accumulator.addMissingFile(asset, displayPath, expectedByteSize, "payload file が通常ファイルとして存在しません。");
+				continue;
+			}
+
+			try {
+				long actualByteSize = Files.size(payloadPath);
+				if (actualByteSize != expectedByteSize) {
+					accumulator.addByteSizeMismatch(asset, displayPath, expectedByteSize, actualByteSize);
+				}
+				String expectedContentHash = asset.getContentHash();
+				if (expectedContentHash != null && !expectedContentHash.isBlank()) {
+					String actualContentHash = sha256File(payloadPath);
+					if (!expectedContentHash.equalsIgnoreCase(actualContentHash)) {
+						accumulator.addContentHashMismatch(asset, displayPath, expectedByteSize, actualByteSize);
+					}
+				}
+			} catch (IOException exception) {
+				accumulator.addUnreadableFile(asset, displayPath, expectedByteSize);
+			}
+		}
+
+		scanOrphanPayloads(dataRoot, referencedPayloads, accumulator);
+		return accumulator.toReport();
 	}
 
 	@Transactional
@@ -433,6 +496,56 @@ public class GeneratedAssetService {
 		return true;
 	}
 
+	private void scanOrphanPayloads(
+			Path dataRoot,
+			Set<Path> referencedPayloads,
+			AssetConsistencyAccumulator accumulator) {
+		Path assetsRoot = dataRoot.resolve("assets").normalize();
+		for (String directory : ASSET_PAYLOAD_DIRECTORIES) {
+			Path payloadRoot = assetsRoot.resolve(directory).normalize();
+			if (!payloadRoot.startsWith(assetsRoot) || !Files.isDirectory(payloadRoot)) {
+				continue;
+			}
+			try (Stream<Path> paths = Files.walk(payloadRoot)) {
+				paths.filter(Files::isRegularFile)
+						.map(path -> path.toAbsolutePath().normalize())
+						.sorted(Comparator.comparing(Path::toString))
+						.filter(path -> !referencedPayloads.contains(path))
+						.forEach(path -> accumulator.addOrphanFile(displayPath(dataRoot, path), safeSize(path)));
+			} catch (IOException exception) {
+				accumulator.addUnreadableFile(null, displayPath(dataRoot, payloadRoot), null);
+			}
+		}
+	}
+
+	private Optional<Path> resolveStoredPath(String storagePath) {
+		if (storagePath == null || storagePath.isBlank()) {
+			return Optional.empty();
+		}
+		try {
+			return Optional.of(Path.of(storagePath).toAbsolutePath().normalize());
+		} catch (InvalidPathException exception) {
+			return Optional.empty();
+		}
+	}
+
+	private String displayPath(Path dataRoot, Path path) {
+		Path normalizedPath = path.toAbsolutePath().normalize();
+		if (normalizedPath.startsWith(dataRoot)) {
+			return dataRoot.relativize(normalizedPath).toString().replace('\\', '/');
+		}
+		Path fileName = normalizedPath.getFileName();
+		return fileName == null ? "<outside-data-root>" : "<outside-data-root>/" + fileName;
+	}
+
+	private Long safeSize(Path path) {
+		try {
+			return Files.size(path);
+		} catch (IOException exception) {
+			return null;
+		}
+	}
+
 	private long maxBytesFor(SettingsDocument.CacheSettings cache, GeneratedAssetType assetType) {
 		return switch (assetType) {
 			case SCRIPT -> cache.scriptMaxBytes();
@@ -517,6 +630,27 @@ public class GeneratedAssetService {
 		}
 	}
 
+	private String sha256File(Path path) throws IOException {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			try (InputStream input = Files.newInputStream(path)) {
+				byte[] buffer = new byte[8192];
+				int length;
+				while ((length = input.read(buffer)) != -1) {
+					digest.update(buffer, 0, length);
+				}
+			}
+			byte[] hash = digest.digest();
+			StringBuilder builder = new StringBuilder(hash.length * 2);
+			for (byte value : hash) {
+				builder.append(String.format("%02x", value));
+			}
+			return builder.toString();
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 が利用できません。", exception);
+		}
+	}
+
 	private String nextId() {
 		return "asset-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 	}
@@ -549,6 +683,38 @@ public class GeneratedAssetService {
 			CacheMetricsSnapshot after) {
 	}
 
+	public record AssetConsistencyReport(
+			Instant checkedAt,
+			long assetCount,
+			long checkedAssetCount,
+			long missingFileCount,
+			long byteSizeMismatchCount,
+			long contentHashMismatchCount,
+			long orphanFileCount,
+			long unreadableFileCount,
+			long issueCount,
+			boolean issuesTruncated,
+			List<AssetConsistencyIssue> issues) {
+	}
+
+	public record AssetConsistencyIssue(
+			AssetConsistencyIssueType issueType,
+			String assetId,
+			GeneratedAssetType assetType,
+			String storagePath,
+			Long expectedByteSize,
+			Long actualByteSize,
+			String message) {
+	}
+
+	public enum AssetConsistencyIssueType {
+		MISSING_FILE,
+		BYTE_SIZE_MISMATCH,
+		CONTENT_HASH_MISMATCH,
+		ORPHAN_FILE,
+		UNREADABLE_FILE
+	}
+
 	private static final class EvictionAccumulator {
 
 		private final Instant executedAt;
@@ -575,5 +741,116 @@ public class GeneratedAssetService {
 	}
 
 	private record LifecycleDefaults(String reuseScope, int retentionDays) {
+	}
+
+	private static final class AssetConsistencyAccumulator {
+
+		private final Instant checkedAt;
+		private final long assetCount;
+		private final int issueLimit;
+		private final List<AssetConsistencyIssue> issues = new ArrayList<>();
+		private long checkedAssetCount;
+		private long missingFileCount;
+		private long byteSizeMismatchCount;
+		private long contentHashMismatchCount;
+		private long orphanFileCount;
+		private long unreadableFileCount;
+		private long issueCount;
+
+		private AssetConsistencyAccumulator(Instant checkedAt, long assetCount, int issueLimit) {
+			this.checkedAt = checkedAt;
+			this.assetCount = assetCount;
+			this.issueLimit = issueLimit;
+		}
+
+		private void addMissingFile(GeneratedAssetEntity asset, String storagePath, long expectedByteSize, String message) {
+			missingFileCount++;
+			addIssue(new AssetConsistencyIssue(
+					AssetConsistencyIssueType.MISSING_FILE,
+					asset.getId(),
+					asset.getAssetType(),
+					storagePath,
+					expectedByteSize,
+					null,
+					message));
+		}
+
+		private void addByteSizeMismatch(
+				GeneratedAssetEntity asset,
+				String storagePath,
+				long expectedByteSize,
+				long actualByteSize) {
+			byteSizeMismatchCount++;
+			addIssue(new AssetConsistencyIssue(
+					AssetConsistencyIssueType.BYTE_SIZE_MISMATCH,
+					asset.getId(),
+					asset.getAssetType(),
+					storagePath,
+					expectedByteSize,
+					actualByteSize,
+					"DB metadata の byteSize と payload file size が一致しません。"));
+		}
+
+		private void addContentHashMismatch(
+				GeneratedAssetEntity asset,
+				String storagePath,
+				long expectedByteSize,
+				long actualByteSize) {
+			contentHashMismatchCount++;
+			addIssue(new AssetConsistencyIssue(
+					AssetConsistencyIssueType.CONTENT_HASH_MISMATCH,
+					asset.getId(),
+					asset.getAssetType(),
+					storagePath,
+					expectedByteSize,
+					actualByteSize,
+					"DB metadata の contentHash と payload file hash が一致しません。"));
+		}
+
+		private void addOrphanFile(String storagePath, Long actualByteSize) {
+			orphanFileCount++;
+			addIssue(new AssetConsistencyIssue(
+					AssetConsistencyIssueType.ORPHAN_FILE,
+					null,
+					null,
+					storagePath,
+					null,
+					actualByteSize,
+					"generated asset metadata から参照されていない payload file です。"));
+		}
+
+		private void addUnreadableFile(GeneratedAssetEntity asset, String storagePath, Long expectedByteSize) {
+			unreadableFileCount++;
+			addIssue(new AssetConsistencyIssue(
+					AssetConsistencyIssueType.UNREADABLE_FILE,
+					asset == null ? null : asset.getId(),
+					asset == null ? null : asset.getAssetType(),
+					storagePath,
+					expectedByteSize,
+					null,
+					"payload file のサイズ取得または走査に失敗しました。"));
+		}
+
+		private void addIssue(AssetConsistencyIssue issue) {
+			issueCount++;
+			if (issues.size() < issueLimit) {
+				issues.add(issue);
+			}
+		}
+
+		private AssetConsistencyReport toReport() {
+			return new AssetConsistencyReport(
+					checkedAt,
+					assetCount,
+					checkedAssetCount,
+					missingFileCount,
+					byteSizeMismatchCount,
+					contentHashMismatchCount,
+					orphanFileCount,
+					unreadableFileCount,
+					issueCount,
+					issueCount > issues.size(),
+					List.copyOf(issues));
+		}
 	}
 }

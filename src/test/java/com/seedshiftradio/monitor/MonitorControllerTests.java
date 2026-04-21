@@ -22,6 +22,7 @@ import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.PlayoutState;
 import com.seedshiftradio.monitor.MonitorDtos.ArchiveMetrics;
+import com.seedshiftradio.monitor.MonitorDtos.AssetConsistencyResponse;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.settings.GeneratedAssetService;
 
@@ -58,6 +59,32 @@ class MonitorControllerTests {
 		verify(adminApiGuard).require("test-admin-token");
 	}
 
+	@Test
+	void assetConsistencyReturnsIssueCountsAndRequiresAdminToken() throws Exception {
+		when(monitorService.assetConsistency()).thenReturn(assetConsistency());
+
+		mockMvc.perform(get("/api/monitor/assets/consistency").header(AdminApiGuard.HEADER_NAME, "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.checkedAt").value("2026-03-20T09:30:00Z"))
+				.andExpect(jsonPath("$.assetCount").value(3))
+				.andExpect(jsonPath("$.checkedAssetCount").value(2))
+				.andExpect(jsonPath("$.missingFileCount").value(1))
+				.andExpect(jsonPath("$.byteSizeMismatchCount").value(1))
+				.andExpect(jsonPath("$.contentHashMismatchCount").value(0))
+				.andExpect(jsonPath("$.orphanFileCount").value(1))
+				.andExpect(jsonPath("$.unreadableFileCount").value(0))
+				.andExpect(jsonPath("$.issueCount").value(3))
+				.andExpect(jsonPath("$.issuesTruncated").value(false))
+				.andExpect(jsonPath("$.issues[0].issueType").value("MISSING_FILE"))
+				.andExpect(jsonPath("$.issues[0].assetId").value("asset-missing"))
+				.andExpect(jsonPath("$.issues[0].storagePath").value("assets/audio/missing.wav"))
+				.andExpect(jsonPath("$.issues[0].expectedByteSize").value(123))
+				.andExpect(jsonPath("$.issues[1].issueType").value("BYTE_SIZE_MISMATCH"))
+				.andExpect(jsonPath("$.issues[1].actualByteSize").value(5));
+
+		verify(adminApiGuard).require("test-admin-token");
+	}
+
 	private MonitorSummaryResponse summary() {
 		return new MonitorSummaryResponse(
 				"playout-001",
@@ -87,5 +114,44 @@ class MonitorControllerTests {
 				Map.of(
 						GeneratedAssetType.MUSIC,
 						new GeneratedAssetService.CacheTypeMetrics(GeneratedAssetType.MUSIC, 0L, 0L, 0L, 0.0D)));
+	}
+
+	private AssetConsistencyResponse assetConsistency() {
+		return new AssetConsistencyResponse(
+				Instant.parse("2026-03-20T09:30:00Z"),
+				3L,
+				2L,
+				1L,
+				1L,
+				0L,
+				1L,
+				0L,
+				3L,
+				false,
+				List.of(
+						new GeneratedAssetService.AssetConsistencyIssue(
+								GeneratedAssetService.AssetConsistencyIssueType.MISSING_FILE,
+								"asset-missing",
+								GeneratedAssetType.AUDIO,
+								"assets/audio/missing.wav",
+								123L,
+								null,
+								"payload file が通常ファイルとして存在しません。"),
+						new GeneratedAssetService.AssetConsistencyIssue(
+								GeneratedAssetService.AssetConsistencyIssueType.BYTE_SIZE_MISMATCH,
+								"asset-mismatch",
+								GeneratedAssetType.SCRIPT,
+								"assets/scripts/mismatch.txt",
+								12L,
+								5L,
+								"DB metadata の byteSize と payload file size が一致しません。"),
+						new GeneratedAssetService.AssetConsistencyIssue(
+								GeneratedAssetService.AssetConsistencyIssueType.ORPHAN_FILE,
+								null,
+								null,
+								"assets/music/orphan.wav",
+								null,
+								456L,
+								"generated asset metadata から参照されていない payload file です。")));
 	}
 }

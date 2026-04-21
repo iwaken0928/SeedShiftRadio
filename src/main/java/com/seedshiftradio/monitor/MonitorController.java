@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.seedshiftradio.common.security.AdminApiGuard;
+import com.seedshiftradio.monitor.MonitorDtos.AssetConsistencyResponse;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 
 @RestController
@@ -24,5 +25,11 @@ public class MonitorController {
 	public MonitorSummaryResponse summary(@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
 		adminApiGuard.require(adminToken);
 		return monitorService.summary();
+	}
+
+	@GetMapping("/assets/consistency")
+	public AssetConsistencyResponse assetConsistency(@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
+		adminApiGuard.require(adminToken);
+		return monitorService.assetConsistency();
 	}
 }

@@ -13,6 +13,7 @@ import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.letter.LetterService;
 import com.seedshiftradio.monitor.MonitorDtos.ArchiveMetrics;
+import com.seedshiftradio.monitor.MonitorDtos.AssetConsistencyResponse;
 import com.seedshiftradio.monitor.MonitorDtos.AuditEventSummary;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 import com.seedshiftradio.monitor.MonitorDtos.ProviderJobSummary;
@@ -104,6 +105,10 @@ public class MonitorService {
 				recentErrors,
 				auditEvents,
 				status.updatedAt());
+	}
+
+	public AssetConsistencyResponse assetConsistency() {
+		return AssetConsistencyResponse.from(generatedAssetService.assetConsistency());
 	}
 
 	private ArchiveMetrics archiveMetrics(String stationId) {

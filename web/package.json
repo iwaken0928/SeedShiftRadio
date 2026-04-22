@@ -4,11 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "dev:e2e": "next dev --hostname 127.0.0.1 --port 3001",
     "build": "next build",
     "start": "next start",
+    "start:e2e": "next start --hostname 127.0.0.1 --port 3001",
     "typecheck": "tsc --noEmit",
     "test": "TMPDIR=/tmp TEMP=/tmp TMP=/tmp vitest run",
-    "test:watch": "TMPDIR=/tmp TEMP=/tmp TMP=/tmp vitest"
+    "test:watch": "TMPDIR=/tmp TEMP=/tmp TMP=/tmp vitest",
+    "e2e": "npm run build && TMPDIR=/tmp TEMP=/tmp TMP=/tmp PLAYWRIGHT_BROWSERS_PATH=0 playwright test",
+    "e2e:headed": "npm run build && TMPDIR=/tmp TEMP=/tmp TMP=/tmp PLAYWRIGHT_BROWSERS_PATH=0 playwright test --headed"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.64.2",
@@ -19,6 +23,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "^22.10.1",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",

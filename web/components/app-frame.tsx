@@ -22,6 +22,7 @@ export function AppFrame({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const connectionStatus = useUiStore((state) => state.connectionStatus);
   const liveSubtitle = useUiStore((state) => state.liveSubtitle);
+  const lastEventId = useUiStore((state) => state.lastEventId);
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const radioName = useUiStore((state) => state.radioName);
   const hasAdminToken = Boolean(getAdminToken());
@@ -62,18 +63,32 @@ export function AppFrame({ children }: PropsWithChildren) {
               })}
             </nav>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={connectionStatus === "connected" ? "success" : connectionStatus === "reconnecting" ? "warning" : "default"}>
-                {connectionStatus.toUpperCase()}
-              </Badge>
+              <div data-testid="connection-status">
+                <Badge tone={connectionStatus === "connected" ? "success" : connectionStatus === "reconnecting" ? "warning" : "default"}>
+                  {connectionStatus.toUpperCase()}
+                </Badge>
+              </div>
               {selectedStationId ? <Badge tone="accent">{selectedStationId}</Badge> : <Badge tone="warning">NO STATION</Badge>}
               <Badge tone="default">{radioName}</Badge>
             </div>
           </div>
           {liveSubtitle ? (
-            <p className="mt-3 rounded-2xl bg-slate-950/5 px-4 py-2 text-sm text-slate-700" aria-live="polite" aria-atomic="true" role="status">
+            <p
+              className="mt-3 rounded-2xl bg-slate-950/5 px-4 py-2 text-sm text-slate-700"
+              aria-live="polite"
+              aria-atomic="true"
+              role="status"
+              data-testid="live-subtitle"
+            >
               {liveSubtitle}
             </p>
           ) : null}
+          <div className="sr-only" data-testid="live-subtitle-value">
+            {liveSubtitle}
+          </div>
+          <div className="sr-only" data-testid="last-event-id">
+            {lastEventId ?? ""}
+          </div>
         </header>
 
         <main className="relative flex-1">{children}</main>

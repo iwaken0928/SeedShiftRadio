@@ -1,10 +1,12 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import { useState, type PropsWithChildren } from "react";
 import { LiveStreamBridge } from "@/components/live-stream-bridge";
 
 export function AppProviders({ children }: PropsWithChildren) {
+  const pathname = usePathname();
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -17,7 +19,7 @@ export function AppProviders({ children }: PropsWithChildren) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <LiveStreamBridge />
+      {pathname !== "/stream-harness" ? <LiveStreamBridge /> : null}
       {children}
     </QueryClientProvider>
   );

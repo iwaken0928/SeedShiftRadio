@@ -1,0 +1,266 @@
+import type { Locator, Page, Route } from "@playwright/test";
+
+export const API_BASE_URL = "http://127.0.0.1:8080";
+export const APP_BASE_URL = process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://127.0.0.1:3001";
+export const UI_STORE_STORAGE_KEY = "seedshift-radio-web-ui";
+
+export function appUrl(pathname = "/") {
+  return new URL(pathname, APP_BASE_URL).toString();
+}
+
+export function apiUrl(pathname: string) {
+  return `${API_BASE_URL}${pathname}`;
+}
+
+export function apiRegExp(pathPattern: string) {
+  return new RegExp(`^${escapeRegExp(API_BASE_URL)}${pathPattern}$`);
+}
+
+export async function clearPersistedUiState(page: Page) {
+  await page.addInitScript(({ storageKey }) => {
+    window.localStorage.removeItem(storageKey);
+  }, { storageKey: UI_STORE_STORAGE_KEY });
+}
+
+export async function stubAudioPlayback(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value() {
+        return Promise.resolve();
+      },
+    });
+
+    Object.defineProperty(HTMLMediaElement.prototype, "pause", {
+      configurable: true,
+      value() {},
+    });
+
+    Object.defineProperty(HTMLMediaElement.prototype, "load", {
+      configurable: true,
+      value() {},
+    });
+  });
+}
+
+export async function fulfillJson(route: Route, body: unknown, status = 200) {
+  await route.fulfill({
+    status,
+    body: JSON.stringify(body),
+    contentType: "application/json; charset=utf-8",
+  });
+}
+
+export async function fulfillEmpty(route: Route, status = 204) {
+  await route.fulfill({
+    status,
+    body: "",
+  });
+}
+
+export async function fulfillSse(route: Route, body: string, status = 200) {
+  await route.fulfill({
+    status,
+    body,
+    headers: {
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Content-Type": "text/event-stream; charset=utf-8",
+    },
+  });
+}
+
+export async function mockUnavailableStream(page: Page) {
+  await page.route(apiUrl("/api/stream/events"), async (route) => {
+    await fulfillJson(route, { message: "stream unavailable in this test" }, 503);
+  });
+}
+
+export function sseEvent({
+  id,
+  event,
+  data,
+}: {
+  id?: string;
+  event?: string;
+  data?: unknown;
+}) {
+  const lines: string[] = [];
+
+  if (id) {
+    lines.push(`id: ${id}`);
+  }
+  if (event) {
+    lines.push(`event: ${event}`);
+  }
+  if (data !== undefined) {
+    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    for (const line of payload.split("\n")) {
+      lines.push(`data: ${line}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n\n`;
+}
+
+export function panelByHeading(page: Page, heading: string) {
+  return page.locator("section").filter({
+    has: page.getByRole("heading", { name: heading, exact: true }),
+  }).first();
+}
+
+export function sectionByText(page: Page, text: string) {
+  return page.locator("section").filter({ hasText: text }).last();
+}
+
+export function inputFollowingLabel(page: Page, labelText: string) {
+  return page.locator(`xpath=//label[normalize-space()="${labelText}"]/following::*[self::input][1]`);
+}
+
+export function textareaFollowingLabel(page: Page, labelText: string) {
+  return page.locator(`xpath=//label[normalize-space()="${labelText}"]/following::*[self::textarea][1]`);
+}
+
+export async function fillInput(locator: Locator, value: string) {
+  await locator.click();
+  await locator.fill(value);
+}
+
+export function buildStation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "station-night",
+    name: "Nocturne FM",
+    frequencyMHz: 76.1,
+    genre: "Talk",
+    isActive: true,
+    programmingEnabled: true,
+    defaultProgramTemplateId: "tmpl-night",
+    ...overrides,
+  };
+}
+
+export function buildRadioStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    sessionId: null,
+    stationId: null,
+    programBlockId: null,
+    programTemplateId: null,
+    programTitle: null,
+    state: "IDLE",
+    currentItemId: null,
+    bufferReadyCount: 0,
+    degraded: false,
+    updatedAt: "2026-04-22T00:00:00Z",
+    correlationId: null,
+    ...overrides,
+  };
+}
+
+export function buildQueueItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "queue-001",
+    programBlockId: "block-night-001",
+    programSlotId: "slot-opening-001",
+    slotRole: "OPENING",
+    type: "TALK",
+    title: "Night Shift Intro",
+    playbackMode: "SERVER_AUDIO",
+    assetUrl: "/api/assets/audio/asset-001.wav",
+    speechDirectiveId: null,
+    durationMs: 32000,
+    status: "READY",
+    correlationId: "corr-night-001",
+    assetBanned: false,
+    contentOrigin: "PLACEHOLDER",
+    preparedAt: "2026-04-22T00:00:01Z",
+    replayOfPlayHistoryId: null,
+    letterId: null,
+    ...overrides,
+  };
+}
+
+export function buildQueueSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    sessionId: "session-night-001",
+    stationId: "station-night",
+    items: [buildQueueItem()],
+    correlationId: "corr-night-001",
+    ...overrides,
+  };
+}
+
+export function buildProgramBlock(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "block-night-001",
+    stationId: "station-night",
+    templateId: "tmpl-night",
+    templateVersion: 1,
+    title: "Night Session",
+    status: "ACTIVE",
+    plannedDurationMs: 900000,
+    remainingSlotCount: 3,
+    startedAt: "2026-04-22T00:00:00Z",
+    slots: [
+      {
+        id: "slot-opening-001",
+        slotId: "opening-main",
+        role: "OPENING",
+        constraintMode: "HARD",
+        resolvedSegmentType: "TALK",
+        targetDurationMs: 30000,
+        status: "READY",
+        slotContext: {},
+        title: "Night Shift Intro",
+      },
+    ],
+    correlationId: "corr-night-001",
+    ...overrides,
+  };
+}
+
+export function buildSpeechDirective(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "speech-001",
+    text: "Welcome back to SeedShiftRadio.",
+    normalizedText: "Welcome back to SeedShiftRadio.",
+    pronunciationHints: [],
+    emotion: "CALM",
+    tempo: "MEDIUM",
+    pauseHints: [],
+    personaRef: null,
+    voiceHint: null,
+    correlationId: "corr-night-001",
+    ...overrides,
+  };
+}
+
+export function buildPublicPlayHistory(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "play-history-001",
+    sessionId: "session-night-001",
+    stationId: "station-night",
+    segmentType: "LETTER",
+    title: "Listener Mail Spotlight",
+    resultStatus: "DONE",
+    playedAt: "2026-04-22T00:15:00Z",
+    ...overrides,
+  };
+}
+
+export function buildPublicLetter(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "letter-001",
+    stationId: null,
+    radioName: "Listener Zero",
+    subject: "Need a night playlist",
+    status: "ADOPTED",
+    adoptedInSessionId: "session-night-001",
+    createdAt: "2026-04-22T00:10:00Z",
+    playHistory: [buildPublicPlayHistory()],
+    ...overrides,
+  };
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

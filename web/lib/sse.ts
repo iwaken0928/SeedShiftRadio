@@ -67,6 +67,7 @@ async function consumeStream(
   let buffer = "";
   let eventName = "message";
   let eventId = lastKnownEventId;
+  let lastReceivedEventId = lastKnownEventId;
   let dataLines: string[] = [];
 
   const flush = () => {
@@ -77,6 +78,7 @@ async function consumeStream(
     const data = parseEventData(rawData);
     const nextEventId = eventId ?? null;
     if (nextEventId) {
+      lastReceivedEventId = nextEventId;
       onId(nextEventId);
     }
     onEvent({
@@ -116,7 +118,7 @@ async function consumeStream(
   }
 
   flush();
-  return eventId ?? lastKnownEventId;
+  return lastReceivedEventId;
 }
 
 function parseEventData(rawData: string) {

@@ -119,20 +119,23 @@ export function RadioDashboard() {
                   tone="secondary"
                   disabled={!selectedStationId || tuneMutation.isPending}
                   onClick={() => tuneMutation.mutate()}
+                  data-testid="radio-tune"
                 >
                   Tune
                 </Button>
-                <Button tone="primary" disabled={playMutation.isPending} onClick={() => playMutation.mutate()}>
+                <Button tone="primary" disabled={playMutation.isPending} onClick={() => playMutation.mutate()} data-testid="radio-play">
                   Play
                 </Button>
-                <Button tone="ghost" disabled={stopMutation.isPending} onClick={() => stopMutation.mutate()}>
+                <Button tone="ghost" disabled={stopMutation.isPending} onClick={() => stopMutation.mutate()} data-testid="radio-stop">
                   Stop
                 </Button>
               </div>
             }
           />
           <div className="grid gap-3 md:grid-cols-4">
-            <Metric label="State" value={status?.state ?? "IDLE"} tone={status?.degraded ? "warning" : "default"} />
+            <div data-testid="radio-state">
+              <Metric label="State" value={status?.state ?? "IDLE"} tone={status?.degraded ? "warning" : "default"} />
+            </div>
             <Metric label="Session" value={status?.sessionId ?? "none"} />
             <Metric label="Buffer Ready" value={status?.bufferReadyCount ?? 0} tone="accent" />
             <Metric label="Current Item" value={status?.currentItemId ?? "none"} />
@@ -150,6 +153,7 @@ export function RadioDashboard() {
                         key={station.id}
                         type="button"
                         onClick={() => setSelectedStationId(station.id)}
+                        data-testid={`station-option-${station.id}`}
                         className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                           selectedStationId === station.id
                             ? "border-slate-950 bg-slate-950 text-white"
@@ -167,7 +171,9 @@ export function RadioDashboard() {
               <div className="grid gap-3 md:grid-cols-2">
                 <Card tone="accent" className="p-4">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-700">Now playing</div>
-                  <div className="mt-2 text-lg font-semibold text-slate-950">{currentOrNextItem?.title ?? "Queue waiting"}</div>
+                  <div className="mt-2 text-lg font-semibold text-slate-950" data-testid="radio-now-playing-title">
+                    {currentOrNextItem?.title ?? "Queue waiting"}
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {currentOrNextItem ? <Badge tone="accent">{currentOrNextItem.type}</Badge> : null}
                     {currentOrNextItem ? <Badge tone="default">{currentOrNextItem.status}</Badge> : null}
@@ -234,9 +240,14 @@ export function RadioDashboard() {
         <Card className="mt-4">
           <SectionHeader eyebrow="Queue" title="Queue Snapshot" description="SSE と REST で同期される queue の現在値です。" />
           {queue?.items?.length ? (
-            <div className="grid gap-3">
+            <div className="grid gap-3" data-testid="queue-list">
               {queue.items.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
+                  data-testid="queue-item"
+                  data-itemid={item.id}
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="font-semibold text-slate-950">{item.title}</div>
                     <Badge tone={item.status === "FAILED" ? "danger" : item.status === "READY" ? "success" : "default"}>

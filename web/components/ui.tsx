@@ -1,13 +1,14 @@
 "use client";
 
 import clsx from "clsx";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, PropsWithChildren, ReactNode, TextareaHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, ComponentPropsWithoutRef, InputHTMLAttributes, PropsWithChildren, ReactNode, TextareaHTMLAttributes } from "react";
 
 export function Card({
   children,
   className,
   tone = "default",
-}: PropsWithChildren<{ className?: string; tone?: "default" | "accent" | "warning" | "dark" }>) {
+  ...props
+}: PropsWithChildren<ComponentPropsWithoutRef<"section"> & { tone?: "default" | "accent" | "warning" | "dark" }>) {
   const toneClass = {
     default: "bg-white/82 border-slate-200/80",
     accent: "bg-teal-50/90 border-teal-200/80",
@@ -16,7 +17,10 @@ export function Card({
   }[tone];
 
   return (
-    <section className={clsx("glass rounded-3xl border p-5 shadow-glow transition duration-300 animate-floatIn", toneClass, className)}>
+    <section
+      {...props}
+      className={clsx("glass rounded-3xl border p-5 shadow-glow transition duration-300 animate-floatIn", toneClass, className)}
+    >
       {children}
     </section>
   );

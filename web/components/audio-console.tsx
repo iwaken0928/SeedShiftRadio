@@ -93,7 +93,7 @@ export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, vo
   };
 
   return (
-    <Card tone="dark" className="relative overflow-hidden">
+    <Card tone="dark" className="relative overflow-hidden" data-testid="audio-console">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(20,184,166,0.22),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(194,101,54,0.18),transparent_24%)]" />
       <div className="relative space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -105,13 +105,13 @@ export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, vo
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button type="button" tone="secondary" onClick={() => void play()} disabled={!sourceUrl}>
+          <Button type="button" tone="secondary" onClick={() => void play()} disabled={!sourceUrl} data-testid="audio-play">
             Play
           </Button>
-          <Button type="button" tone="ghost" onClick={pause}>
+          <Button type="button" tone="ghost" onClick={pause} data-testid="audio-pause">
             Pause
           </Button>
-          <Button type="button" tone="danger" onClick={() => void stop()}>
+          <Button type="button" tone="danger" onClick={() => void stop()} data-testid="audio-stop">
             Stop
           </Button>
         </div>
@@ -120,6 +120,7 @@ export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, vo
           ref={audioRef}
           className="hidden"
           preload="auto"
+          data-testid="audio-element"
           onEnded={() => {
             setPlaying(false);
             void emitPlaybackEvent("SEGMENT_ENDED");

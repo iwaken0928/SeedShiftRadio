@@ -163,3 +163,5 @@
 - `useEffectEvent` を用いて音声イベント購読処理を安定化する
 - 過剰なグローバル状態は避け、Server State と UI State を分離する
 - `/monitor` は必要に応じて管理トークンがある時だけ導線を表示する
+- Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID` を mock API / mock stream / audio stub で確認する
+- E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する

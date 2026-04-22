@@ -158,7 +158,12 @@ export function LettersDashboard() {
             description="公開投稿はここだけで完結します。管理 inbox は別カードに分離し、管理トークンがない場合は表示しません。"
           />
           {toastMessage ? (
-            <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status" aria-live="polite">
+            <div
+              className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
+              role="status"
+              aria-live="polite"
+              data-testid="letter-submit-toast"
+            >
               {toastMessage}
             </div>
           ) : null}
@@ -210,7 +215,12 @@ export function LettersDashboard() {
           {mergedLocalSubmissions.length ? (
             <div className="space-y-3">
               {mergedLocalSubmissions.map((submission) => (
-                <div key={submission.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+                <div
+                  key={submission.id}
+                  className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3"
+                  data-testid="local-letter"
+                  data-letter-id={submission.id}
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="font-semibold text-slate-950">{submission.subject}</div>
                     <Badge tone={submission.status === "ADOPTED" ? "accent" : submission.status === "REPLIED" ? "success" : "default"}>
@@ -246,7 +256,12 @@ export function LettersDashboard() {
           ) : publicAdoptionEntries.length ? (
             <div className="space-y-3">
               {publicAdoptionEntries.map((submission) => (
-                <div key={submission.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
+                <div
+                  key={submission.id}
+                  className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4"
+                  data-testid="public-letter"
+                  data-letter-id={submission.id}
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="font-semibold text-slate-950">{submission.subject}</div>
                     <Badge tone={submission.status === "ADOPTED" ? "accent" : submission.status === "REPLIED" ? "success" : "default"}>
@@ -337,6 +352,8 @@ export function LettersDashboard() {
                       key={letter.id}
                       type="button"
                       onClick={() => setSelectedLetterId(letter.id)}
+                      data-testid="admin-letter"
+                      data-letter-id={letter.id}
                       className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
                         selectedLetterId === letter.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-800"
                       }`}

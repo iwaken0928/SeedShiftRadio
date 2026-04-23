@@ -7,6 +7,8 @@ import {
   mergeAdminHeaders,
   requestJson,
   safeReadError,
+  updateStation,
+  updateStationProgramming,
 } from "@/lib/api";
 
 describe("api helpers", () => {
@@ -107,6 +109,141 @@ describe("api helpers", () => {
       cache: "no-store",
       headers: {
         Accept: "application/json",
+        "X-Admin-Token": "admin-token",
+      },
+    });
+  });
+
+  it("updateStationProgramming は admin token と JSON body を付けて PUT する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          stationId: "station-night",
+          version: 3,
+          enabled: true,
+          defaultTemplateId: "tmpl-night",
+          fallbackStrategy: "LEGACY_RATIO",
+          planningHorizonMinutes: 20,
+          preGeneration: {
+            mode: "ASSISTED",
+            maxPreparedMinutes: 12,
+            maxPreparedBlocks: 2,
+            preferCacheReuse: true,
+          },
+          replay: {
+            intensity: "LIGHT",
+            eligibleSegmentTypes: ["MUSIC_AI"],
+            minimumAssetAgeHours: 6,
+            cooldownHours: 72,
+            maxReplaySharePercent: 20,
+            excludeLetterSegments: true,
+          },
+          composition: {
+            targetSegmentShares: { talk: 40, letter: 20, music: 35, jingle: 5 },
+            maxConsecutiveTalkSegments: 2,
+            musicBreakIntervalMinutes: 8,
+            letterPriorityBoostThreshold: 4,
+            allowSoftFallbackRetiming: true,
+          },
+          updatedAt: "2026-04-23T00:00:00Z",
+          rules: [],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const body: Parameters<typeof updateStationProgramming>[1] = {
+      version: 2,
+      enabled: false,
+      defaultTemplateId: null,
+      fallbackStrategy: "LEGACY_RATIO",
+      planningHorizonMinutes: 15,
+      preGeneration: {
+        mode: "REALTIME_ONLY",
+        maxPreparedMinutes: 0,
+        maxPreparedBlocks: 0,
+        preferCacheReuse: false,
+      },
+      replay: {
+        intensity: "OFF",
+        eligibleSegmentTypes: ["MUSIC_LOCAL"],
+        minimumAssetAgeHours: 0,
+        cooldownHours: 0,
+        maxReplaySharePercent: 0,
+        excludeLetterSegments: true,
+      },
+      composition: {
+        targetSegmentShares: { talk: 60, letter: 10, music: 25, jingle: 5 },
+        maxConsecutiveTalkSegments: 3,
+        musicBreakIntervalMinutes: 10,
+        letterPriorityBoostThreshold: 2,
+        allowSoftFallbackRetiming: false,
+      },
+      rules: [],
+    };
+
+    await updateStationProgramming("station/night", body);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight/programming", {
+      cache: "no-store",
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Admin-Token": "admin-token",
+      },
+    });
+  });
+
+  it("updateStation は admin token と JSON body を付けて PUT する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "station-night",
+          version: 5,
+          name: "Midnight Echo",
+          frequencyMHz: 82.5,
+          genre: "ambient",
+          languagePersonaId: "persona-night",
+          defaultVoiceProfileId: "voice-night",
+          isActive: true,
+          programmingEnabled: true,
+          defaultProgramTemplateId: "tmpl-night",
+          updatedAt: "2026-04-23T00:00:00Z",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const body: Parameters<typeof updateStation>[1] = {
+      version: 4,
+      id: "station-night",
+      name: "Midnight Echo",
+      frequencyMHz: 82.5,
+      genre: "ambient",
+      languagePersonaId: "persona-night",
+      defaultVoiceProfileId: "voice-night",
+      isActive: true,
+      programmingEnabled: true,
+      defaultProgramTemplateId: "tmpl-night",
+    };
+
+    await updateStation("station/night", body);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight", {
+      cache: "no-store",
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
         "X-Admin-Token": "admin-token",
       },
     });

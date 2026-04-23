@@ -71,4 +71,30 @@ describe("monitor-provider-health", () => {
       { label: "Profile", value: "profile-a" },
     ]);
   });
+
+  it("worker metadata の nested object に secret や本文系 key が混ざる場合は表示値にしない", () => {
+    const details = extractWorkerStatusDetails(
+      createHealth({
+        adapter: "worker-http",
+        defaultModel: { model: "musicgen-medium", apiKey: "sk-secret" },
+        models: [{ name: "musicgen-large", prompt: "raw prompt" }, { name: "musicgen-small" }],
+        modelProfileIds: [{ id: "profile-safe", radioName: "secret radio" }, { id: "profile-visible" }],
+      }),
+    );
+
+    expect(details?.defaultModel).toBeNull();
+    expect(details?.models).toEqual(["musicgen-small"]);
+    expect(details?.modelProfileIds).toEqual(["profile-visible"]);
+  });
+
+  it("worker metadata の object fallback は JSON 表示しない", () => {
+    const details = extractWorkerStatusDetails(
+      createHealth({
+        adapter: "worker-http",
+        models: [{ unexpected: "value" }],
+      }),
+    );
+
+    expect(details?.models).toEqual([]);
+  });
 });

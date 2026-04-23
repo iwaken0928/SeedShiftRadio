@@ -86,6 +86,27 @@
 - `programming` は `GET /api/stations/{id}/programming` の応答と同じ文脈で扱う局ごとの番組編成ポリシーであり、`preGeneration`, `replay`, `composition` の 3 つの runtime profile を含む
 - これらの profile は `station_programming_policy` の保存内容と 1 対 1 で対応し、StationDetail はその正本を読み出した denormalized view とみなす
 
+### 4.2.1 StationUpsertRequest / StationResponse
+
+`POST /api/stations` と `PUT /api/stations/{id}` は station 基本情報を保存する管理 API である。`PUT` では path の `id` と body の `id` を一致させ、`version` を楽観ロックに使う。
+
+```json
+{
+  "version": 4,
+  "id": "station-night",
+  "name": "Midnight Echo",
+  "frequencyMHz": 81.3,
+  "genre": "talk",
+  "languagePersonaId": "persona-night-main",
+  "defaultVoiceProfileId": "voice-night-main",
+  "isActive": true,
+  "programmingEnabled": true,
+  "defaultProgramTemplateId": "tmpl-night-regular"
+}
+```
+
+`name`, `genre`, `languagePersonaId`, `defaultVoiceProfileId` は必須、`frequencyMHz` は `0.1` 以上とする。`languagePersonaId`, `defaultVoiceProfileId`, `defaultProgramTemplateId` は Server 側で参照整合性を確認する。`defaultProgramTemplateId` は `GLOBAL` または同一 station scope の template のみ許可する。Web `/settings` の station 基本情報 editor は `programmingEnabled` と `defaultProgramTemplateId` を直接編集せず、保存済み summary を保持して送信する。
+
 ### 4.3 RadioStatus
 
 ```json
@@ -791,6 +812,8 @@ Response:
 
 `PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。`preGeneration`, `replay`, `composition` は station ごとの実行時調整プロファイルとして扱い、既存 `ProgramTemplate` の版を壊さずに運用中 block の深さ、キャッシュ優先度、再放送比率、番組の混ぜ方を調整できるようにする。`StationDetail.programming` はこの完全版の要約、`station_programming_policy` は完全版の正本とする。
 
+Web の `/settings` ではこの API を station programming policy editor の保存先として使う。Import / Export の対象である `/api/settings` `config.json` とは別の DB 正本であり、保存後は station detail と station list を再取得して要約ビューを更新する。現行 Preview UI は保存済み policy を評価し、未保存 draft policy の preview は後続拡張とする。
+
 ### 6.7 `POST /stations/{id}/programming/preview`
 
 Request:
@@ -974,6 +997,8 @@ Response:
 `programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、`providers.musicGen.providers.{key}` は追加で `adapter`, `apiKeyRef`, `defaultModelProfileId`, `modelProfiles` を持ちます。`adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
 
 `modelProfiles` の各要素は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTransliterationMode`, `outputFormat`, `maxDurationSeconds` を持ちます。`lyricsTransliterationMode` は `native`, `kana`, `romaji`、`outputFormat` は v1 の `/api/assets/audio/{assetId}.wav` 契約に合わせて `wav` または `wav32` を受け付けます。未知 profile id や profile 上限を超える duration は Server 側 validation / 正規化で拒否または補正します。
+
+Web の `/settings` Import / Export は専用 API を追加せず、`GET /api/settings` の取得結果から `SettingsUpdateRequest` 互換 JSON を export し、import した JSON を draft に反映してから既存の `PUT /api/settings` で保存します。Export JSON には `updatedAt` と `configPath` を含めません。Import 時は `schemaVersion` の一致を Web 側でも確認し、`version` は現在の保存済み設定に合わせてから送信します。最終的な整合性検証と書き込み対象の固定は Server 側の `PUT /api/settings` が担います。
 
 ### 6.10 `POST /api/settings/test-connections`
 

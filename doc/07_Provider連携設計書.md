@@ -138,6 +138,8 @@ Provider ごとに以下を持つ。
 - `capabilities`
 - `metadata`: ACE-Step では adapter、profile id、queue stats、model 一覧など。prompt / lyrics / 秘密値は含めない
 
+`metadata` と `message` は診断用の短い状態値に限定する。Web は provider 契約違反の payload が混ざった場合も、secret / prompt / lyrics / letter body / radioName / raw response らしい key や値を redaction し、worker status detail は許可済み metadata key の短い値だけを表示する。
+
 上記 Payload は `/api/monitor/summary` と `/api/health` で `providerHealth` map として返す。key は `llm`, `tts`, `musicGen`、value は各 Provider 種別の `ProviderHealthPayload` とし、SSE `provider.health.changed` イベントでも同じ map 構造を送る。
 `status` は `UP` で正常、`DEGRADED` で代替 Provider へ切り替え中、`DOWN` で fallback に突入するシグナルとして解釈される。SSE の `Last-Event-ID` で再接続すると最新状態を受け取れる。
 

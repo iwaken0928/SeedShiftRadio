@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getHealth, getMonitorSummary, getRadioProgram } from "@/lib/api";
 import { getAdminToken } from "@/lib/env";
 import { extractWorkerStatusDetails, getProviderMetadataHighlights, type WorkerStatusDetails } from "@/lib/monitor-provider-health";
+import { formatSafeDisplayText } from "@/lib/safe-metadata";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Card, EmptyState, Input, Metric, SectionHeader } from "@/components/ui";
 import type { CacheTypeMetrics, MonitorAuditEvent, MonitorProviderJob, ProviderHealthPayload } from "@/lib/types";
@@ -133,7 +134,7 @@ export function MonitorDashboard() {
                 ) : (
                   <EmptyState
                     title="現在の番組 block はまだありません"
-                    description={programQuery.error instanceof Error ? programQuery.error.message : "Tune 後に現在 block が表示されます。"}
+                    description={programQuery.error instanceof Error ? formatSafeDisplayText(programQuery.error.message) : "Tune 後に現在 block が表示されます。"}
                   />
                 )}
               </section>
@@ -226,7 +227,7 @@ export function MonitorDashboard() {
           ) : (
             <EmptyState
               title="監視情報を取得できません"
-              description={summaryQuery.error instanceof Error ? summaryQuery.error.message : "管理トークンの設定を確認してください。"}
+              description={summaryQuery.error instanceof Error ? formatSafeDisplayText(summaryQuery.error.message) : "管理トークンの設定を確認してください。"}
             />
           )}
         </Card>
@@ -244,7 +245,7 @@ export function MonitorDashboard() {
               <Metric label="Current Session" value={healthQuery.data.currentSessionId ?? "none"} />
             </div>
           ) : (
-            <EmptyState title="health を取得できません" description={healthQuery.error instanceof Error ? healthQuery.error.message : undefined} />
+            <EmptyState title="health を取得できません" description={healthQuery.error instanceof Error ? formatSafeDisplayText(healthQuery.error.message) : undefined} />
           )}
         </Card>
 
@@ -261,7 +262,7 @@ export function MonitorDashboard() {
                       <Badge tone="default">{event.id}</Badge>
                     </div>
                     <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">{formatInstant(event.occurredAt)}</div>
-                    <div className="mt-2 text-sm text-slate-600">{event.summary}</div>
+                    <div className="mt-2 text-sm text-slate-600">{formatSafeDisplayText(event.summary)}</div>
                   </div>
                 ))}
               </div>
@@ -306,12 +307,12 @@ function ProviderHealthCard({ label, health }: { label: string; health: Provider
           </Badge>
         ))}
       </div>
-      <div className="mt-2 text-sm leading-6 text-slate-600">{health.message}</div>
+      <div className="mt-2 text-sm leading-6 text-slate-600">{formatSafeDisplayText(health.message)}</div>
       <div className="mt-3 grid gap-3 text-sm text-slate-500 md:grid-cols-2 xl:grid-cols-4">
         <Metric label="Last Checked" value={health.lastCheckedAt ? formatInstant(health.lastCheckedAt) : "-"} />
         <Metric label="Response" value={health.responseTimeMs != null ? `${health.responseTimeMs} ms` : "-"} />
         <Metric label="Capabilities" value={health.capabilities.length ? health.capabilities.join(", ") : "-"} />
-        <Metric label="Base URL" value={health.baseUrl ?? "-"} />
+        <Metric label="Base URL" value={formatSafeDisplayText(health.baseUrl)} />
       </div>
     </div>
   );
@@ -359,7 +360,7 @@ function WorkerStatusCard({
         <DetailGroup
           label="Provider Context"
           description={health.providerKey ?? "provider key なし"}
-          footer={health.baseUrl ?? "base URL 未設定"}
+          footer={formatSafeDisplayText(health.baseUrl)}
         />
       </div>
 
@@ -423,7 +424,7 @@ function MonitorJobCard({ job }: { job: MonitorProviderJob }) {
         {job.errorCode || job.externalRef ? " / " : ""}
         {job.errorCode ? `error: ${job.errorCode}` : null}
         {job.errorCode && job.externalRef ? " / " : ""}
-        {job.externalRef ? `ref: ${job.externalRef}` : ""}
+        {job.externalRef ? `ref: ${formatSafeDisplayText(job.externalRef)}` : ""}
       </div>
     </div>
   );

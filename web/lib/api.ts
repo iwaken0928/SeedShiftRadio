@@ -14,6 +14,7 @@ import {
   type ProgrammingPreviewRequest,
   type ProgrammingPreviewResponse,
   type StationProgrammingResponse,
+  type StationProgrammingUpdateRequest,
   type ProgramBlockSummary,
   type QueueSnapshot,
   type RadioStatus,
@@ -21,7 +22,9 @@ import {
   type SettingsUpdateRequest,
   type SpeechDirective,
   type StationDetail,
+  type StationResponse,
   type StationSummary,
+  type StationUpdateRequest,
   type TuneRequest,
   type TuneResponse,
 } from "@/lib/types";
@@ -111,9 +114,25 @@ export function getStation(stationId: string) {
   return requestJson<StationDetail>(`/api/stations/${encodeURIComponent(stationId)}`);
 }
 
+export function updateStation(stationId: string, body: StationUpdateRequest) {
+  return requestJson<StationResponse>(`/api/stations/${encodeURIComponent(stationId)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+    headers: withAdminHeaders({ "Content-Type": "application/json" }),
+  });
+}
+
 export function getStationProgramming(stationId: string) {
   return requestJson<StationProgrammingResponse>(`/api/stations/${encodeURIComponent(stationId)}/programming`, {
     headers: withAdminHeaders(),
+  });
+}
+
+export function updateStationProgramming(stationId: string, body: StationProgrammingUpdateRequest) {
+  return requestJson<StationProgrammingResponse>(`/api/stations/${encodeURIComponent(stationId)}/programming`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+    headers: withAdminHeaders({ "Content-Type": "application/json" }),
   });
 }
 

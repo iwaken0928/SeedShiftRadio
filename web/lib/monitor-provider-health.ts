@@ -1,4 +1,5 @@
 import type { ProviderHealthPayload } from "@/lib/types";
+import { formatSafeMetadataValue, isSensitiveMetadataKey, REDACTED_METADATA_VALUE } from "@/lib/safe-metadata";
 
 const WORKER_METADATA_KEYS = [
   "adapter",
@@ -74,7 +75,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown): string | null {
   if (typeof value === "string" && value.trim().length > 0) {
-    return value;
+    return safeStringValue("workerMetadata", value);
   }
   return null;
 }
@@ -102,7 +103,7 @@ function readStringArray(value: unknown): string[] {
 
 function formatValue(value: unknown): string | null {
   if (typeof value === "string" && value.trim().length > 0) {
-    return value;
+    return safeStringValue("workerMetadata", value);
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     return String(value);
@@ -116,6 +117,14 @@ function formatValue(value: unknown): string | null {
     return null;
   }
 
+  if (
+    Object.entries(record).some(
+      ([key, nestedValue]) => isSensitiveMetadataKey(key) || formatSafeMetadataValue(key, nestedValue) === REDACTED_METADATA_VALUE,
+    )
+  ) {
+    return null;
+  }
+
   const preferredKeys = ["id", "name", "model", "profileId", "value"];
   for (const key of preferredKeys) {
     const nested = readString(record[key]);
@@ -123,7 +132,10 @@ function formatValue(value: unknown): string | null {
       return nested;
     }
   }
+  return null;
+}
 
-  const serialized = JSON.stringify(record);
-  return serialized === "{}" ? null : serialized;
+function safeStringValue(key: string, value: string): string | null {
+  const safeValue = formatSafeMetadataValue(key, value);
+  return safeValue === REDACTED_METADATA_VALUE ? null : safeValue;
 }

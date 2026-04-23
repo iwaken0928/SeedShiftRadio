@@ -41,6 +41,23 @@ export interface StationDetail {
   programming: StationProgrammingProfile;
 }
 
+export interface StationUpdateRequest {
+  version: number;
+  id: string;
+  name: string;
+  frequencyMHz: number;
+  genre: string;
+  languagePersonaId: string;
+  defaultVoiceProfileId: string;
+  isActive: boolean;
+  programmingEnabled: boolean;
+  defaultProgramTemplateId: string | null;
+}
+
+export interface StationResponse extends StationUpdateRequest {
+  updatedAt: string;
+}
+
 export interface StationProgrammingResponse {
   stationId: string;
   version: number;
@@ -55,8 +72,30 @@ export interface StationProgrammingResponse {
   rules: ProgramRuleSummary[];
 }
 
+export interface StationProgrammingUpdateRequest {
+  version: number;
+  enabled: boolean;
+  defaultTemplateId: string | null;
+  fallbackStrategy: string;
+  planningHorizonMinutes: number;
+  preGeneration: PreGenerationProfile;
+  replay: ReplayProfile;
+  composition: CompositionProfile;
+  rules: ProgramRuleUpdateRequest[];
+}
+
 export interface ProgramRuleSummary {
   id: string;
+  priority: number;
+  days: string[];
+  startTime: string;
+  endTime: string;
+  minimumPendingLetters: number;
+  requiredProviderStates: string[];
+  templateId: string;
+}
+
+export interface ProgramRuleUpdateRequest {
   priority: number;
   days: string[];
   startTime: string;

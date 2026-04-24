@@ -3,6 +3,7 @@ import {
   buildApiUrl,
   buildLettersPath,
   buildNextSpeechDirectivePath,
+  createStation,
   listLetters,
   mergeAdminHeaders,
   requestJson,
@@ -240,6 +241,56 @@ describe("api helpers", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight", {
       cache: "no-store",
       method: "PUT",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Admin-Token": "admin-token",
+      },
+    });
+  });
+
+  it("createStation は admin token と JSON body を付けて POST する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "station-dawn",
+          version: 1,
+          name: "Dawn Signals",
+          frequencyMHz: 77.7,
+          genre: "talk",
+          languagePersonaId: "persona-dawn",
+          defaultVoiceProfileId: "voice-dawn",
+          isActive: true,
+          programmingEnabled: false,
+          defaultProgramTemplateId: null,
+          updatedAt: "2026-04-23T00:00:00Z",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const body: Parameters<typeof createStation>[0] = {
+      version: 0,
+      id: "station-dawn",
+      name: "Dawn Signals",
+      frequencyMHz: 77.7,
+      genre: "talk",
+      languagePersonaId: "persona-dawn",
+      defaultVoiceProfileId: "voice-dawn",
+      isActive: true,
+      programmingEnabled: false,
+      defaultProgramTemplateId: null,
+    };
+
+    await createStation(body);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations", {
+      cache: "no-store",
+      method: "POST",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",

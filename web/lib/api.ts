@@ -110,6 +110,14 @@ export function listStations() {
   return requestJson<StationSummary[]>("/api/stations");
 }
 
+export function createStation(body: StationUpdateRequest) {
+  return requestJson<StationResponse>("/api/stations", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: withAdminHeaders({ "Content-Type": "application/json" }),
+  });
+}
+
 export function getStation(stationId: string) {
   return requestJson<StationDetail>(`/api/stations/${encodeURIComponent(stationId)}`);
 }

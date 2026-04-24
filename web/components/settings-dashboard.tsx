@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createStation,
   getProgramTemplate,
   getSettings,
   getStation,
@@ -18,6 +19,7 @@ import {
 import { getAdminToken } from "@/lib/env";
 import { formatSafeDisplayText, getSafeMetadataEntries } from "@/lib/safe-metadata";
 import { buildSettingsExportFilename, buildSettingsExportPayload, parseSettingsImportPayload } from "@/lib/settings-import-export";
+import { cloneStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
 import type {
   ConnectionsTestResponse,
   ProgramTemplateDetail,
@@ -32,6 +34,7 @@ import type {
   SettingsResponse,
   SettingsUpdateRequest,
   StationDetail,
+  StationResponse,
   StationProgrammingResponse,
   StationProgrammingUpdateRequest,
   StationUpdateRequest,
@@ -80,6 +83,9 @@ export function SettingsDashboard() {
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [stationDraft, setStationDraft] = useState<StationUpdateRequest | null>(null);
+  const [stationEditorMode, setStationEditorMode] = useState<"existing" | "create">("existing");
+  const [stationCreateBaseDraft, setStationCreateBaseDraft] = useState<StationUpdateRequest | null>(null);
+  const [stationCreateSourceId, setStationCreateSourceId] = useState<string | null>(null);
   const [stationNotice, setStationNotice] = useState<string | null>(null);
   const [programmingDraft, setProgrammingDraft] = useState<StationProgrammingUpdateRequest | null>(null);
   const [programmingNotice, setProgrammingNotice] = useState<string | null>(null);
@@ -162,66 +168,69 @@ export function SettingsDashboard() {
         providerStates: previewDraft.providerStates,
       }),
   });
+  const applyStationSave = (saved: StationResponse, mode: "create" | "update") => {
+    queryClient.setQueryData<StationSummary[]>(["settings", "stations"], (current) => {
+      const nextStation = {
+        id: saved.id,
+        name: saved.name,
+        frequencyMHz: saved.frequencyMHz,
+        genre: saved.genre,
+        isActive: saved.isActive,
+        programmingEnabled: saved.programmingEnabled,
+        defaultProgramTemplateId: saved.defaultProgramTemplateId,
+      };
+
+      if (!current?.length) {
+        return [nextStation];
+      }
+      if (current.some((station) => station.id === saved.id)) {
+        return current.map((station) => (station.id === saved.id ? nextStation : station));
+      }
+      return [...current, nextStation];
+    });
+    setStationDraft({
+      version: saved.version,
+      id: saved.id,
+      name: saved.name,
+      frequencyMHz: saved.frequencyMHz,
+      genre: saved.genre,
+      languagePersonaId: saved.languagePersonaId,
+      defaultVoiceProfileId: saved.defaultVoiceProfileId,
+      isActive: saved.isActive,
+      programmingEnabled: saved.programmingEnabled,
+      defaultProgramTemplateId: saved.defaultProgramTemplateId,
+    });
+    setStationEditorMode("existing");
+    setStationCreateBaseDraft(null);
+    setStationCreateSourceId(null);
+    setProgrammingDraft(null);
+    setSelectedStationId(saved.id);
+    setStationNotice(
+      mode === "create"
+        ? "局を作成しました。番組編成ポリシーは必要に応じて下の editor で調整してください。"
+        : "局の基本情報を保存しました。表示と次回の番組計画に反映されます。",
+    );
+    void queryClient.invalidateQueries({ queryKey: ["settings", "station", saved.id] });
+    void queryClient.invalidateQueries({ queryKey: ["settings", "station-programming", saved.id] });
+    void queryClient.invalidateQueries({ queryKey: ["settings", "stations"] });
+    void queryClient.invalidateQueries({ queryKey: ["stations"] });
+  };
+  const createStationMutation = useMutation({
+    mutationFn: createStation,
+    onMutate: () => {
+      setStationNotice(null);
+    },
+    onSuccess: (saved) => {
+      applyStationSave(saved, "create");
+    },
+  });
   const stationMutation = useMutation({
     mutationFn: ({ stationId, body }: { stationId: string; body: StationUpdateRequest }) => updateStation(stationId, body),
     onMutate: () => {
       setStationNotice(null);
     },
     onSuccess: (saved) => {
-      queryClient.setQueryData<StationDetail>(["settings", "station", saved.id], (current) =>
-        current
-          ? {
-              ...current,
-              name: saved.name,
-              frequencyMHz: saved.frequencyMHz,
-              genre: saved.genre,
-              languagePersonaId: saved.languagePersonaId,
-              defaultVoiceProfileId: saved.defaultVoiceProfileId,
-              isActive: saved.isActive,
-              version: saved.version,
-              programming: {
-                ...current.programming,
-                enabled: saved.programmingEnabled,
-                defaultTemplateId: saved.defaultProgramTemplateId,
-              },
-            }
-          : current,
-      );
-      queryClient.setQueryData<StationSummary[]>(["settings", "stations"], (current) =>
-        current?.map((station) =>
-          station.id === saved.id
-            ? {
-                ...station,
-                name: saved.name,
-                frequencyMHz: saved.frequencyMHz,
-                genre: saved.genre,
-                isActive: saved.isActive,
-                programmingEnabled: saved.programmingEnabled,
-                defaultProgramTemplateId: saved.defaultProgramTemplateId,
-              }
-            : station,
-        ),
-      );
-      setStationDraft((current) =>
-        current
-          ? {
-              ...current,
-              version: saved.version,
-              name: saved.name,
-              frequencyMHz: saved.frequencyMHz,
-              genre: saved.genre,
-              languagePersonaId: saved.languagePersonaId,
-              defaultVoiceProfileId: saved.defaultVoiceProfileId,
-              isActive: saved.isActive,
-              programmingEnabled: saved.programmingEnabled,
-              defaultProgramTemplateId: saved.defaultProgramTemplateId,
-            }
-          : current,
-      );
-      setStationNotice("局の基本情報を保存しました。表示と次回の番組計画に反映されます。");
-      void queryClient.invalidateQueries({ queryKey: ["settings", "station", saved.id] });
-      void queryClient.invalidateQueries({ queryKey: ["settings", "stations"] });
-      void queryClient.invalidateQueries({ queryKey: ["stations"] });
+      applyStationSave(saved, "update");
     },
   });
   const programmingMutation = useMutation({
@@ -240,7 +249,8 @@ export function SettingsDashboard() {
 
   const baseDraft = settingsQuery.data ? createDraft(settingsQuery.data) : null;
   const isDirty = baseDraft !== null && draft !== null && JSON.stringify(baseDraft) !== JSON.stringify(draft);
-  const baseStationDraft = stationDetailQuery.data ? createStationDraft(stationDetailQuery.data) : null;
+  const baseStationDraft =
+    stationEditorMode === "create" ? stationCreateBaseDraft : stationDetailQuery.data ? createStationDraft(stationDetailQuery.data) : null;
   const isStationDirty = baseStationDraft !== null && stationDraft !== null && JSON.stringify(baseStationDraft) !== JSON.stringify(stationDraft);
   const baseProgrammingDraft = stationProgrammingQuery.data ? createProgrammingDraft(stationProgrammingQuery.data) : null;
   const isProgrammingDirty =
@@ -306,13 +316,16 @@ export function SettingsDashboard() {
   };
 
   useEffect(() => {
+    if (stationEditorMode === "create") {
+      return;
+    }
     if (!stationsQuery.data?.length) {
       return;
     }
     if (!selectedStationId || !stationsQuery.data.some((station) => station.id === selectedStationId)) {
       setSelectedStationId(stationsQuery.data[0].id);
     }
-  }, [selectedStationId, setSelectedStationId, stationsQuery.data]);
+  }, [selectedStationId, setSelectedStationId, stationEditorMode, stationsQuery.data]);
 
   useEffect(() => {
     if (!templatesQuery.data?.length) {
@@ -333,13 +346,62 @@ export function SettingsDashboard() {
   }, [stationProgrammingQuery.data]);
 
   useEffect(() => {
+    if (stationEditorMode === "create") {
+      return;
+    }
     setStationDraft(stationDetailQuery.data ? createStationDraft(stationDetailQuery.data) : null);
-  }, [stationDetailQuery.data]);
+  }, [stationDetailQuery.data, stationEditorMode]);
 
   useEffect(() => {
     setProgrammingNotice(null);
-    setStationNotice(null);
   }, [selectedStationId]);
+
+  const startBlankStationDraft = () => {
+    const nextDraft = createBlankStationDraft(stationsQuery.data ?? []);
+    setStationEditorMode("create");
+    setStationCreateBaseDraft(cloneStationDraft(nextDraft));
+    setStationCreateSourceId(selectedStationId);
+    setStationDraft(nextDraft);
+    setSelectedStationId(null);
+    setProgrammingDraft(null);
+    setStationNotice("新規 station draft を作成しました。保存後に programming policy を設定できます。");
+    stationMutation.reset();
+    createStationMutation.reset();
+  };
+
+  const startDuplicatedStationDraft = () => {
+    if (!stationDetailQuery.data) {
+      return;
+    }
+    const nextDraft = createDuplicatedStationDraft(stationDetailQuery.data, stationsQuery.data ?? [], templatesQuery.data ?? []);
+    setStationEditorMode("create");
+    setStationCreateBaseDraft(cloneStationDraft(nextDraft));
+    setStationCreateSourceId(selectedStationId);
+    setStationDraft(nextDraft);
+    setSelectedStationId(null);
+    setProgrammingDraft(null);
+    setStationNotice(
+      "選択中の station から新規 draft を作成しました。ID と周波数は新規値へ調整し、station 固有 template 参照は引き継ぎません。",
+    );
+    stationMutation.reset();
+    createStationMutation.reset();
+  };
+
+  const cancelStationDraft = () => {
+    setStationEditorMode("existing");
+    setStationCreateBaseDraft(null);
+    setStationDraft(null);
+    setProgrammingDraft(null);
+    createStationMutation.reset();
+    stationMutation.reset();
+    setStationNotice("新規 station draft を閉じました。");
+    const fallbackStationId =
+      stationCreateSourceId && stationsQuery.data?.some((station) => station.id === stationCreateSourceId)
+        ? stationCreateSourceId
+        : (stationsQuery.data?.[0]?.id ?? null);
+    setSelectedStationId(fallbackStationId);
+    setStationCreateSourceId(null);
+  };
 
   if (!hasAdminToken) {
     return (
@@ -755,30 +817,52 @@ export function SettingsDashboard() {
 
         <StationOverviewCard
           stations={stationsQuery.data ?? []}
+          isCreatingStation={stationEditorMode === "create"}
           selectedStationId={selectedStationId}
           station={stationDetailQuery.data}
           programming={stationProgrammingQuery.data}
           templates={templatesQuery.data ?? []}
           stationDraft={stationDraft}
           stationDirty={isStationDirty}
-          stationSaving={stationMutation.isPending}
+          stationSaving={stationMutation.isPending || createStationMutation.isPending}
           stationNotice={stationNotice}
-          stationError={stationMutation.error}
+          stationError={createStationMutation.error ?? stationMutation.error}
           programmingDraft={programmingDraft}
           programmingDirty={isProgrammingDirty}
           programmingSaving={programmingMutation.isPending}
           programmingNotice={programmingNotice}
           programmingError={programmingMutation.error}
-          onSelectStation={setSelectedStationId}
+          onSelectStation={(stationId) => {
+            if (!stationId) {
+              if (stationEditorMode !== "create") {
+                startBlankStationDraft();
+              }
+              return;
+            }
+            setStationEditorMode("existing");
+            setStationCreateBaseDraft(null);
+            setStationCreateSourceId(null);
+            setSelectedStationId(stationId);
+            createStationMutation.reset();
+            stationMutation.reset();
+          }}
+          onStartCreateStation={startBlankStationDraft}
+          onDuplicateStation={startDuplicatedStationDraft}
+          onCancelCreateStation={cancelStationDraft}
           onStationDraftChange={setStationDraft}
           onResetStation={() => {
-            if (stationDetailQuery.data) {
+            if (stationEditorMode === "create" && stationCreateBaseDraft) {
+              setStationDraft(cloneStationDraft(stationCreateBaseDraft));
+              setStationNotice("新規 station draft の変更を破棄しました。");
+            } else if (stationDetailQuery.data) {
               setStationDraft(createStationDraft(stationDetailQuery.data));
               setStationNotice("未保存の局基本情報変更を破棄しました。");
             }
           }}
           onSaveStation={() => {
-            if (selectedStationId && stationDraft) {
+            if (stationEditorMode === "create" && stationDraft) {
+              createStationMutation.mutate(stationDraft);
+            } else if (selectedStationId && stationDraft) {
               stationMutation.mutate({ stationId: selectedStationId, body: stationDraft });
             }
           }}
@@ -1410,6 +1494,7 @@ type PreviewDraft = {
 
 function StationOverviewCard({
   stations,
+  isCreatingStation,
   selectedStationId,
   station,
   programming,
@@ -1425,6 +1510,9 @@ function StationOverviewCard({
   programmingNotice,
   programmingError,
   onSelectStation,
+  onStartCreateStation,
+  onDuplicateStation,
+  onCancelCreateStation,
   onStationDraftChange,
   onResetStation,
   onSaveStation,
@@ -1433,6 +1521,7 @@ function StationOverviewCard({
   onSaveProgramming,
 }: {
   stations: StationSummary[];
+  isCreatingStation: boolean;
   selectedStationId: string | null;
   station?: StationDetail;
   programming?: StationProgrammingResponse;
@@ -1448,6 +1537,9 @@ function StationOverviewCard({
   programmingNotice: string | null;
   programmingError: unknown;
   onSelectStation: (stationId: string | null) => void;
+  onStartCreateStation: () => void;
+  onDuplicateStation: () => void;
+  onCancelCreateStation: () => void;
   onStationDraftChange: Dispatch<SetStateAction<StationUpdateRequest | null>>;
   onResetStation: () => void;
   onSaveStation: () => void;
@@ -1455,42 +1547,68 @@ function StationOverviewCard({
   onResetProgramming: () => void;
   onSaveProgramming: () => void;
 }) {
+  const stationMetrics = stationDraft ?? (station ? createStationDraft(station) : null);
+
   return (
     <Card className="mt-4">
       <SectionHeader
         eyebrow="Stations"
         title="Station overview"
         description="局情報と station ごとの編成 profile を settings 画面から参照します。"
-      />
-      {!stations.length ? (
-        <EmptyState title="局がまだありません" description="`/api/stations` に局が追加されるとここに表示されます。" />
-      ) : (
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="settings-station-select">Station</Label>
-            <select
-              id="settings-station-select"
-              className={SELECT_CLASS_NAME}
-              value={selectedStationId ?? ""}
-              onChange={(event) => onSelectStation(event.currentTarget.value || null)}
-            >
-              {stations.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name} ({entry.frequencyMHz} MHz)
-                </option>
-              ))}
-            </select>
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" tone="secondary" onClick={onStartCreateStation}>
+              New Station
+            </Button>
+            <Button type="button" tone="ghost" onClick={onDuplicateStation} disabled={!station}>
+              Duplicate Current
+            </Button>
+            {isCreatingStation ? (
+              <Button type="button" tone="ghost" onClick={onCancelCreateStation}>
+                Close Draft
+              </Button>
+            ) : null}
           </div>
-          {station ? (
+        }
+      />
+      <div className="space-y-4">
+        <div>
+          <Label htmlFor="settings-station-select">Station</Label>
+          <select
+            id="settings-station-select"
+            className={SELECT_CLASS_NAME}
+            value={isCreatingStation ? "" : (selectedStationId ?? "")}
+            onChange={(event) => onSelectStation(event.currentTarget.value || null)}
+          >
+            {isCreatingStation ? <option value="">Draft new station</option> : null}
+            {stations.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name} ({entry.frequencyMHz} MHz)
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {!stations.length && !isCreatingStation ? (
+          <EmptyState title="局がまだありません" description="`New Station` から最初の局を作成できます。" />
+        ) : stationMetrics ? (
+          <div className="space-y-4">
+            {isCreatingStation ? (
+              <InlineNotice
+                tone="accent"
+                message="新規局ドラフトを編集中です。保存後に一覧へ追加され、必要に応じて番組編成 policy を設定できます。"
+              />
+            ) : null}
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Genre" value={station.genre} />
-                <Metric label="Frequency" value={`${station.frequencyMHz} MHz`} />
-                <Metric label="Persona" value={station.languagePersonaId} />
-                <Metric label="Voice" value={station.defaultVoiceProfileId} />
+                <Metric label="Genre" value={stationMetrics.genre || "-"} />
+                <Metric label="Frequency" value={`${stationMetrics.frequencyMHz} MHz`} />
+                <Metric label="Persona" value={stationMetrics.languagePersonaId || "-"} />
+                <Metric label="Voice" value={stationMetrics.defaultVoiceProfileId || "-"} />
               </div>
               <StationBasicInfoEditor
                 draft={stationDraft}
+                mode={isCreatingStation ? "create" : "existing"}
                 isDirty={stationDirty}
                 isSaving={stationSaving}
                 notice={stationNotice}
@@ -1499,102 +1617,112 @@ function StationOverviewCard({
                 onReset={onResetStation}
                 onSave={onSaveStation}
               />
-              <KeyValueGrid
-                title="Programming policy"
-                entries={[
-                  ["Enabled", programming?.enabled ? "true" : "false"],
-                  ["Default Template", programming?.defaultTemplateId ?? station.programming.defaultTemplateId ?? "-"],
-                  ["Fallback", programming?.fallbackStrategy ?? station.programming.fallbackStrategy],
-                  ["Planning Horizon", `${programming?.planningHorizonMinutes ?? station.programming.planningHorizonMinutes} min`],
-                ]}
-              />
-              <KeyValueGrid
-                title="Pre-generation"
-                entries={[
-                  ["Mode", programming?.preGeneration.mode ?? station.programming.preGeneration.mode],
-                  ["Max Prepared Minutes", programming?.preGeneration.maxPreparedMinutes ?? station.programming.preGeneration.maxPreparedMinutes],
-                  ["Max Prepared Blocks", programming?.preGeneration.maxPreparedBlocks ?? station.programming.preGeneration.maxPreparedBlocks],
-                  ["Prefer Cache Reuse", String(programming?.preGeneration.preferCacheReuse ?? station.programming.preGeneration.preferCacheReuse)],
-                ]}
-              />
-              <KeyValueGrid
-                title="Replay"
-                entries={[
-                  ["Intensity", programming?.replay.intensity ?? station.programming.replay.intensity],
-                  [
-                    "Eligible Segments",
-                    formatSegmentTypes(programming?.replay.eligibleSegmentTypes ?? station.programming.replay.eligibleSegmentTypes),
-                  ],
-                  ["Cooldown", `${programming?.replay.cooldownHours ?? station.programming.replay.cooldownHours} h`],
-                  ["Max Share", `${programming?.replay.maxReplaySharePercent ?? station.programming.replay.maxReplaySharePercent}%`],
-                ]}
-              />
-              <KeyValueGrid
-                title="Composition"
-                entries={[
-                  [
-                    "Target Shares",
-                    formatShareMap(programming?.composition.targetSegmentShares ?? station.programming.composition.targetSegmentShares),
-                  ],
-                  [
-                    "Max Consecutive Talk",
-                    programming?.composition.maxConsecutiveTalkSegments ?? station.programming.composition.maxConsecutiveTalkSegments,
-                  ],
-                  [
-                    "Music Break Interval",
-                    `${programming?.composition.musicBreakIntervalMinutes ?? station.programming.composition.musicBreakIntervalMinutes} min`,
-                  ],
-                  [
-                    "Letter Boost Threshold",
-                    programming?.composition.letterPriorityBoostThreshold ?? station.programming.composition.letterPriorityBoostThreshold,
-                  ],
-                ]}
-              />
-              <StationProgrammingPolicyEditor
-                stationId={station.id}
-                templates={templates}
-                draft={programmingDraft}
-                isDirty={programmingDirty}
-                isSaving={programmingSaving}
-                notice={programmingNotice}
-                error={programmingError}
-                onDraftChange={onProgrammingDraftChange}
-                onReset={onResetProgramming}
-                onSave={onSaveProgramming}
-              />
-              <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Rules</div>
-                {programming?.rules.length ? (
-                  programming.rules.map((rule) => (
-                    <div key={rule.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone="accent">Priority {rule.priority}</Badge>
-                        <Badge tone="default">{rule.templateId}</Badge>
-                      </div>
-                      <div className="mt-2 text-sm text-slate-600">
-                        {rule.days.join(", ")} / {rule.startTime}-{rule.endTime} / minimum letters {rule.minimumPendingLetters}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        required states: {rule.requiredProviderStates.length ? rule.requiredProviderStates.join(", ") : "none"}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyState title="Programming rule はまだありません" description="自動番組生成ルールが未設定の場合は fallback で運用されます。" />
-                )}
-              </div>
+              {isCreatingStation ? (
+                <EmptyState
+                  title="Programming policy は作成後に設定します"
+                  description="station 作成/複製では局基本情報だけを保存します。defaultTemplateId や rules は保存後に station ごとの policy editor で調整してください。"
+                />
+              ) : station ? (
+                <>
+                  <KeyValueGrid
+                    title="Programming policy"
+                    entries={[
+                      ["Enabled", programming?.enabled ? "true" : "false"],
+                      ["Default Template", programming?.defaultTemplateId ?? station.programming.defaultTemplateId ?? "-"],
+                      ["Fallback", programming?.fallbackStrategy ?? station.programming.fallbackStrategy],
+                      ["Planning Horizon", `${programming?.planningHorizonMinutes ?? station.programming.planningHorizonMinutes} min`],
+                    ]}
+                  />
+                  <KeyValueGrid
+                    title="Pre-generation"
+                    entries={[
+                      ["Mode", programming?.preGeneration.mode ?? station.programming.preGeneration.mode],
+                      ["Max Prepared Minutes", programming?.preGeneration.maxPreparedMinutes ?? station.programming.preGeneration.maxPreparedMinutes],
+                      ["Max Prepared Blocks", programming?.preGeneration.maxPreparedBlocks ?? station.programming.preGeneration.maxPreparedBlocks],
+                      ["Prefer Cache Reuse", String(programming?.preGeneration.preferCacheReuse ?? station.programming.preGeneration.preferCacheReuse)],
+                    ]}
+                  />
+                  <KeyValueGrid
+                    title="Replay"
+                    entries={[
+                      ["Intensity", programming?.replay.intensity ?? station.programming.replay.intensity],
+                      [
+                        "Eligible Segments",
+                        formatSegmentTypes(programming?.replay.eligibleSegmentTypes ?? station.programming.replay.eligibleSegmentTypes),
+                      ],
+                      ["Cooldown", `${programming?.replay.cooldownHours ?? station.programming.replay.cooldownHours} h`],
+                      ["Max Share", `${programming?.replay.maxReplaySharePercent ?? station.programming.replay.maxReplaySharePercent}%`],
+                    ]}
+                  />
+                  <KeyValueGrid
+                    title="Composition"
+                    entries={[
+                      [
+                        "Target Shares",
+                        formatShareMap(programming?.composition.targetSegmentShares ?? station.programming.composition.targetSegmentShares),
+                      ],
+                      [
+                        "Max Consecutive Talk",
+                        programming?.composition.maxConsecutiveTalkSegments ?? station.programming.composition.maxConsecutiveTalkSegments,
+                      ],
+                      [
+                        "Music Break Interval",
+                        `${programming?.composition.musicBreakIntervalMinutes ?? station.programming.composition.musicBreakIntervalMinutes} min`,
+                      ],
+                      [
+                        "Letter Boost Threshold",
+                        programming?.composition.letterPriorityBoostThreshold ?? station.programming.composition.letterPriorityBoostThreshold,
+                      ],
+                    ]}
+                  />
+                  <StationProgrammingPolicyEditor
+                    stationId={station.id}
+                    templates={templates}
+                    draft={programmingDraft}
+                    isDirty={programmingDirty}
+                    isSaving={programmingSaving}
+                    notice={programmingNotice}
+                    error={programmingError}
+                    onDraftChange={onProgrammingDraftChange}
+                    onReset={onResetProgramming}
+                    onSave={onSaveProgramming}
+                  />
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Rules</div>
+                    {programming?.rules.length ? (
+                      programming.rules.map((rule) => (
+                        <div key={rule.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge tone="accent">Priority {rule.priority}</Badge>
+                            <Badge tone="default">{rule.templateId}</Badge>
+                          </div>
+                          <div className="mt-2 text-sm text-slate-600">
+                            {rule.days.join(", ")} / {rule.startTime}-{rule.endTime} / minimum letters {rule.minimumPendingLetters}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            required states: {rule.requiredProviderStates.length ? rule.requiredProviderStates.join(", ") : "none"}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <EmptyState title="Programming rule はまだありません" description="自動番組生成ルールが未設定の場合は fallback で運用されます。" />
+                    )}
+                  </div>
+                </>
+              ) : null}
             </div>
-          ) : (
-            <EmptyState title="局詳細を取得できません" description="station を選択すると概要と programming policy を表示します。" />
-          )}
-        </div>
-      )}
+          </div>
+        ) : (
+          <EmptyState title="局詳細を取得できません" description="station を選択するか、`New Station` から新規局ドラフトを作成してください。" />
+        )}
+      </div>
     </Card>
   );
 }
 
 function StationBasicInfoEditor({
   draft,
+  mode,
   isDirty,
   isSaving,
   notice,
@@ -1604,6 +1732,7 @@ function StationBasicInfoEditor({
   onSave,
 }: {
   draft: StationUpdateRequest | null;
+  mode: "existing" | "create";
   isDirty: boolean;
   isSaving: boolean;
   notice: string | null;
@@ -1617,6 +1746,7 @@ function StationBasicInfoEditor({
   }
 
   const validationMessages = [
+    draft.id.trim().length === 0 ? "Station ID は必須です。" : null,
     draft.name.trim().length === 0 ? "局名は必須です。" : null,
     draft.genre.trim().length === 0 ? "ジャンルは必須です。" : null,
     draft.languagePersonaId.trim().length === 0 ? "Persona ID は必須です。" : null,
@@ -1631,17 +1761,24 @@ function StationBasicInfoEditor({
   return (
     <SettingsSection
       title="Station Basic Info"
-      description="局名、周波数、ジャンル、人格ID、音声ID、有効状態を編集します。番組編成の有効化と既定テンプレートは下の policy editor で管理します。"
+      description={
+        mode === "create"
+          ? "局ID、局名、周波数、ジャンル、人格ID、音声ID、有効状態を指定して新しい局を作成します。programming policy は作成後に設定します。"
+          : "局名、周波数、ジャンル、人格ID、音声ID、有効状態を編集します。番組編成の有効化と既定テンプレートは下の policy editor で管理します。"
+      }
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "Unsaved station changes" : "Station saved"}</Badge>
-          <Badge tone="accent">station version {draft.version}</Badge>
+          <Badge tone="accent">{mode === "create" ? "new station draft" : `station version ${draft.version}`}</Badge>
+          {mode === "create" ? (
+            <Badge tone="warning">programming policy は保存後に設定</Badge>
+          ) : null}
           <Button type="button" tone="ghost" onClick={onReset} disabled={!isDirty || isSaving}>
-            Reset Station
+            {mode === "create" ? "Reset Draft" : "Reset Station"}
           </Button>
           <Button type="button" tone="primary" onClick={onSave} disabled={!isDirty || isSaving || validationMessages.length > 0}>
-            {isSaving ? "Saving station..." : "Save Station"}
+            {isSaving ? (mode === "create" ? "Creating station..." : "Saving station...") : mode === "create" ? "Create Station" : "Save Station"}
           </Button>
         </div>
 
@@ -1654,7 +1791,13 @@ function StationBasicInfoEditor({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <div>
             <Label htmlFor="station-id">Station ID</Label>
-            <Input id="station-id" value={draft.id} readOnly className="cursor-not-allowed bg-slate-100 text-slate-500" />
+            <Input
+              id="station-id"
+              value={draft.id}
+              readOnly={mode === "existing"}
+              className={mode === "existing" ? "cursor-not-allowed bg-slate-100 text-slate-500" : undefined}
+              onChange={(event) => updateDraft((current) => ({ ...current, id: event.currentTarget.value }))}
+            />
           </div>
           <TextField
             id="station-name"
@@ -1698,7 +1841,11 @@ function StationBasicInfoEditor({
         </div>
         <InlineNotice
           tone="warning"
-          message="Persona ID と Voice Profile ID は既存の登録 ID を指定してください。参照整合性と周波数重複は Server 側でも検証されます。"
+          message={
+            mode === "create"
+              ? "Station ID は保存後に変更しません。Persona ID と Voice Profile ID は既存の登録 ID を指定し、ID 重複と周波数重複は Server 側でも検証されます。"
+              : "Persona ID と Voice Profile ID は既存の登録 ID を指定してください。参照整合性と周波数重複は Server 側でも検証されます。"
+          }
         />
       </div>
     </SettingsSection>

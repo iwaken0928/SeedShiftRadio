@@ -11,6 +11,7 @@ import {
   type PlaybackEventRequest,
   type ProgramTemplateDetail,
   type ProgramTemplateSummary,
+  type ProgramTemplateUpdateRequest,
   type ProgrammingPreviewRequest,
   type ProgrammingPreviewResponse,
   type StationProgrammingResponse,
@@ -153,6 +154,22 @@ export function listProgramTemplates() {
 export function getProgramTemplate(templateId: string) {
   return requestJson<ProgramTemplateDetail>(`/api/program-templates/${encodeURIComponent(templateId)}`, {
     headers: withAdminHeaders(),
+  });
+}
+
+export function createProgramTemplate(body: ProgramTemplateUpdateRequest) {
+  return requestJson<ProgramTemplateDetail>("/api/program-templates", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: withAdminHeaders({ "Content-Type": "application/json" }),
+  });
+}
+
+export function updateProgramTemplate(templateId: string, body: ProgramTemplateUpdateRequest) {
+  return requestJson<ProgramTemplateDetail>(`/api/program-templates/${encodeURIComponent(templateId)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+    headers: withAdminHeaders({ "Content-Type": "application/json" }),
   });
 }
 

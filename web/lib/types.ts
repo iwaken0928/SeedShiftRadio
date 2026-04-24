@@ -117,6 +117,20 @@ export interface ProgramTemplateSummary {
   fallbackTemplateId: string | null;
 }
 
+export interface ProgramTemplateUpdateRequest {
+  id: string;
+  scope: string;
+  stationId: string | null;
+  name: string;
+  version: number;
+  targetDurationMinutes: number;
+  planningHorizonMinutes: number;
+  isActive: boolean;
+  editorialPolicy: Record<string, unknown>;
+  fallbackTemplateId: string | null;
+  slots: ProgramTemplateSlot[];
+}
+
 export interface ProgramTemplateDetail extends ProgramTemplateSummary {
   editorialPolicy: Record<string, unknown>;
   slots: ProgramTemplateSlot[];

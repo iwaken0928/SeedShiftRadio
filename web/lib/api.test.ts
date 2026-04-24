@@ -3,11 +3,13 @@ import {
   buildApiUrl,
   buildLettersPath,
   buildNextSpeechDirectivePath,
+  createProgramTemplate,
   createStation,
   listLetters,
   mergeAdminHeaders,
   requestJson,
   safeReadError,
+  updateProgramTemplate,
   updateStation,
   updateStationProgramming,
 } from "@/lib/api";
@@ -289,6 +291,178 @@ describe("api helpers", () => {
     await createStation(body);
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations", {
+      cache: "no-store",
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Admin-Token": "admin-token",
+      },
+    });
+  });
+
+  it("updateProgramTemplate は admin token と JSON body を付けて PUT する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "tmpl-night-deep",
+          scope: "STATION",
+          stationId: "station-night",
+          name: "深夜ロングトーク",
+          version: 4,
+          targetDurationMinutes: 25,
+          planningHorizonMinutes: 18,
+          isActive: true,
+          editorialPolicy: {
+            tone: "calm",
+            topics: ["night", "coding"],
+          },
+          fallbackTemplateId: "tmpl-night-regular",
+          slots: [
+            {
+              slotId: "open",
+              role: "OPENING",
+              constraintMode: "HARD",
+              candidateSegmentTypes: ["JINGLE", "TALK"],
+              fallbackSegmentTypes: ["TALK"],
+              targetDurationMs: 30000,
+              slotPolicy: { allowArchiveReplay: false },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const body: Parameters<typeof updateProgramTemplate>[1] = {
+      id: "tmpl-night-deep",
+      scope: "STATION",
+      stationId: "station-night",
+      name: "深夜ロングトーク",
+      version: 3,
+      targetDurationMinutes: 25,
+      planningHorizonMinutes: 18,
+      isActive: true,
+      editorialPolicy: {
+        tone: "calm",
+        topics: ["night", "coding"],
+      },
+      fallbackTemplateId: "tmpl-night-regular",
+      slots: [
+        {
+          slotId: "open",
+          role: "OPENING",
+          constraintMode: "HARD",
+          candidateSegmentTypes: ["JINGLE", "TALK"],
+          fallbackSegmentTypes: ["TALK"],
+          targetDurationMs: 30000,
+          slotPolicy: { allowArchiveReplay: false },
+        },
+        {
+          slotId: "letter-main",
+          role: "LETTER",
+          constraintMode: "SOFT",
+          candidateSegmentTypes: ["LETTER", "TALK"],
+          fallbackSegmentTypes: ["TALK"],
+          targetDurationMs: 120000,
+          slotPolicy: { preferFreshGeneration: true },
+        },
+      ],
+    };
+
+    await updateProgramTemplate("tmpl/night/deep", body);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/program-templates/tmpl%2Fnight%2Fdeep", {
+      cache: "no-store",
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Admin-Token": "admin-token",
+      },
+    });
+  });
+
+  it("createProgramTemplate は admin token と JSON body を付けて POST する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "tmpl-global-morning",
+          scope: "GLOBAL",
+          stationId: null,
+          name: "朝のテンポ番組",
+          version: 1,
+          targetDurationMinutes: 15,
+          planningHorizonMinutes: 10,
+          isActive: true,
+          editorialPolicy: {
+            energy: "bright",
+            topicTags: ["morning", "news-lite"],
+          },
+          fallbackTemplateId: null,
+          slots: [
+            {
+              slotId: "open",
+              role: "OPENING",
+              constraintMode: "HARD",
+              candidateSegmentTypes: ["JINGLE", "TALK"],
+              fallbackSegmentTypes: ["TALK"],
+              targetDurationMs: 15000,
+              slotPolicy: { preferFreshGeneration: true },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const body: Parameters<typeof createProgramTemplate>[0] = {
+      id: "tmpl-global-morning",
+      scope: "GLOBAL",
+      stationId: null,
+      name: "朝のテンポ番組",
+      version: 0,
+      targetDurationMinutes: 15,
+      planningHorizonMinutes: 10,
+      isActive: true,
+      editorialPolicy: {
+        energy: "bright",
+        topicTags: ["morning", "news-lite"],
+      },
+      fallbackTemplateId: null,
+      slots: [
+        {
+          slotId: "open",
+          role: "OPENING",
+          constraintMode: "HARD",
+          candidateSegmentTypes: ["JINGLE", "TALK"],
+          fallbackSegmentTypes: ["TALK"],
+          targetDurationMs: 15000,
+          slotPolicy: { preferFreshGeneration: true },
+        },
+        {
+          slotId: "music-break",
+          role: "MUSIC_BREAK",
+          constraintMode: "SOFT",
+          candidateSegmentTypes: ["MUSIC_LOCAL", "MUSIC_AI"],
+          fallbackSegmentTypes: ["JINGLE"],
+          targetDurationMs: 180000,
+          slotPolicy: { allowArchiveReplay: true },
+        },
+      ],
+    };
+
+    await createProgramTemplate(body);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/program-templates", {
       cache: "no-store",
       method: "POST",
       body: JSON.stringify(body),

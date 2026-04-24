@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createProgramTemplate,
   createStation,
   getProgramTemplate,
   getSettings,
@@ -12,6 +13,7 @@ import {
   listStations,
   previewProgramming,
   testConnections,
+  updateProgramTemplate,
   updateStation,
   updateStationProgramming,
   updateSettings,
@@ -20,12 +22,23 @@ import { getAdminToken } from "@/lib/env";
 import { formatSafeDisplayText, getSafeMetadataEntries } from "@/lib/safe-metadata";
 import { buildSettingsExportFilename, buildSettingsExportPayload, parseSettingsImportPayload } from "@/lib/settings-import-export";
 import { cloneStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
+import {
+  cloneProgramTemplateDraft,
+  createBlankProgramTemplateDraft,
+  createDefaultSlotDraft,
+  createDuplicatedProgramTemplateDraft,
+  createProgramTemplateDraftFromDetail,
+  serializeProgramTemplateDraft,
+  type ProgramTemplateEditorDraft,
+} from "@/lib/template-editor";
 import type {
+  ConstraintMode,
   ConnectionsTestResponse,
   ProgramTemplateDetail,
   ProgramTemplateSummary,
   ProgrammingPreviewRequest,
   ProgrammingPreviewResponse,
+  SegmentType,
   FeatureSettings,
   ProviderCatalog,
   ProviderEndpoint,
@@ -37,10 +50,11 @@ import type {
   StationResponse,
   StationProgrammingResponse,
   StationProgrammingUpdateRequest,
+  SlotRole,
   StationUpdateRequest,
   StationSummary,
 } from "@/lib/types";
-import { Badge, Button, Card, EmptyState, Input, Label, Metric, SectionHeader } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Input, Label, Metric, SectionHeader, Textarea } from "@/components/ui";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { useUiStore } from "@/stores/ui-store";
 
@@ -48,6 +62,9 @@ const REUSE_SCOPE_OPTIONS = ["DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIV
 const PRE_GENERATION_MODE_OPTIONS = ["REALTIME_ONLY", "ASSISTED", "AGGRESSIVE"] as const;
 const REPLAY_INTENSITY_OPTIONS = ["OFF", "LIGHT", "MEDIUM", "HEAVY"] as const;
 const SEGMENT_TYPE_OPTIONS = ["TALK", "LETTER", "JINGLE", "MUSIC_LOCAL", "MUSIC_AI"] as const;
+const TEMPLATE_SCOPE_OPTIONS = ["GLOBAL", "STATION"] as const;
+const SLOT_ROLE_OPTIONS = ["OPENING", "TOPIC", "LETTER", "MUSIC_BREAK", "ENDING"] as const;
+const CONSTRAINT_MODE_OPTIONS = ["HARD", "SOFT"] as const;
 const SHARE_KEYS = ["talk", "letter", "music", "jingle"] as const;
 const DAY_OPTIONS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
 const REQUIRED_PROVIDER_STATE_OPTIONS = [
@@ -87,6 +104,11 @@ export function SettingsDashboard() {
   const [stationCreateBaseDraft, setStationCreateBaseDraft] = useState<StationUpdateRequest | null>(null);
   const [stationCreateSourceId, setStationCreateSourceId] = useState<string | null>(null);
   const [stationNotice, setStationNotice] = useState<string | null>(null);
+  const [templateDraft, setTemplateDraft] = useState<ProgramTemplateEditorDraft | null>(null);
+  const [templateEditorMode, setTemplateEditorMode] = useState<"existing" | "create">("existing");
+  const [templateCreateBaseDraft, setTemplateCreateBaseDraft] = useState<ProgramTemplateEditorDraft | null>(null);
+  const [templateCreateSourceId, setTemplateCreateSourceId] = useState<string | null>(null);
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
   const [programmingDraft, setProgrammingDraft] = useState<StationProgrammingUpdateRequest | null>(null);
   const [programmingNotice, setProgrammingNotice] = useState<string | null>(null);
   const [previewDraft, setPreviewDraft] = useState(createPreviewDraft);
@@ -246,12 +268,74 @@ export function SettingsDashboard() {
       void queryClient.invalidateQueries({ queryKey: ["settings", "stations"] });
     },
   });
+  const applyTemplateSave = (saved: ProgramTemplateDetail, mode: "create" | "update") => {
+    queryClient.setQueryData<ProgramTemplateSummary[]>(["settings", "program-templates"], (current) => {
+      const nextTemplate = {
+        id: saved.id,
+        scope: saved.scope,
+        stationId: saved.stationId,
+        name: saved.name,
+        version: saved.version,
+        targetDurationMinutes: saved.targetDurationMinutes,
+        planningHorizonMinutes: saved.planningHorizonMinutes,
+        isActive: saved.isActive,
+        fallbackTemplateId: saved.fallbackTemplateId,
+      };
+
+      if (!current?.length) {
+        return [nextTemplate];
+      }
+      if (current.some((template) => template.id === saved.id)) {
+        return current.map((template) => (template.id === saved.id ? nextTemplate : template));
+      }
+      return [...current, nextTemplate];
+    });
+    queryClient.setQueryData(["settings", "program-template", saved.id], saved);
+    setTemplateDraft(createProgramTemplateDraftFromDetail(saved));
+    setTemplateEditorMode("existing");
+    setTemplateCreateBaseDraft(null);
+    setTemplateCreateSourceId(null);
+    setSelectedTemplateId(saved.id);
+    setTemplateNotice(
+      mode === "create"
+        ? "ProgramTemplate を作成しました。Preview は保存済み template / policy に対して実行されます。"
+        : "ProgramTemplate を保存しました。変更は実行中 block ではなく次の番組から反映されます。",
+    );
+    void queryClient.invalidateQueries({ queryKey: ["settings", "program-templates"] });
+    void queryClient.invalidateQueries({ queryKey: ["settings", "program-template", saved.id] });
+  };
+  const createTemplateMutation = useMutation({
+    mutationFn: createProgramTemplate,
+    onMutate: () => {
+      setTemplateNotice(null);
+    },
+    onSuccess: (saved) => {
+      applyTemplateSave(saved, "create");
+    },
+  });
+  const templateMutation = useMutation({
+    mutationFn: ({ templateId, body }: { templateId: string; body: ReturnType<typeof serializeProgramTemplateDraft> }) =>
+      updateProgramTemplate(templateId, body),
+    onMutate: () => {
+      setTemplateNotice(null);
+    },
+    onSuccess: (saved) => {
+      applyTemplateSave(saved, "update");
+    },
+  });
 
   const baseDraft = settingsQuery.data ? createDraft(settingsQuery.data) : null;
   const isDirty = baseDraft !== null && draft !== null && JSON.stringify(baseDraft) !== JSON.stringify(draft);
   const baseStationDraft =
     stationEditorMode === "create" ? stationCreateBaseDraft : stationDetailQuery.data ? createStationDraft(stationDetailQuery.data) : null;
   const isStationDirty = baseStationDraft !== null && stationDraft !== null && JSON.stringify(baseStationDraft) !== JSON.stringify(stationDraft);
+  const baseTemplateDraft =
+    templateEditorMode === "create"
+      ? templateCreateBaseDraft
+      : templateDetailQuery.data
+        ? createProgramTemplateDraftFromDetail(templateDetailQuery.data)
+        : null;
+  const isTemplateDirty = baseTemplateDraft !== null && templateDraft !== null && JSON.stringify(baseTemplateDraft) !== JSON.stringify(templateDraft);
   const baseProgrammingDraft = stationProgrammingQuery.data ? createProgrammingDraft(stationProgrammingQuery.data) : null;
   const isProgrammingDirty =
     baseProgrammingDraft !== null && programmingDraft !== null && JSON.stringify(baseProgrammingDraft) !== JSON.stringify(programmingDraft);
@@ -328,6 +412,9 @@ export function SettingsDashboard() {
   }, [selectedStationId, setSelectedStationId, stationEditorMode, stationsQuery.data]);
 
   useEffect(() => {
+    if (templateEditorMode === "create") {
+      return;
+    }
     if (!templatesQuery.data?.length) {
       setSelectedTemplateId(null);
       return;
@@ -339,7 +426,7 @@ export function SettingsDashboard() {
       (selectedStationId ? templatesQuery.data.find((template) => template.stationId === selectedStationId) : undefined) ??
       templatesQuery.data[0];
     setSelectedTemplateId(preferredTemplate.id);
-  }, [selectedStationId, selectedTemplateId, templatesQuery.data]);
+  }, [selectedStationId, selectedTemplateId, templateEditorMode, templatesQuery.data]);
 
   useEffect(() => {
     setProgrammingDraft(stationProgrammingQuery.data ? createProgrammingDraft(stationProgrammingQuery.data) : null);
@@ -351,6 +438,13 @@ export function SettingsDashboard() {
     }
     setStationDraft(stationDetailQuery.data ? createStationDraft(stationDetailQuery.data) : null);
   }, [stationDetailQuery.data, stationEditorMode]);
+
+  useEffect(() => {
+    if (templateEditorMode === "create") {
+      return;
+    }
+    setTemplateDraft(templateDetailQuery.data ? createProgramTemplateDraftFromDetail(templateDetailQuery.data) : null);
+  }, [templateDetailQuery.data, templateEditorMode]);
 
   useEffect(() => {
     setProgrammingNotice(null);
@@ -401,6 +495,55 @@ export function SettingsDashboard() {
         : (stationsQuery.data?.[0]?.id ?? null);
     setSelectedStationId(fallbackStationId);
     setStationCreateSourceId(null);
+  };
+
+  const startBlankTemplateDraft = () => {
+    const nextDraft = createBlankProgramTemplateDraft(selectedStationId);
+    setTemplateEditorMode("create");
+    setTemplateCreateBaseDraft(cloneProgramTemplateDraft(nextDraft));
+    setTemplateCreateSourceId(selectedTemplateId);
+    setTemplateDraft(nextDraft);
+    setSelectedTemplateId(null);
+    setTemplateNotice(
+      selectedStationId
+        ? "新規 template draft を作成しました。選択中 station に紐づく STATION scope で開始しています。"
+        : "新規 template draft を作成しました。GLOBAL scope から始めています。",
+    );
+    createTemplateMutation.reset();
+    templateMutation.reset();
+  };
+
+  const startDuplicatedTemplateDraft = () => {
+    if (!templateDetailQuery.data) {
+      return;
+    }
+    const nextDraft = createDuplicatedProgramTemplateDraft(templateDetailQuery.data, templatesQuery.data ?? []);
+    setTemplateEditorMode("create");
+    setTemplateCreateBaseDraft(cloneProgramTemplateDraft(nextDraft));
+    setTemplateCreateSourceId(selectedTemplateId);
+    setTemplateDraft(nextDraft);
+    setSelectedTemplateId(null);
+    setTemplateNotice("選択中 template を複製した新規 draft を作成しました。slot 構成と policy は保持し、template ID は新規候補へ補正しています。");
+    createTemplateMutation.reset();
+    templateMutation.reset();
+  };
+
+  const cancelTemplateDraft = () => {
+    setTemplateEditorMode("existing");
+    setTemplateCreateBaseDraft(null);
+    setTemplateDraft(null);
+    createTemplateMutation.reset();
+    templateMutation.reset();
+    setTemplateNotice("新規 template draft を閉じました。");
+    const preferredTemplateId =
+      templateCreateSourceId && templatesQuery.data?.some((template) => template.id === templateCreateSourceId)
+        ? templateCreateSourceId
+        : ((selectedStationId
+            ? templatesQuery.data?.find((template) => template.stationId === selectedStationId)?.id
+            : null) ??
+          (templatesQuery.data?.[0]?.id ?? null));
+    setSelectedTemplateId(preferredTemplateId);
+    setTemplateCreateSourceId(null);
   };
 
   if (!hasAdminToken) {
@@ -881,10 +1024,54 @@ export function SettingsDashboard() {
         />
 
         <ProgramTemplateCard
+          stations={stationsQuery.data ?? []}
           templates={templatesQuery.data ?? []}
+          isCreatingTemplate={templateEditorMode === "create"}
           selectedTemplateId={selectedTemplateId}
           template={templateDetailQuery.data}
-          onSelectTemplate={setSelectedTemplateId}
+          draft={templateDraft}
+          isDirty={isTemplateDirty}
+          isSaving={templateMutation.isPending || createTemplateMutation.isPending}
+          notice={templateNotice}
+          error={createTemplateMutation.error ?? templateMutation.error}
+          onSelectTemplate={(templateId) => {
+            if (!templateId) {
+              if (templateEditorMode !== "create") {
+                startBlankTemplateDraft();
+              }
+              return;
+            }
+            setTemplateEditorMode("existing");
+            setTemplateCreateBaseDraft(null);
+            setTemplateCreateSourceId(null);
+            setSelectedTemplateId(templateId);
+            createTemplateMutation.reset();
+            templateMutation.reset();
+          }}
+          onStartCreateTemplate={startBlankTemplateDraft}
+          onDuplicateTemplate={startDuplicatedTemplateDraft}
+          onCancelCreateTemplate={cancelTemplateDraft}
+          onDraftChange={setTemplateDraft}
+          onReset={() => {
+            if (templateEditorMode === "create" && templateCreateBaseDraft) {
+              setTemplateDraft(cloneProgramTemplateDraft(templateCreateBaseDraft));
+              setTemplateNotice("新規 template draft の変更を破棄しました。");
+            } else if (templateDetailQuery.data) {
+              setTemplateDraft(createProgramTemplateDraftFromDetail(templateDetailQuery.data));
+              setTemplateNotice("未保存の template 変更を破棄しました。");
+            }
+          }}
+          onSave={() => {
+            if (!templateDraft) {
+              return;
+            }
+            const body = serializeProgramTemplateDraft(templateDraft);
+            if (templateEditorMode === "create") {
+              createTemplateMutation.mutate(body);
+            } else if (selectedTemplateId) {
+              templateMutation.mutate({ templateId: selectedTemplateId, body });
+            }
+          }}
         />
       </PanelColumn>
 
@@ -1468,6 +1655,44 @@ function toggleStringList<T extends string>(values: readonly T[], value: T, chec
 
 function isTemplateUsableForStation(template: ProgramTemplateSummary, stationId: string) {
   return template.scope === "GLOBAL" || (template.scope === "STATION" && template.stationId === stationId);
+}
+
+function isTemplateUsableForDraft(template: ProgramTemplateSummary, draft: Pick<ProgramTemplateEditorDraft, "scope" | "stationId">) {
+  if (draft.scope === "GLOBAL") {
+    return template.scope === "GLOBAL";
+  }
+  return template.scope === "GLOBAL" || (template.scope === "STATION" && template.stationId === draft.stationId);
+}
+
+function suggestSlotId(slots: ProgramTemplateEditorDraft["slots"]) {
+  const usedIds = new Set(slots.map((slot) => slot.slotId.trim()).filter(Boolean));
+  if (!usedIds.has("slot")) {
+    return "slot";
+  }
+  for (let index = 2; index <= 100; index += 1) {
+    const candidate = `slot-${index}`;
+    if (!usedIds.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `slot-${Date.now()}`;
+}
+
+function getJsonObjectValidationMessage(value: string, label: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      return `${label} は JSON object で指定してください。`;
+    }
+    return null;
+  } catch {
+    return `${label} は JSON object で指定してください。`;
+  }
 }
 
 function formatTimestamp(value: string) {
@@ -2253,103 +2478,444 @@ function StationProgrammingPolicyEditor({
 }
 
 function ProgramTemplateCard({
+  stations,
   templates,
+  isCreatingTemplate,
   selectedTemplateId,
   template,
+  draft,
+  isDirty,
+  isSaving,
+  notice,
+  error,
   onSelectTemplate,
+  onStartCreateTemplate,
+  onDuplicateTemplate,
+  onCancelCreateTemplate,
+  onDraftChange,
+  onReset,
+  onSave,
 }: {
+  stations: StationSummary[];
   templates: ProgramTemplateSummary[];
+  isCreatingTemplate: boolean;
   selectedTemplateId: string | null;
   template?: ProgramTemplateDetail;
+  draft: ProgramTemplateEditorDraft | null;
+  isDirty: boolean;
+  isSaving: boolean;
+  notice: string | null;
+  error: unknown;
   onSelectTemplate: (templateId: string | null) => void;
+  onStartCreateTemplate: () => void;
+  onDuplicateTemplate: () => void;
+  onCancelCreateTemplate: () => void;
+  onDraftChange: Dispatch<SetStateAction<ProgramTemplateEditorDraft | null>>;
+  onReset: () => void;
+  onSave: () => void;
 }) {
+  const updateDraft = (updater: (current: ProgramTemplateEditorDraft) => ProgramTemplateEditorDraft) => {
+    onDraftChange((current) => (current ? updater(current) : current));
+  };
+
+  const fallbackOptions = draft ? templates.filter((entry) => isTemplateUsableForDraft(entry, draft) && entry.id !== draft.id.trim()) : [];
+  const duplicateSlotIds = new Set(
+    (draft?.slots ?? [])
+      .map((slot) => slot.slotId.trim())
+      .filter((slotId, index, array) => slotId.length > 0 && array.indexOf(slotId) !== index),
+  );
+  const validationMessages = draft
+    ? [
+        draft.id.trim().length === 0 ? "Template ID は必須です。" : null,
+        draft.name.trim().length === 0 ? "Template 名は必須です。" : null,
+        draft.scope === "STATION" && !draft.stationId ? "STATION scope の場合は station を選択してください。" : null,
+        draft.scope === "STATION" && draft.stationId && !stations.some((station) => station.id === draft.stationId)
+          ? "選択した stationId が存在しません。"
+          : null,
+        draft.targetDurationMinutes < 1 ? "targetDurationMinutes は 1 以上で指定してください。" : null,
+        draft.planningHorizonMinutes < 1 ? "planningHorizonMinutes は 1 以上で指定してください。" : null,
+        draft.fallbackTemplateId && draft.fallbackTemplateId === draft.id.trim() ? "fallbackTemplateId に自分自身は指定できません。" : null,
+        getJsonObjectValidationMessage(draft.editorialPolicyText, "Editorial Policy"),
+        draft.slots.length === 0 ? "slot は 1 件以上必要です。" : null,
+        draft.slots.some((slot) => slot.slotId.trim().length === 0) ? "各 slot に slotId が必要です。" : null,
+        duplicateSlotIds.size > 0 ? `slotId は一意にしてください。重複: ${Array.from(duplicateSlotIds).join(", ")}` : null,
+        draft.slots.some((slot) => slot.targetDurationMs < 1_000) ? "slot の targetDurationMs は 1000ms 以上で指定してください。" : null,
+        draft.slots.some((slot) => slot.candidateSegmentTypes.length === 0) ? "各 slot で candidateSegmentTypes を 1 件以上選択してください。" : null,
+        ...draft.slots.map((slot) => getJsonObjectValidationMessage(slot.slotPolicyText, `Slot Policy (${slot.slotId.trim() || "new slot"})`)),
+      ].filter((message): message is string => Boolean(message))
+    : [];
+
+  const addSlot = () => {
+    updateDraft((current) => ({
+      ...current,
+      slots: [
+        ...current.slots,
+        {
+          ...createDefaultSlotDraft(),
+          slotId: suggestSlotId(current.slots),
+        },
+      ],
+    }));
+  };
+
+  const updateSlot = (
+    index: number,
+    updater: (slot: ProgramTemplateEditorDraft["slots"][number]) => ProgramTemplateEditorDraft["slots"][number],
+  ) => {
+    updateDraft((current) => ({
+      ...current,
+      slots: current.slots.map((slot, slotIndex) => (slotIndex === index ? updater(slot) : slot)),
+    }));
+  };
+
+  const removeSlot = (index: number) => {
+    updateDraft((current) => ({
+      ...current,
+      slots: current.slots.filter((_, slotIndex) => slotIndex !== index),
+    }));
+  };
+
   return (
     <Card className="mt-4">
       <SectionHeader
         eyebrow="Templates"
         title="Program templates"
-        description="番組テンプレートの一覧と slot 構成を読み取り専用で確認します。"
+        description="ProgramTemplate の作成・複製・編集を行います。Preview は保存済み template / policy に対して実行され、実行中 block ではなく次の番組から反映されます。"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" tone="secondary" onClick={onStartCreateTemplate}>
+              New Template
+            </Button>
+            <Button type="button" tone="ghost" onClick={onDuplicateTemplate} disabled={!template}>
+              Duplicate Current
+            </Button>
+            {isCreatingTemplate ? (
+              <Button type="button" tone="ghost" onClick={onCancelCreateTemplate}>
+                Close Draft
+              </Button>
+            ) : null}
+          </div>
+        }
       />
-      {!templates.length ? (
-        <EmptyState title="Program Template はまだありません" description="`/api/program-templates` の一覧がここに表示されます。" />
-      ) : (
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="program-template-select">Template</Label>
-            <select
-              id="program-template-select"
-              className={SELECT_CLASS_NAME}
-              value={selectedTemplateId ?? ""}
-              onChange={(event) => onSelectTemplate(event.currentTarget.value || null)}
-            >
-              {templates.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name} ({entry.scope})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid gap-3">
+      <div className="space-y-4">
+        <div>
+          <Label htmlFor="program-template-select">Template</Label>
+          <select
+            id="program-template-select"
+            className={SELECT_CLASS_NAME}
+            value={isCreatingTemplate ? "" : (selectedTemplateId ?? "")}
+            onChange={(event) => onSelectTemplate(event.currentTarget.value || null)}
+          >
+            {isCreatingTemplate ? <option value="">Draft new template</option> : null}
             {templates.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={() => onSelectTemplate(entry.id)}
-                className={`rounded-2xl border px-4 py-3 text-left transition ${
-                  entry.id === selectedTemplateId ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-800"
-                }`}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="font-semibold">{entry.name}</div>
-                  <Badge tone={entry.isActive ? "success" : "warning"}>{entry.isActive ? "ACTIVE" : "INACTIVE"}</Badge>
-                  <Badge tone="default">{entry.scope}</Badge>
-                </div>
-                <div className="mt-1 text-sm opacity-80">
-                  {entry.stationId ?? "GLOBAL"} / {entry.targetDurationMinutes} min / horizon {entry.planningHorizonMinutes} min
-                </div>
-              </button>
+              <option key={entry.id} value={entry.id}>
+                {entry.name} ({entry.scope})
+              </option>
             ))}
-          </div>
-          {template ? (
-            <div className="space-y-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-lg font-semibold text-slate-950">{template.name}</div>
-                <Badge tone="accent">v{template.version}</Badge>
-                {template.fallbackTemplateId ? <Badge tone="default">fallback: {template.fallbackTemplateId}</Badge> : null}
-              </div>
-              <KeyValueGrid
-                title="Template facts"
-                entries={[
-                  ["Scope", template.scope],
-                  ["Station", template.stationId ?? "GLOBAL"],
-                  ["Target Duration", `${template.targetDurationMinutes} min`],
-                  ["Planning Horizon", `${template.planningHorizonMinutes} min`],
-                ]}
-              />
-              <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slots</div>
-                {template.slots.map((slot) => (
-                  <div key={slot.slotId} className="rounded-2xl bg-white px-4 py-3">
+          </select>
+        </div>
+
+        {!templates.length && !isCreatingTemplate ? (
+          <EmptyState title="Program Template はまだありません" description="`New Template` から最初の template を作成できます。" />
+        ) : (
+          <>
+            <div className="grid gap-3">
+              {templates.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => onSelectTemplate(entry.id)}
+                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    entry.id === selectedTemplateId && !isCreatingTemplate
+                      ? "border-slate-950 bg-slate-950 text-white"
+                      : "border-slate-200 bg-white/80 text-slate-800"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-semibold">{entry.name}</div>
+                    <Badge tone={entry.isActive ? "success" : "warning"}>{entry.isActive ? "ACTIVE" : "INACTIVE"}</Badge>
+                    <Badge tone="default">{entry.scope}</Badge>
+                    <Badge tone="accent">v{entry.version}</Badge>
+                  </div>
+                  <div className="mt-1 text-sm opacity-80">
+                    {entry.stationId ?? "GLOBAL"} / {entry.targetDurationMinutes} min / horizon {entry.planningHorizonMinutes} min
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {draft ? (
+              <div className="space-y-4">
+                {isCreatingTemplate ? (
+                  <InlineNotice
+                    tone="accent"
+                    message="新規 template draft を編集中です。保存後に一覧へ追加され、station programming policy から参照できます。"
+                  />
+                ) : null}
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <Metric label="Scope" value={draft.scope} />
+                  <Metric label="Station" value={draft.scope === "STATION" ? draft.stationId ?? "-" : "GLOBAL"} />
+                  <Metric label="Version" value={isCreatingTemplate ? "new draft" : `v${draft.version}`} tone="accent" />
+                  <Metric label="Slots" value={draft.slots.length} />
+                </div>
+
+                <SettingsSection
+                  title="Template Editor"
+                  description="Template 本体を編集します。scope / station / fallback の整合は保存前に確認し、Preview は保存済み template に対して実行してください。"
+                >
+                  <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-semibold text-slate-950">{slot.slotId}</div>
-                      <Badge tone="default">{slot.role}</Badge>
-                      <Badge tone={slot.constraintMode === "HARD" ? "danger" : "accent"}>{slot.constraintMode}</Badge>
+                      <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "Unsaved template changes" : "Template saved"}</Badge>
+                      <Badge tone="accent">{isCreatingTemplate ? "new template draft" : `template version ${draft.version}`}</Badge>
+                      <Button type="button" tone="ghost" onClick={onReset} disabled={!isDirty || isSaving}>
+                        {isCreatingTemplate ? "Reset Draft" : "Reset Template"}
+                      </Button>
+                      <Button type="button" tone="primary" onClick={onSave} disabled={!isDirty || isSaving || validationMessages.length > 0}>
+                        {isSaving
+                          ? isCreatingTemplate
+                            ? "Creating template..."
+                            : "Saving template..."
+                          : isCreatingTemplate
+                            ? "Create Template"
+                            : "Save Template"}
+                      </Button>
                     </div>
-                    <div className="mt-2 text-sm text-slate-600">
-                      candidate: {formatSegmentTypes(slot.candidateSegmentTypes)} / fallback: {formatSegmentTypes(slot.fallbackSegmentTypes)}
+
+                    {notice ? <InlineNotice tone="accent" message={notice} /> : null}
+                    {error instanceof Error ? <InlineNotice tone="danger" message={formatSafeDisplayText(error.message)} /> : null}
+                    {validationMessages.map((message) => (
+                      <InlineNotice key={message} tone="warning" message={message} />
+                    ))}
+                    <InlineNotice
+                      tone="warning"
+                      message="Template 変更は次の ProgramBlock から反映されます。Preview は未保存 draft を直接評価せず、保存済み template / policy を対象にします。"
+                    />
+
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div>
+                        <Label htmlFor="template-id">Template ID</Label>
+                        <Input
+                          id="template-id"
+                          value={draft.id}
+                          readOnly={!isCreatingTemplate}
+                          className={!isCreatingTemplate ? "cursor-not-allowed bg-slate-100 text-slate-500" : undefined}
+                          onChange={(event) => updateDraft((current) => ({ ...current, id: event.currentTarget.value }))}
+                        />
+                      </div>
+                      <TextField
+                        id="template-name"
+                        label="Template Name"
+                        value={draft.name}
+                        onChange={(value) => updateDraft((current) => ({ ...current, name: value }))}
+                      />
+                      <SelectField
+                        id="template-scope"
+                        label="Scope"
+                        value={draft.scope}
+                        options={TEMPLATE_SCOPE_OPTIONS}
+                        onChange={(value) =>
+                          updateDraft((current) => ({
+                            ...current,
+                            scope: value,
+                            stationId: value === "STATION" ? current.stationId ?? stations[0]?.id ?? null : null,
+                          }))
+                        }
+                      />
+                      {draft.scope === "STATION" ? (
+                        <div>
+                          <Label htmlFor="template-station">Station</Label>
+                          <select
+                            id="template-station"
+                            className={SELECT_CLASS_NAME}
+                            value={draft.stationId ?? ""}
+                            onChange={(event) => updateDraft((current) => ({ ...current, stationId: event.currentTarget.value || null }))}
+                          >
+                            <option value="">Select station</option>
+                            {stations.map((station) => (
+                              <option key={station.id} value={station.id}>
+                                {station.name} ({station.id})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <Metric label="Station Scope" value="GLOBAL template" />
+                      )}
+                      <NumberField
+                        id="template-duration"
+                        label="Target Duration (min)"
+                        value={draft.targetDurationMinutes}
+                        min={1}
+                        onChange={(value) => updateDraft((current) => ({ ...current, targetDurationMinutes: value }))}
+                      />
+                      <NumberField
+                        id="template-horizon"
+                        label="Planning Horizon (min)"
+                        value={draft.planningHorizonMinutes}
+                        min={1}
+                        onChange={(value) => updateDraft((current) => ({ ...current, planningHorizonMinutes: value }))}
+                      />
+                      <div>
+                        <Label htmlFor="template-fallback">Fallback Template</Label>
+                        <select
+                          id="template-fallback"
+                          className={SELECT_CLASS_NAME}
+                          value={draft.fallbackTemplateId ?? ""}
+                          onChange={(event) => updateDraft((current) => ({ ...current, fallbackTemplateId: event.currentTarget.value || null }))}
+                        >
+                          <option value="">No fallback template</option>
+                          {fallbackOptions.map((entry) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.name} ({entry.id})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <CheckboxField
+                        id="template-active"
+                        label="Template Active"
+                        checked={draft.isActive}
+                        description="無効にすると template resolver の候補から外します。"
+                        onChange={(checked) => updateDraft((current) => ({ ...current, isActive: checked }))}
+                      />
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      target: {formatDurationMs(slot.targetDurationMs)} / policy: {formatJson(slot.slotPolicy)}
+
+                    <div>
+                      <Label htmlFor="template-editorial-policy">Editorial Policy (JSON object)</Label>
+                      <Textarea
+                        id="template-editorial-policy"
+                        rows={8}
+                        value={draft.editorialPolicyText}
+                        onChange={(event) => updateDraft((current) => ({ ...current, editorialPolicyText: event.currentTarget.value }))}
+                      />
                     </div>
                   </div>
-                ))}
+                </SettingsSection>
+
+                <SettingsSection
+                  title="Slot Editor"
+                  description="slot の順序がそのまま保存順になります。HARD は強く守る構成、SOFT は fallback と尺調整を許す構成として扱います。"
+                >
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone="accent">slot order = save order</Badge>
+                        <Badge tone="warning">HARD / SOFT は runtime と preview の見え方が完全一致ではありません</Badge>
+                      </div>
+                      <Button type="button" tone="ghost" onClick={addSlot}>
+                        Add Slot
+                      </Button>
+                    </div>
+                    {draft.slots.length ? (
+                      draft.slots.map((slot, index) => (
+                        <div key={`${slot.slotId || "slot"}-${index}`} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge tone="accent">Slot {index + 1}</Badge>
+                              <Badge tone="default">{slot.role}</Badge>
+                              <Badge tone={slot.constraintMode === "HARD" ? "danger" : "accent"}>{slot.constraintMode}</Badge>
+                            </div>
+                            <Button type="button" tone="danger" onClick={() => removeSlot(index)}>
+                              Remove
+                            </Button>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <TextField
+                              id={`template-slot-id-${index}`}
+                              label="Slot ID"
+                              value={slot.slotId}
+                              onChange={(value) => updateSlot(index, (current) => ({ ...current, slotId: value }))}
+                            />
+                            <SelectField
+                              id={`template-slot-role-${index}`}
+                              label="Role"
+                              value={slot.role}
+                              options={SLOT_ROLE_OPTIONS}
+                              onChange={(value) => updateSlot(index, (current) => ({ ...current, role: value as SlotRole }))}
+                            />
+                            <SelectField
+                              id={`template-slot-constraint-${index}`}
+                              label="Constraint"
+                              value={slot.constraintMode}
+                              options={CONSTRAINT_MODE_OPTIONS}
+                              onChange={(value) => updateSlot(index, (current) => ({ ...current, constraintMode: value as ConstraintMode }))}
+                            />
+                            <NumberField
+                              id={`template-slot-duration-${index}`}
+                              label="Target Duration (ms)"
+                              value={slot.targetDurationMs}
+                              min={1000}
+                              step={1000}
+                              onChange={(value) => updateSlot(index, (current) => ({ ...current, targetDurationMs: value }))}
+                            />
+                          </div>
+
+                          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                            <div>
+                              <SegmentCheckboxes
+                                idPrefix={`template-slot-candidate-${index}`}
+                                selected={slot.candidateSegmentTypes}
+                                onChange={(segmentType, checked) =>
+                                  updateSlot(index, (current) => ({
+                                    ...current,
+                                    candidateSegmentTypes: toggleStringList(current.candidateSegmentTypes, segmentType as SegmentType, checked),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div>
+                              <CheckboxGroup
+                                title="Fallback Segments"
+                                idPrefix={`template-slot-fallback-${index}`}
+                                options={SEGMENT_TYPE_OPTIONS}
+                                selected={slot.fallbackSegmentTypes}
+                                onChange={(segmentType, checked) =>
+                                  updateSlot(index, (current) => ({
+                                    ...current,
+                                    fallbackSegmentTypes: toggleStringList(current.fallbackSegmentTypes, segmentType as SegmentType, checked),
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          <div className="mt-4">
+                            <Label htmlFor={`template-slot-policy-${index}`}>Slot Policy (JSON object)</Label>
+                            <Textarea
+                              id={`template-slot-policy-${index}`}
+                              rows={6}
+                              value={slot.slotPolicyText}
+                              onChange={(event) => updateSlot(index, (current) => ({ ...current, slotPolicyText: event.currentTarget.value }))}
+                            />
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <EmptyState title="slot はまだありません" description="保存するには `Add Slot` から少なくとも 1 件追加してください。" />
+                    )}
+                  </div>
+                </SettingsSection>
+
+                {!isCreatingTemplate && template ? (
+                  <KeyValueGrid
+                    title="Saved Template Facts"
+                    entries={[
+                      ["Scope", template.scope],
+                      ["Station", template.stationId ?? "GLOBAL"],
+                      ["Fallback", template.fallbackTemplateId ?? "-"],
+                      ["Saved Slots", template.slots.length],
+                    ]}
+                  />
+                ) : null}
               </div>
-            </div>
-          ) : (
-            <EmptyState title="テンプレート詳細を取得できません" description="一覧からテンプレートを選ぶと slot 構成を確認できます。" />
-          )}
-        </div>
-      )}
+            ) : (
+              <EmptyState title="テンプレート詳細を取得できません" description="template を選択するか、`New Template` から新規 draft を作成してください。" />
+            )}
+          </>
+        )}
+      </div>
     </Card>
   );
 }

@@ -111,6 +111,7 @@
 - station 基本情報編集では `PUT /api/stations/{id}` を使い、局 ID は読み取り専用、`version` 楽観ロック、dirty/reset/save、必須項目、周波数下限を UI でも確認する
 - station 作成/複製では create mode を別に持ち、`POST /api/stations` を使う。create mode では局 ID を編集可能にし、保存後は新 station を選択状態へ切り替える
 - station 複製は局基本情報だけを初期値として引き継ぎ、`id` と `frequencyMHz` は新規候補へ補正する。`STATION` scope template を指す `defaultProgramTemplateId` や policy/rules は自動複製せず、保存後に policy editor で調整する
+- station create/duplicate draft に未保存変更があるまま `Close Draft`、`New Station`、`Duplicate Current`、station 切り替えを行う時は、破棄確認を出して accidental discard を防ぐ
 - 局ごとの番組編成設定では `preGeneration`, `replay`, `composition` を 1 画面で編集できるようにし、再放送比率と番組構成比は slider と数値入力の両方を許容する
 - 局ごとの番組編成 policy 編集では `GET/PUT /api/stations/{id}/programming` を使い、`version` 楽観ロック、dirty 表示、composition 合計 100%、enabled 時 rules 必須、Replay の LETTER 除外を UI でも確認する
 - `Cache` セクションでは script / TTS / music の保持上限サイズ、保存日数、再利用範囲を個別に確認できるようにする

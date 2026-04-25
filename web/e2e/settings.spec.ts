@@ -52,6 +52,100 @@ test("settings: existing station programming policy save", async ({ page }) => {
   await expect(stationPanel).toContainText("番組編成ポリシーを保存しました。");
 });
 
+test("settings: station create draft -> save and select new station", async ({ page }) => {
+  const state = createSettingsState();
+  const stationCreateRequests: RequestCapture[] = [];
+
+  await installSettingsRoutes(page, state, { stationCreateRequests });
+  await page.goto(appUrl("/settings"));
+
+  const stationPanel = panelByHeading(page, "Station overview");
+
+  await stationPanel.getByRole("button", { name: "New Station", exact: true }).click();
+
+  await expect(stationPanel.locator("#settings-station-select")).toHaveValue("");
+  await expect(stationPanel.locator("#station-id")).toBeEditable();
+  await expect(stationPanel.locator("#programming-horizon")).toHaveCount(0);
+
+  await stationPanel.locator("#station-id").fill("station-dawn");
+  await stationPanel.locator("#station-name").fill("Dawn Wave");
+  await stationPanel.locator("#station-frequency").fill("80.0");
+  await stationPanel.locator("#station-genre").fill("Morning Talk");
+  await stationPanel.locator("#station-persona").fill("persona-dawn");
+  await stationPanel.locator("#station-voice").fill("voice-dawn");
+  await stationPanel.getByRole("button", { name: "Create Station", exact: true }).click();
+
+  await expect.poll(() => stationCreateRequests.length).toBe(1);
+  await expect(stationCreateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  await expect(stationCreateRequests[0]?.body).toMatchObject({
+    version: 0,
+    id: "station-dawn",
+    name: "Dawn Wave",
+    frequencyMHz: 80.0,
+    genre: "Morning Talk",
+    languagePersonaId: "persona-dawn",
+    defaultVoiceProfileId: "voice-dawn",
+    isActive: true,
+    programmingEnabled: false,
+    defaultProgramTemplateId: null,
+  });
+  await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-dawn");
+  await expect(stationPanel.locator("#station-id")).toHaveValue("station-dawn");
+  await expect(stationPanel.locator("#station-id")).not.toBeEditable();
+  await expect(stationPanel.locator("#programming-horizon")).toHaveValue("30");
+  await expect(stationPanel).toContainText("局を作成しました。");
+});
+
+test("settings: station duplicate draft strips station policy and can be closed", async ({ page }) => {
+  const state = createSettingsState();
+  const stationCreateRequests: RequestCapture[] = [];
+
+  await installSettingsRoutes(page, state, { stationCreateRequests });
+  await page.goto(appUrl("/settings"));
+
+  const stationPanel = panelByHeading(page, "Station overview");
+
+  await stationPanel.getByRole("button", { name: "Duplicate Current", exact: true }).click();
+
+  await expect(stationPanel.locator("#settings-station-select")).toHaveValue("");
+  await expect(stationPanel.locator("#station-id")).toHaveValue("station-night-copy");
+  await expect(stationPanel.locator("#station-name")).toHaveValue("Nocturne FM Copy");
+  await expect(stationPanel.locator("#station-frequency")).toHaveValue("76.2");
+  await expect(stationPanel.locator("#programming-horizon")).toHaveCount(0);
+
+  await stationPanel.locator("#station-name").fill("Nocturne FM Draft");
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("未保存の station 変更を破棄します。station draft のクローズを続行しますか？");
+    await dialog.accept();
+  });
+  await stationPanel.getByRole("button", { name: "Close Draft", exact: true }).click();
+  await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-night");
+  await expect(stationPanel.locator("#station-id")).toHaveValue("station-night");
+
+  await stationPanel.getByRole("button", { name: "Duplicate Current", exact: true }).click();
+  await stationPanel.locator("#station-id").fill("station-night-clone");
+  await stationPanel.locator("#station-name").fill("Nocturne FM Clone");
+  await stationPanel.getByRole("button", { name: "Create Station", exact: true }).click();
+
+  await expect.poll(() => stationCreateRequests.length).toBe(1);
+  await expect(stationCreateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  await expect(stationCreateRequests[0]?.body).toMatchObject({
+    version: 0,
+    id: "station-night-clone",
+    name: "Nocturne FM Clone",
+    frequencyMHz: 76.2,
+    genre: "Talk",
+    languagePersonaId: "persona-night",
+    defaultVoiceProfileId: "voice-night",
+    isActive: true,
+    programmingEnabled: false,
+    defaultProgramTemplateId: null,
+  });
+  await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-night-clone");
+  await expect(stationPanel.locator("#programming-horizon")).toHaveValue("30");
+  await expect(stationPanel).toContainText("局を作成しました。");
+});
+
 test("settings: ProgramTemplate duplicate draft -> update existing", async ({ page }) => {
   const state = createSettingsState();
   const templateUpdateRequests: RequestCapture[] = [];
@@ -152,19 +246,29 @@ async function installSettingsRoutes(
     captures.stationCreateRequests?.push({ body, headers: route.request().headers() });
 
     const stationId = String(body.id);
+    const defaultTemplateId = typeof body.defaultProgramTemplateId === "string" ? body.defaultProgramTemplateId : null;
+    const programmingEnabled = Boolean(body.programmingEnabled);
+    const programming = buildStationProgrammingResponse({
+      stationId,
+      version: 1,
+      enabled: programmingEnabled,
+      defaultTemplateId,
+      planningHorizonMinutes: 30,
+      rules: [],
+    });
     const stationDetail = buildStationDetail({
       ...body,
       id: stationId,
       version: 1,
-      programming: buildStationDetail().programming,
-    });
-    const programming = buildStationProgrammingResponse({
-      stationId,
-      version: 1,
-      enabled: false,
-      defaultTemplateId: null,
-      planningHorizonMinutes: 30,
-      rules: [],
+      programming: {
+        enabled: programming.enabled,
+        defaultTemplateId: programming.defaultTemplateId,
+        fallbackStrategy: programming.fallbackStrategy,
+        planningHorizonMinutes: programming.planningHorizonMinutes,
+        preGeneration: programming.preGeneration,
+        replay: programming.replay,
+        composition: programming.composition,
+      },
     });
 
     state.stations = [...state.stations, buildStation({
@@ -173,8 +277,8 @@ async function installSettingsRoutes(
       frequencyMHz: Number(body.frequencyMHz),
       genre: String(body.genre),
       isActive: Boolean(body.isActive),
-      programmingEnabled: false,
-      defaultProgramTemplateId: null,
+      programmingEnabled,
+      defaultProgramTemplateId: defaultTemplateId,
     })];
     state.stationDetails.set(stationId, stationDetail);
     state.stationProgramming.set(stationId, programming);
@@ -201,13 +305,13 @@ async function installSettingsRoutes(
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     captures.programmingUpdateRequests?.push({ body, headers: route.request().headers() });
     const current = state.stationProgramming.get(stationId) ?? buildStationProgrammingResponse({ stationId, enabled: false, defaultTemplateId: null, rules: [] });
-    const updated = {
+    const updated = buildStationProgrammingResponse({
       ...current,
       ...body,
       stationId,
       updatedAt: "2026-04-25T00:10:00Z",
       rules: (body.rules as unknown[]) ?? current.rules,
-    };
+    });
     state.stationProgramming.set(stationId, updated);
     await fulfillJson(route, updated);
   });

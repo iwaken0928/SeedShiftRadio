@@ -21,7 +21,7 @@ import {
 import { getAdminToken } from "@/lib/env";
 import { formatSafeDisplayText, getSafeMetadataEntries } from "@/lib/safe-metadata";
 import { buildSettingsExportFilename, buildSettingsExportPayload, parseSettingsImportPayload } from "@/lib/settings-import-export";
-import { cloneStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
+import { applyProgrammingSummaryToStationDraft, cloneStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
 import {
   cloneProgramTemplateDraft,
   createBlankProgramTemplateDraft,
@@ -261,7 +261,31 @@ export function SettingsDashboard() {
       setProgrammingNotice(null);
     },
     onSuccess: (saved) => {
+      queryClient.setQueryData<StationDetail | undefined>(["settings", "station", saved.stationId], (current) =>
+        current
+          ? {
+              ...current,
+              programming: {
+                ...current.programming,
+                enabled: saved.enabled,
+                defaultTemplateId: saved.defaultTemplateId,
+              },
+            }
+          : current,
+      );
+      queryClient.setQueryData<StationSummary[]>(["settings", "stations"], (current) =>
+        current?.map((station) =>
+          station.id === saved.stationId
+            ? {
+                ...station,
+                programmingEnabled: saved.enabled,
+                defaultProgramTemplateId: saved.defaultTemplateId,
+              }
+            : station,
+        ) ?? current,
+      );
       queryClient.setQueryData(["settings", "station-programming", saved.stationId], saved);
+      setStationDraft((current) => (current ? applyProgrammingSummaryToStationDraft(current, saved) : current));
       setProgrammingDraft(createProgrammingDraft(saved));
       setProgrammingNotice("番組編成ポリシーを保存しました。変更は実行中 block ではなく次の番組から反映されます。");
       void queryClient.invalidateQueries({ queryKey: ["settings", "station", saved.stationId] });
@@ -340,6 +364,13 @@ export function SettingsDashboard() {
   const isProgrammingDirty =
     baseProgrammingDraft !== null && programmingDraft !== null && JSON.stringify(baseProgrammingDraft) !== JSON.stringify(programmingDraft);
   const bindHostWarning = draft && isUnsafeBindHost(draft.server.bindHost);
+
+  function confirmDiscardStationChanges(actionLabel: string) {
+    if (!isStationDirty) {
+      return true;
+    }
+    return window.confirm(`未保存の station 変更を破棄します。${actionLabel}を続行しますか？`);
+  }
 
   const resetDraft = () => {
     if (!settingsQuery.data) {
@@ -451,6 +482,9 @@ export function SettingsDashboard() {
   }, [selectedStationId]);
 
   const startBlankStationDraft = () => {
+    if (!confirmDiscardStationChanges("新規 station draft の開始")) {
+      return;
+    }
     const nextDraft = createBlankStationDraft(stationsQuery.data ?? []);
     setStationEditorMode("create");
     setStationCreateBaseDraft(cloneStationDraft(nextDraft));
@@ -465,6 +499,9 @@ export function SettingsDashboard() {
 
   const startDuplicatedStationDraft = () => {
     if (!stationDetailQuery.data) {
+      return;
+    }
+    if (!confirmDiscardStationChanges("station 複製 draft の開始")) {
       return;
     }
     const nextDraft = createDuplicatedStationDraft(stationDetailQuery.data, stationsQuery.data ?? [], templatesQuery.data ?? []);
@@ -482,6 +519,9 @@ export function SettingsDashboard() {
   };
 
   const cancelStationDraft = () => {
+    if (!confirmDiscardStationChanges("station draft のクローズ")) {
+      return;
+    }
     setStationEditorMode("existing");
     setStationCreateBaseDraft(null);
     setStationDraft(null);
@@ -980,6 +1020,9 @@ export function SettingsDashboard() {
               if (stationEditorMode !== "create") {
                 startBlankStationDraft();
               }
+              return;
+            }
+            if (stationId !== selectedStationId && !confirmDiscardStationChanges("station の切り替え")) {
               return;
             }
             setStationEditorMode("existing");
@@ -2021,7 +2064,10 @@ function StationBasicInfoEditor({
               value={draft.id}
               readOnly={mode === "existing"}
               className={mode === "existing" ? "cursor-not-allowed bg-slate-100 text-slate-500" : undefined}
-              onChange={(event) => updateDraft((current) => ({ ...current, id: event.currentTarget.value }))}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                updateDraft((current) => ({ ...current, id: value }));
+              }}
             />
           </div>
           <TextField
@@ -2196,7 +2242,10 @@ function StationProgrammingPolicyEditor({
               id="programming-default-template"
               className={SELECT_CLASS_NAME}
               value={draft.defaultTemplateId ?? ""}
-              onChange={(event) => updateDraft((current) => ({ ...current, defaultTemplateId: event.currentTarget.value || null }))}
+              onChange={(event) => {
+                const value = event.currentTarget.value || null;
+                updateDraft((current) => ({ ...current, defaultTemplateId: value }));
+              }}
             >
               <option value="">No default template</option>
               {usableTemplates.map((template) => (
@@ -2412,7 +2461,10 @@ function StationProgrammingPolicyEditor({
                       id={`rule-${index}-template`}
                       className={SELECT_CLASS_NAME}
                       value={rule.templateId}
-                      onChange={(event) => updateRule(index, (current) => ({ ...current, templateId: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        updateRule(index, (current) => ({ ...current, templateId: value }));
+                      }}
                     >
                       {usableTemplates.map((template) => (
                         <option key={template.id} value={template.id}>
@@ -2427,7 +2479,10 @@ function StationProgrammingPolicyEditor({
                       id={`rule-${index}-start`}
                       type="time"
                       value={rule.startTime}
-                      onChange={(event) => updateRule(index, (current) => ({ ...current, startTime: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        updateRule(index, (current) => ({ ...current, startTime: value }));
+                      }}
                     />
                   </div>
                   <div>
@@ -2436,7 +2491,10 @@ function StationProgrammingPolicyEditor({
                       id={`rule-${index}-end`}
                       type="time"
                       value={rule.endTime}
-                      onChange={(event) => updateRule(index, (current) => ({ ...current, endTime: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        updateRule(index, (current) => ({ ...current, endTime: value }));
+                      }}
                     />
                   </div>
                   <NumberField
@@ -2700,7 +2758,10 @@ function ProgramTemplateCard({
                           value={draft.id}
                           readOnly={!isCreatingTemplate}
                           className={!isCreatingTemplate ? "cursor-not-allowed bg-slate-100 text-slate-500" : undefined}
-                          onChange={(event) => updateDraft((current) => ({ ...current, id: event.currentTarget.value }))}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            updateDraft((current) => ({ ...current, id: value }));
+                          }}
                         />
                       </div>
                       <TextField
@@ -2729,7 +2790,10 @@ function ProgramTemplateCard({
                             id="template-station"
                             className={SELECT_CLASS_NAME}
                             value={draft.stationId ?? ""}
-                            onChange={(event) => updateDraft((current) => ({ ...current, stationId: event.currentTarget.value || null }))}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value || null;
+                              updateDraft((current) => ({ ...current, stationId: value }));
+                            }}
                           >
                             <option value="">Select station</option>
                             {stations.map((station) => (
@@ -2762,7 +2826,10 @@ function ProgramTemplateCard({
                           id="template-fallback"
                           className={SELECT_CLASS_NAME}
                           value={draft.fallbackTemplateId ?? ""}
-                          onChange={(event) => updateDraft((current) => ({ ...current, fallbackTemplateId: event.currentTarget.value || null }))}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value || null;
+                            updateDraft((current) => ({ ...current, fallbackTemplateId: value }));
+                          }}
                         >
                           <option value="">No fallback template</option>
                           {fallbackOptions.map((entry) => (
@@ -2787,7 +2854,10 @@ function ProgramTemplateCard({
                         id="template-editorial-policy"
                         rows={8}
                         value={draft.editorialPolicyText}
-                        onChange={(event) => updateDraft((current) => ({ ...current, editorialPolicyText: event.currentTarget.value }))}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          updateDraft((current) => ({ ...current, editorialPolicyText: value }));
+                        }}
                       />
                     </div>
                   </div>
@@ -2887,7 +2957,10 @@ function ProgramTemplateCard({
                               id={`template-slot-policy-${index}`}
                               rows={6}
                               value={slot.slotPolicyText}
-                              onChange={(event) => updateSlot(index, (current) => ({ ...current, slotPolicyText: event.currentTarget.value }))}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value;
+                                updateSlot(index, (current) => ({ ...current, slotPolicyText: value }));
+                              }}
                             />
                           </div>
                         </div>
@@ -2974,12 +3047,13 @@ function ProgrammingPreviewCard({
                 id="preview-at"
                 type="datetime-local"
                 value={previewDraft.at}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
                   onPreviewDraftChange((current) => ({
                     ...current,
-                    at: event.currentTarget.value,
-                  }))
-                }
+                    at: value,
+                  }));
+                }}
               />
             </div>
             <NumberField
@@ -3001,15 +3075,16 @@ function ProgrammingPreviewCard({
                   id={`preview-${providerKey}`}
                   className={SELECT_CLASS_NAME}
                   value={previewDraft.providerStates[providerKey]}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     onPreviewDraftChange((current) => ({
                       ...current,
                       providerStates: {
                         ...current.providerStates,
-                        [providerKey]: event.currentTarget.value,
+                        [providerKey]: value,
                       },
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   {PROGRAMMING_STATE_OPTIONS.map((option) => (
                     <option key={option} value={option}>

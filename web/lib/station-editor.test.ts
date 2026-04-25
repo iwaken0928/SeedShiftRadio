@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
-import type { ProgramTemplateSummary, StationDetail, StationSummary } from "@/lib/types";
+import { applyProgrammingSummaryToStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
+import type { ProgramTemplateSummary, StationDetail, StationProgrammingResponse, StationSummary, StationUpdateRequest } from "@/lib/types";
 
 describe("station-editor", () => {
   it("blank station draft は最初の未使用周波数で新規局ドラフトを作る", () => {
@@ -124,6 +124,20 @@ describe("station-editor", () => {
     expect(draft.defaultProgramTemplateId).toBe("tmpl-global");
     expect(draft.programmingEnabled).toBe(false);
   });
+
+  it("programming 保存後は station draft の summary だけを同期できる", () => {
+    const draft = applyProgrammingSummaryToStationDraft(createStationUpdateRequest(), createProgrammingResponse({
+      enabled: true,
+      defaultTemplateId: "tmpl-global",
+    }));
+
+    expect(draft).toMatchObject({
+      id: "station-default",
+      name: "Station Default",
+      programmingEnabled: true,
+      defaultProgramTemplateId: "tmpl-global",
+    });
+  });
 });
 
 function createStationSummary(overrides: Partial<StationSummary> = {}): StationSummary {
@@ -191,6 +205,57 @@ function createTemplate(overrides: Partial<ProgramTemplateSummary> = {}): Progra
     planningHorizonMinutes: 15,
     isActive: true,
     fallbackTemplateId: null,
+    ...overrides,
+  };
+}
+
+function createStationUpdateRequest(overrides: Partial<StationUpdateRequest> = {}): StationUpdateRequest {
+  return {
+    version: 4,
+    id: "station-default",
+    name: "Station Default",
+    frequencyMHz: 77.7,
+    genre: "talk",
+    languagePersonaId: "persona-default",
+    defaultVoiceProfileId: "voice-default",
+    isActive: true,
+    programmingEnabled: false,
+    defaultProgramTemplateId: null,
+    ...overrides,
+  };
+}
+
+function createProgrammingResponse(overrides: Partial<StationProgrammingResponse> = {}): StationProgrammingResponse {
+  return {
+    stationId: "station-default",
+    version: 3,
+    enabled: false,
+    defaultTemplateId: null,
+    fallbackStrategy: "LEGACY_RATIO",
+    planningHorizonMinutes: 20,
+    preGeneration: {
+      mode: "ASSISTED",
+      maxPreparedMinutes: 12,
+      maxPreparedBlocks: 2,
+      preferCacheReuse: true,
+    },
+    replay: {
+      intensity: "LIGHT",
+      eligibleSegmentTypes: ["MUSIC_AI"],
+      minimumAssetAgeHours: 6,
+      cooldownHours: 72,
+      maxReplaySharePercent: 20,
+      excludeLetterSegments: true,
+    },
+    composition: {
+      targetSegmentShares: { talk: 40, letter: 20, music: 35, jingle: 5 },
+      maxConsecutiveTalkSegments: 2,
+      musicBreakIntervalMinutes: 8,
+      letterPriorityBoostThreshold: 4,
+      allowSoftFallbackRetiming: true,
+    },
+    updatedAt: "2026-04-25T00:00:00Z",
+    rules: [],
     ...overrides,
   };
 }

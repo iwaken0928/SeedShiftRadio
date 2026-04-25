@@ -1,4 +1,4 @@
-import type { ProgramTemplateSummary, StationDetail, StationSummary, StationUpdateRequest } from "@/lib/types";
+import type { ProgramTemplateSummary, StationDetail, StationProgrammingResponse, StationSummary, StationUpdateRequest } from "@/lib/types";
 
 const STATION_ID_MAX_ATTEMPTS = 100;
 const DEFAULT_STATION_FREQUENCY = 80.0;
@@ -42,6 +42,17 @@ export function createDuplicatedStationDraft(
 
 export function cloneStationDraft(draft: StationUpdateRequest): StationUpdateRequest {
   return { ...draft };
+}
+
+export function applyProgrammingSummaryToStationDraft(
+  draft: StationUpdateRequest,
+  programming: Pick<StationProgrammingResponse, "enabled" | "defaultTemplateId">,
+): StationUpdateRequest {
+  return {
+    ...draft,
+    programmingEnabled: programming.enabled,
+    defaultProgramTemplateId: programming.defaultTemplateId,
+  };
 }
 
 function resolveDuplicatedDefaultTemplateId(

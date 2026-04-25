@@ -6,11 +6,12 @@ type StreamHandlers = {
   onStatus?: (status: StreamStatus) => void;
   signal: AbortSignal;
   initialLastEventId?: string | null;
+  reconnectOnClose?: boolean;
 };
 
 export type StreamStatus = "idle" | "connecting" | "connected" | "reconnecting" | "closed" | "error";
 
-export function openSeedShiftStream({ onEvent, onStatus, signal, initialLastEventId }: StreamHandlers) {
+export function openSeedShiftStream({ onEvent, onStatus, signal, initialLastEventId, reconnectOnClose = true }: StreamHandlers) {
   let lastEventId = initialLastEventId ?? null;
   let retryDelay = 1000;
   let active = true;
@@ -36,6 +37,9 @@ export function openSeedShiftStream({ onEvent, onStatus, signal, initialLastEven
         lastEventId = await consumeStream(response.body, onEvent, (eventId) => {
           lastEventId = eventId;
         }, signal, lastEventId);
+        if (!reconnectOnClose) {
+          break;
+        }
       } catch (error) {
         if (signal.aborted || !active) {
           break;

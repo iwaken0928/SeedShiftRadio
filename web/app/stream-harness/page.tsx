@@ -16,6 +16,7 @@ export default function StreamHarnessPage() {
     const stop = openSeedShiftStream({
       signal: controller.signal,
       initialLastEventId: lastEventId || null,
+      reconnectOnClose: false,
       onStatus: setStatus,
       onEvent: (event: EventMessage) => {
         if (event.id) {

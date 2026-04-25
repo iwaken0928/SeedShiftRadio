@@ -4,15 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "dev:e2e": "next dev --hostname 127.0.0.1 --port 3001",
+    "dev:e2e": "NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN=playwright-admin NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 next dev --hostname 127.0.0.1 --port 3001",
     "build": "next build",
     "start": "next start",
-    "start:e2e": "next start --hostname 127.0.0.1 --port 3001",
+    "start:e2e": "NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN=playwright-admin NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 next start --hostname 127.0.0.1 --port 3001",
     "typecheck": "tsc --noEmit",
     "test": "TMPDIR=/tmp TEMP=/tmp TMP=/tmp vitest run",
     "test:watch": "TMPDIR=/tmp TEMP=/tmp TMP=/tmp vitest",
-    "e2e": "npm run build && TMPDIR=/tmp TEMP=/tmp TMP=/tmp PLAYWRIGHT_BROWSERS_PATH=0 playwright test",
-    "e2e:headed": "npm run build && TMPDIR=/tmp TEMP=/tmp TMP=/tmp PLAYWRIGHT_BROWSERS_PATH=0 playwright test --headed"
+    "e2e": "NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN=playwright-admin NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 npm run build && NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN=playwright-admin NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 TMPDIR=/tmp TEMP=/tmp TMP=/tmp PLAYWRIGHT_BROWSERS_PATH=0 playwright test",
+    "e2e:headed": "NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN=playwright-admin NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 npm run build && NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN=playwright-admin NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 TMPDIR=/tmp TEMP=/tmp TMP=/tmp PLAYWRIGHT_BROWSERS_PATH=0 playwright test --headed"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.64.2",

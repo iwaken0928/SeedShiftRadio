@@ -261,6 +261,238 @@ export function buildPublicLetter(overrides: Record<string, unknown> = {}) {
   };
 }
 
+export function buildSettingsResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 7,
+    schemaVersion: "v1",
+    updatedAt: "2026-04-23T00:00:00Z",
+    configPath: "/srv/seedshift/config.json",
+    server: {
+      bindHost: "127.0.0.1",
+      port: 8080,
+    },
+    paths: {
+      dataRoot: "/srv/seedshift",
+      musicLibrary: "/srv/seedshift/music",
+    },
+    playout: {
+      targetReadyCount: 3,
+      minimumReadyCount: 1,
+      minReadyDurationMs: 30000,
+      maxPreparedDurationMs: 300000,
+      maxPreparedBlocks: 6,
+      scriptAheadCount: 2,
+      ttsAheadCount: 2,
+      musicAheadCount: 1,
+      idlePrefetchEnabled: true,
+    },
+    cache: {
+      scriptMaxBytes: 1048576,
+      ttsMaxBytes: 2097152,
+      musicMaxBytes: 4194304,
+      scriptRetentionDays: 7,
+      ttsRetentionDays: 7,
+      musicRetentionDays: 14,
+      scriptReuseScope: "SESSION",
+      ttsReuseScope: "STATION",
+      musicReuseScope: "GLOBAL",
+      cleanupBatchSize: 100,
+    },
+    programming: {
+      defaultPlanningHorizonMinutes: 120,
+      legacyRatioFallback: false,
+      seedImportRef: "file:/srv/seedshift/seeds.json",
+    },
+    providers: {
+      llm: {
+        defaultProvider: "ollama",
+        fallbackProviders: [],
+        providers: {
+          ollama: {
+            baseUrl: "http://127.0.0.1:11434",
+            healthPath: "/api/tags",
+            timeoutMs: 5000,
+            capabilities: ["SCRIPT"],
+          },
+        },
+      },
+      tts: {
+        defaultProvider: "voicevox",
+        fallbackProviders: [],
+        providers: {
+          voicevox: {
+            baseUrl: "http://127.0.0.1:50021",
+            healthPath: "/version",
+            timeoutMs: 5000,
+            capabilities: ["TTS"],
+          },
+        },
+      },
+      musicGen: {
+        defaultProvider: "worker",
+        fallbackProviders: [],
+        providers: {
+          worker: {
+            baseUrl: "http://127.0.0.1:8091",
+            healthPath: "/health",
+            timeoutMs: 10000,
+            capabilities: ["MUSIC_GEN"],
+            adapter: "MUSICGEN_WORKER",
+            apiKeyRef: "env:MUSICGEN_API_KEY",
+            defaultModelProfileId: "default",
+            modelProfiles: {
+              default: {
+                model: "facebook/musicgen-small",
+                lmModel: "gpt2",
+                thinking: false,
+                lyricsLanguage: "ja",
+                lyricsTransliterationMode: "kana",
+                outputFormat: "wav",
+                maxDurationSeconds: 30,
+              },
+            },
+          },
+        },
+      },
+    },
+    security: {
+      adminTokenRef: "env:SEEDSHIFT_ADMIN_TOKEN",
+    },
+    features: {
+      streaming: {
+        placeholderEnabled: true,
+      },
+    },
+    ...overrides,
+  };
+}
+
+export function buildStationDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "station-night",
+    name: "Nocturne FM",
+    frequencyMHz: 76.1,
+    genre: "Talk",
+    languagePersonaId: "persona-night",
+    defaultVoiceProfileId: "voice-night",
+    isActive: true,
+    version: 3,
+    programming: {
+      enabled: true,
+      defaultTemplateId: "tmpl-night",
+      fallbackStrategy: "LEGACY_RATIO",
+      planningHorizonMinutes: 20,
+      preGeneration: {
+        mode: "ASSISTED",
+        maxPreparedMinutes: 12,
+        maxPreparedBlocks: 2,
+        preferCacheReuse: true,
+      },
+      replay: {
+        intensity: "LIGHT",
+        eligibleSegmentTypes: ["MUSIC_AI"],
+        minimumAssetAgeHours: 6,
+        cooldownHours: 72,
+        maxReplaySharePercent: 20,
+        excludeLetterSegments: true,
+      },
+      composition: {
+        targetSegmentShares: { talk: 40, letter: 20, music: 35, jingle: 5 },
+        maxConsecutiveTalkSegments: 2,
+        musicBreakIntervalMinutes: 8,
+        letterPriorityBoostThreshold: 4,
+        allowSoftFallbackRetiming: true,
+      },
+    },
+    ...overrides,
+  };
+}
+
+export function buildStationProgrammingResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    stationId: "station-night",
+    version: 3,
+    enabled: true,
+    defaultTemplateId: "tmpl-night",
+    fallbackStrategy: "LEGACY_RATIO",
+    planningHorizonMinutes: 20,
+    preGeneration: {
+      mode: "ASSISTED",
+      maxPreparedMinutes: 12,
+      maxPreparedBlocks: 2,
+      preferCacheReuse: true,
+    },
+    replay: {
+      intensity: "LIGHT",
+      eligibleSegmentTypes: ["MUSIC_AI"],
+      minimumAssetAgeHours: 6,
+      cooldownHours: 72,
+      maxReplaySharePercent: 20,
+      excludeLetterSegments: true,
+    },
+    composition: {
+      targetSegmentShares: { talk: 40, letter: 20, music: 35, jingle: 5 },
+      maxConsecutiveTalkSegments: 2,
+      musicBreakIntervalMinutes: 8,
+      letterPriorityBoostThreshold: 4,
+      allowSoftFallbackRetiming: true,
+    },
+    updatedAt: "2026-04-23T00:00:00Z",
+    rules: [
+      {
+        id: "rule-night-001",
+        priority: 100,
+        days: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+        startTime: "00:00",
+        endTime: "23:59",
+        minimumPendingLetters: 0,
+        requiredProviderStates: [],
+        templateId: "tmpl-night",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+export function buildProgramTemplateSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "tmpl-night",
+    scope: "STATION",
+    stationId: "station-night",
+    name: "Night Talk",
+    version: 2,
+    targetDurationMinutes: 20,
+    planningHorizonMinutes: 15,
+    isActive: true,
+    fallbackTemplateId: "tmpl-global-fallback",
+    ...overrides,
+  };
+}
+
+export function buildProgramTemplateDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...buildProgramTemplateSummary(),
+    editorialPolicy: {
+      tone: "calm",
+      topics: ["night", "coding"],
+    },
+    slots: [
+      {
+        slotId: "opening",
+        role: "OPENING",
+        constraintMode: "HARD",
+        candidateSegmentTypes: ["JINGLE", "TALK"],
+        fallbackSegmentTypes: ["TALK"],
+        targetDurationMs: 30000,
+        slotPolicy: {
+          allowArchiveReplay: false,
+        },
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

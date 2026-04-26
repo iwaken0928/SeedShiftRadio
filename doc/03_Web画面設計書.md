@@ -106,7 +106,7 @@
 - 危険な項目は `localhost 以外へ bind` などの注意表示を出す
 - API キー自体は平文表示せず、参照先のみ表示する
 - 番組テンプレート編集では `HARD` / `SOFT` の違いを明示し、dirty/reset/save、create/duplicate を持つ editor を提供する
-- 初期実装の Preview は保存済み `ProgramTemplate` / `StationProgrammingPolicy` に対してのみ実行し、未保存 template draft payload を直接評価しない
+- `Programming Preview` は保存済み `ProgramTemplate` / `StationProgrammingPolicy` に加えて、現在の `/settings` で編集中の未保存 draft を request payload として含めて実行できる。draft preview は DB 保存や実行中 block への反映を行わない
 - ProgramTemplate editor の `editorialPolicy` / `slotPolicy` は JSON object editor とし、`scope` と `stationId` の整合、`slotId` 一意性、`candidateSegmentTypes` 必須、`targetDurationMs` 下限を UI でも確認する
 - station 基本情報編集では `PUT /api/stations/{id}` を使い、局 ID は読み取り専用、`version` 楽観ロック、dirty/reset/save、必須項目、周波数下限を UI でも確認する
 - station 作成/複製では create mode を別に持ち、`POST /api/stations` を使う。create mode では局 ID を編集可能にし、保存後は新 station を選択状態へ切り替える
@@ -129,7 +129,7 @@
 - 管理トークンがない場合は導線を非表示にし、直接開いた時は管理画面であることを案内する
 - `Import / Export` は Web 側で JSON download / file import として実装し、専用 API は増やさず既存の `GET /api/settings` と `PUT /api/settings` を使う
 - Import 時は `schemaVersion` の一致を確認し、`version` は現在の保存済み設定へ合わせる。`apiKeyRef` と `adminTokenRef` は `env:` / `file:` 参照だけ受け付ける
-- `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に対する preview とする。未保存 draft preview は後続フェーズで拡張する
+- `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
 
 ## 8. 監視画面
 

@@ -123,7 +123,9 @@ public final class ProgrammingDtos {
 	public record ProgrammingPreviewRequest(
 			@NotNull OffsetDateTime at,
 			@NotNull @Min(0) Integer pendingLetterCount,
-			@NotNull Map<String, @NotBlank String> providerStates) {
+			@NotNull Map<String, @NotBlank String> providerStates,
+			@Valid ProgrammingPolicyRequest policyDraft,
+			@Valid ProgramTemplateRequest templateDraft) {
 	}
 
 	public record ProgrammingPreviewResponse(

@@ -146,6 +146,50 @@ test("settings: station duplicate draft strips station policy and can be closed"
   await expect(stationPanel).toContainText("局を作成しました。");
 });
 
+test("settings: preview uses unsaved programming and template drafts", async ({ page }) => {
+  const state = createSettingsState();
+  const previewRequests: RequestCapture[] = [];
+
+  await installSettingsRoutes(page, state, { previewRequests });
+  await page.goto(appUrl("/settings"));
+
+  const stationPanel = panelByHeading(page, "Station overview");
+  const templatePanel = panelByHeading(page, "Program templates");
+  const previewPanel = panelByHeading(page, "Programming preview");
+
+  await stationPanel.locator("#programming-default-template").selectOption("tmpl-global-fallback");
+  await templatePanel.locator("#program-template-select").selectOption("tmpl-global-fallback");
+  await templatePanel.locator("#template-name").fill("Global Fallback Draft");
+  await templatePanel.getByRole("button", { name: "Add Slot", exact: true }).click();
+  await templatePanel.locator("#template-slot-id-1").fill("draft-letter");
+  await templatePanel.locator("#template-slot-role-1").selectOption("LETTER");
+  await templatePanel.locator("#template-slot-duration-1").fill("90000");
+
+  await expect(previewPanel).toContainText("using programming draft");
+  await expect(previewPanel).toContainText("using template draft tmpl-global-fallback");
+
+  await previewPanel.locator("#preview-pending-letters").fill("2");
+  await previewPanel.getByRole("button", { name: "Run Preview", exact: true }).click();
+
+  await expect.poll(() => previewRequests.length).toBe(1);
+  await expect(previewRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  await expect(previewRequests[0]?.body.policyDraft).toMatchObject({
+    defaultTemplateId: "tmpl-global-fallback",
+    version: 3,
+  });
+  await expect(previewRequests[0]?.body.templateDraft).toMatchObject({
+    id: "tmpl-global-fallback",
+    name: "Global Fallback Draft",
+  });
+  const previewTemplateDraft = previewRequests[0]?.body.templateDraft as { slots?: Array<Record<string, unknown>> } | undefined;
+  await expect(previewTemplateDraft?.slots?.map((slot) => slot.slotId)).toEqual([
+    "opening",
+    "draft-letter",
+  ]);
+  await expect(previewPanel).toContainText("Global Fallback Draft");
+  await expect(previewPanel).toContainText("draft-letter");
+});
+
 test("settings: ProgramTemplate duplicate draft -> update existing", async ({ page }) => {
   const state = createSettingsState();
   const templateUpdateRequests: RequestCapture[] = [];
@@ -228,6 +272,7 @@ async function installSettingsRoutes(
   captures: {
     stationCreateRequests?: RequestCapture[];
     programmingUpdateRequests?: RequestCapture[];
+    previewRequests?: RequestCapture[];
     templateCreateRequests?: RequestCapture[];
     templateUpdateRequests?: RequestCapture[];
   },
@@ -314,6 +359,35 @@ async function installSettingsRoutes(
     });
     state.stationProgramming.set(stationId, updated);
     await fulfillJson(route, updated);
+  });
+
+  await page.route(apiRegExp("/api/stations/[^/]+/programming/preview$"), async (route) => {
+    const stationId = decodeURIComponent(route.request().url().split("/api/stations/")[1]?.replace("/programming/preview", "") ?? "");
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    captures.previewRequests?.push({ body, headers: route.request().headers() });
+
+    const templateDraft = body.templateDraft as Record<string, unknown> | undefined;
+    const selectedTemplateDetail = state.templateDetails.get(String((body.policyDraft as Record<string, unknown> | undefined)?.defaultTemplateId ?? "tmpl-night"));
+    const slots = Array.isArray(templateDraft?.slots)
+      ? templateDraft.slots
+      : ((selectedTemplateDetail?.slots as unknown[] | undefined) ?? []);
+
+    await fulfillJson(route, {
+      stationId,
+      selectedTemplateId: (body.policyDraft as Record<string, unknown> | undefined)?.defaultTemplateId ?? templateDraft?.id ?? "tmpl-night",
+      fallbackApplied: false,
+      program: {
+        title: typeof templateDraft?.name === "string" ? templateDraft.name : "Night Talk",
+        plannedDurationMs: slots.reduce((total, slot) => total + Number((slot as Record<string, unknown>).targetDurationMs ?? 0), 0),
+      },
+      slots: slots.map((slot) => ({
+        slotId: (slot as Record<string, unknown>).slotId,
+        role: (slot as Record<string, unknown>).role,
+        constraintMode: (slot as Record<string, unknown>).constraintMode,
+        targetDurationMs: (slot as Record<string, unknown>).targetDurationMs,
+      })),
+      validationWarnings: [],
+    });
   });
 
   await page.route(apiUrl("/api/program-templates"), async (route) => {

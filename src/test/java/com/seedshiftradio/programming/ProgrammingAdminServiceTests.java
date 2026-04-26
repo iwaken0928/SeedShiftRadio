@@ -101,13 +101,76 @@ class ProgrammingAdminServiceTests {
 						Map.of(
 								"musicGen", "DOWN",
 								"tts", "UP",
-								"llm", "UP")));
+								"llm", "UP"),
+						null,
+						null));
 
 		assertEquals("station-night", response.stationId());
 		assertEquals("tmpl-default", response.selectedTemplateId());
 		assertFalse(response.fallbackApplied());
 		assertEquals("Night Default", response.program().title());
 		assertEquals("slot-default", response.slots().getFirst().slotId());
+	}
+
+	@Test
+	void previewUsesUnsavedPolicyAndTemplateDraft() {
+		StationEntity station = station("station-night");
+
+		when(stationRepository.findById("station-night")).thenReturn(java.util.Optional.of(station));
+		when(stationRepository.existsById("station-night")).thenReturn(true);
+		when(templateRepository.findById("tmpl-global-fallback")).thenReturn(java.util.Optional.of(template("tmpl-global-fallback", "Global Fallback")));
+
+		ProgrammingDtos.ProgrammingPreviewResponse response = programmingAdminService.preview(
+				"station-night",
+				new ProgrammingDtos.ProgrammingPreviewRequest(
+						java.time.OffsetDateTime.parse("2026-03-20T23:30:00+09:00"),
+						2,
+						Map.of(
+								"musicGen", "UP",
+								"tts", "UP",
+								"llm", "UP"),
+						new ProgrammingDtos.ProgrammingPolicyRequest(
+								3,
+								true,
+								"tmpl-preview-draft",
+								"LEGACY_RATIO",
+								30,
+								ProgrammingPolicyProfileSupport.defaultPreGenerationProfile(),
+								ProgrammingPolicyProfileSupport.defaultReplayProfile(),
+								ProgrammingPolicyProfileSupport.defaultCompositionProfile(),
+								List.of(new ProgrammingDtos.ProgramRuleRequest(
+										100,
+										List.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"),
+										"00:00",
+										"23:59",
+										1,
+										List.of(),
+										"tmpl-preview-draft"))),
+						new ProgrammingDtos.ProgramTemplateRequest(
+								"tmpl-preview-draft",
+								"STATION",
+								"station-night",
+								"Preview Draft Template",
+								0,
+								18,
+								12,
+								true,
+								Map.of("tone", "bright"),
+								"tmpl-global-fallback",
+								List.of(new ProgrammingDtos.ProgramSlotDto(
+										"opening-draft",
+										SlotRole.OPENING,
+										ConstraintMode.HARD,
+										List.of("JINGLE", "TALK"),
+										List.of("TALK"),
+										45_000,
+										Map.of("preferFreshGeneration", true))))));
+
+		assertEquals("station-night", response.stationId());
+		assertEquals("tmpl-preview-draft", response.selectedTemplateId());
+		assertFalse(response.fallbackApplied());
+		assertEquals("Preview Draft Template", response.program().title());
+		assertEquals("opening-draft", response.slots().getFirst().slotId());
 	}
 
 	@Test
@@ -182,7 +245,7 @@ class ProgrammingAdminServiceTests {
 
 	private ProgramTemplateSlotEntity slot(String id, String templateId) {
 		ProgramTemplateSlotEntity slot = new ProgramTemplateSlotEntity();
-		slot.setId(id);
+		slot.setId(templateId + "-" + id);
 		slot.setProgramTemplateId(templateId);
 		slot.setSequenceNo(1);
 		slot.setRole(SlotRole.TOPIC);

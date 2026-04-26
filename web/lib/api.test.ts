@@ -7,6 +7,7 @@ import {
   createStation,
   listLetters,
   mergeAdminHeaders,
+  previewProgramming,
   requestJson,
   safeReadError,
   updateProgramTemplate,
@@ -193,6 +194,124 @@ describe("api helpers", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight/programming", {
       cache: "no-store",
       method: "PUT",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Admin-Token": "admin-token",
+      },
+    });
+  });
+
+  it("previewProgramming は未保存 draft を含む JSON body を付けて POST する", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          stationId: "station-night",
+          selectedTemplateId: "tmpl-preview-draft",
+          fallbackApplied: false,
+          program: {
+            title: "Preview Draft Template",
+            plannedDurationMs: 45000,
+          },
+          slots: [
+            {
+              slotId: "opening-draft",
+              role: "OPENING",
+              constraintMode: "HARD",
+              targetDurationMs: 45000,
+            },
+          ],
+          validationWarnings: [],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const body: Parameters<typeof previewProgramming>[1] = {
+      at: "2026-04-26T21:00",
+      pendingLetterCount: 2,
+      providerStates: {
+        musicGen: "UP",
+        tts: "UP",
+        llm: "UP",
+      },
+      policyDraft: {
+        version: 3,
+        enabled: true,
+        defaultTemplateId: "tmpl-preview-draft",
+        fallbackStrategy: "LEGACY_RATIO",
+        planningHorizonMinutes: 30,
+        preGeneration: {
+          mode: "ASSISTED",
+          maxPreparedMinutes: 12,
+          maxPreparedBlocks: 2,
+          preferCacheReuse: true,
+        },
+        replay: {
+          intensity: "LIGHT",
+          eligibleSegmentTypes: ["MUSIC_AI", "MUSIC_LOCAL"],
+          minimumAssetAgeHours: 6,
+          cooldownHours: 72,
+          maxReplaySharePercent: 20,
+          excludeLetterSegments: true,
+        },
+        composition: {
+          targetSegmentShares: { talk: 40, letter: 20, music: 35, jingle: 5 },
+          maxConsecutiveTalkSegments: 2,
+          musicBreakIntervalMinutes: 8,
+          letterPriorityBoostThreshold: 4,
+          allowSoftFallbackRetiming: true,
+        },
+        rules: [
+          {
+            priority: 100,
+            days: ["MON", "TUE", "WED"],
+            startTime: "20:00",
+            endTime: "23:59",
+            minimumPendingLetters: 1,
+            requiredProviderStates: [],
+            templateId: "tmpl-preview-draft",
+          },
+        ],
+      },
+      templateDraft: {
+        id: "tmpl-preview-draft",
+        scope: "STATION",
+        stationId: "station-night",
+        name: "Preview Draft Template",
+        version: 0,
+        targetDurationMinutes: 18,
+        planningHorizonMinutes: 12,
+        isActive: true,
+        editorialPolicy: {
+          tone: "bright",
+        },
+        fallbackTemplateId: "tmpl-global-fallback",
+        slots: [
+          {
+            slotId: "opening-draft",
+            role: "OPENING",
+            constraintMode: "HARD",
+            candidateSegmentTypes: ["JINGLE", "TALK"],
+            fallbackSegmentTypes: ["TALK"],
+            targetDurationMs: 45000,
+            slotPolicy: {
+              preferFreshGeneration: true,
+            },
+          },
+        ],
+      },
+    };
+
+    await previewProgramming("station/night", body);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight/programming/preview", {
+      cache: "no-store",
+      method: "POST",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",

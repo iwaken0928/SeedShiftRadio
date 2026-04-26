@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.http.HttpStatus;
@@ -102,7 +103,7 @@ public class ProgrammingAdminService {
 		if (request.enabled() && request.rules().isEmpty()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "有効な番組編成には少なくとも 1 つのルールが必要です。", Map.of("stationId", stationId));
 		}
-		validatePolicyReferences(stationId, request.defaultTemplateId(), request.rules());
+		validatePolicyReferences(stationId, request.defaultTemplateId(), request.rules(), null);
 		PreGenerationProfile preGeneration = request.preGeneration() != null
 				? ProgrammingPolicyProfileSupport.materializePreGenerationProfile(request.preGeneration())
 				: ProgrammingPolicyProfileSupport.toPreGenerationProfile(entity.getPreGenerationPolicy());
@@ -159,29 +160,33 @@ public class ProgrammingAdminService {
 
 	@Transactional(readOnly = true)
 	public ProgrammingDtos.ProgrammingPreviewResponse preview(String stationId, ProgrammingDtos.ProgrammingPreviewRequest request) {
-		findStation(stationId);
-		StationProgrammingPolicyEntity policy = policyRepository.findByStationId(stationId).orElse(null);
-		List<ProgramRuleEntity> rules = policy == null ? List.of() : ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId());
+		StationEntity station = findStation(stationId);
+		ProgrammingDtos.ProgramTemplateDetail draftTemplate = request.templateDraft() == null ? null : toDraftTemplate(stationId, request.templateDraft());
+		StationProgrammingPolicyEntity policy = resolvePreviewPolicy(station, request.policyDraft(), draftTemplate);
+		List<ProgramRuleEntity> rules = resolvePreviewRules(policy, request.policyDraft());
 		Map<String, String> providerStates = normalizeProviderStates(request.providerStates());
-		Optional<ProgramTemplateEntity> selectedTemplate = selectTemplate(policy, rules, request, providerStates, stationId);
-		ProgramTemplateEntity template = selectedTemplate.orElseGet(() -> policy != null && policy.getDefaultTemplateId() != null
-				? templateRepository.findById(policy.getDefaultTemplateId()).orElse(null)
+		Optional<ProgrammingDtos.ProgramTemplateDetail> selectedTemplate = selectTemplate(policy, rules, request, providerStates, stationId, draftTemplate);
+		ProgrammingDtos.ProgramTemplateDetail template = selectedTemplate.orElseGet(() -> policy != null && policy.getDefaultTemplateId() != null
+				? resolveTemplate(policy.getDefaultTemplateId(), stationId, draftTemplate).orElse(null)
 				: null);
 		boolean fallbackApplied = template == null;
 		List<ProgrammingDtos.PreviewSlot> slots = template != null
-				? slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc(template.getId()).stream().map(this::toPreviewSlot).toList()
+				? template.slots().stream().map(this::toPreviewSlot).toList()
 				: ProgrammingSupport.buildLegacyFallbackSlots();
 		Integer plannedDurationMs = slots.stream().mapToInt(ProgrammingDtos.PreviewSlot::targetDurationMs).sum();
 		return new ProgrammingDtos.ProgrammingPreviewResponse(
 				stationId,
-				template != null ? template.getId() : "legacy-ratio-fallback",
+				template != null ? template.id() : "legacy-ratio-fallback",
 				fallbackApplied,
-				new ProgrammingDtos.PreviewProgram(template != null ? template.getName() : "Legacy Ratio Fallback", plannedDurationMs),
+				new ProgrammingDtos.PreviewProgram(template != null ? template.name() : "Legacy Ratio Fallback", plannedDurationMs),
 				slots,
 				buildWarnings(template, policy, rules));
 	}
 
-	private List<ProgrammingDtos.ValidationWarning> buildWarnings(ProgramTemplateEntity template, StationProgrammingPolicyEntity policy, List<ProgramRuleEntity> rules) {
+	private List<ProgrammingDtos.ValidationWarning> buildWarnings(
+			ProgrammingDtos.ProgramTemplateDetail template,
+			StationProgrammingPolicyEntity policy,
+			List<ProgramRuleEntity> rules) {
 		List<ProgrammingDtos.ValidationWarning> warnings = new ArrayList<>();
 		if (template == null) {
 			warnings.add(new ProgrammingDtos.ValidationWarning("LEGACY_RATIO_FALLBACK", "番組テンプレートを解決できなかったため固定比率へフォールバックしました。"));
@@ -194,22 +199,23 @@ public class ProgrammingAdminService {
 		return warnings;
 	}
 
-	private Optional<ProgramTemplateEntity> selectTemplate(
+	private Optional<ProgrammingDtos.ProgramTemplateDetail> selectTemplate(
 			StationProgrammingPolicyEntity policy,
 			List<ProgramRuleEntity> rules,
 			ProgrammingDtos.ProgrammingPreviewRequest request,
 			Map<String, String> providerStates,
-			String stationId) {
+			String stationId,
+			ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
 		if (policy == null) {
 			return Optional.empty();
 		}
 		for (ProgramRuleEntity rule : rules) {
-			if (matchesRule(rule, request, providerStates) && isTemplateUsable(rule.getTemplateId(), stationId)) {
-				return templateRepository.findById(rule.getTemplateId());
+			if (matchesRule(rule, request, providerStates) && isTemplateUsable(rule.getTemplateId(), stationId, draftTemplate)) {
+				return resolveTemplate(rule.getTemplateId(), stationId, draftTemplate);
 			}
 		}
-		if (policy.getDefaultTemplateId() != null && isTemplateUsable(policy.getDefaultTemplateId(), stationId)) {
-			return templateRepository.findById(policy.getDefaultTemplateId());
+		if (policy.getDefaultTemplateId() != null && isTemplateUsable(policy.getDefaultTemplateId(), stationId, draftTemplate)) {
+			return resolveTemplate(policy.getDefaultTemplateId(), stationId, draftTemplate);
 		}
 		return Optional.empty();
 	}
@@ -241,22 +247,125 @@ public class ProgrammingAdminService {
 		return normalized;
 	}
 
-	private boolean isTemplateUsable(String templateId, String stationId) {
+	private boolean isTemplateUsable(String templateId, String stationId, ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
+		if (draftTemplate != null && Objects.equals(draftTemplate.id(), templateId)) {
+			return "GLOBAL".equalsIgnoreCase(draftTemplate.scope())
+					|| ("STATION".equalsIgnoreCase(draftTemplate.scope()) && stationId.equals(draftTemplate.stationId()));
+		}
 		return templateRepository.findById(templateId)
 				.filter(template -> "GLOBAL".equalsIgnoreCase(template.getScope())
 						|| ("STATION".equalsIgnoreCase(template.getScope()) && stationId.equals(template.getStationId())))
 				.isPresent();
 	}
 
-	private void validatePolicyReferences(String stationId, String defaultTemplateId, List<ProgrammingDtos.ProgramRuleRequest> rules) {
-		if (defaultTemplateId != null && !isTemplateUsable(defaultTemplateId, stationId)) {
+	private void validatePolicyReferences(
+			String stationId,
+			String defaultTemplateId,
+			List<ProgrammingDtos.ProgramRuleRequest> rules,
+			ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
+		if (defaultTemplateId != null && !isTemplateUsable(defaultTemplateId, stationId, draftTemplate)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TEMPLATE", "既定テンプレートが局に対して無効です。", Map.of("defaultTemplateId", defaultTemplateId));
 		}
 		for (ProgrammingDtos.ProgramRuleRequest rule : rules) {
-			if (!isTemplateUsable(rule.templateId(), stationId)) {
+			if (!isTemplateUsable(rule.templateId(), stationId, draftTemplate)) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TEMPLATE", "ルールが参照するテンプレートが無効です。", Map.of("templateId", rule.templateId()));
 			}
 		}
+	}
+
+	private StationProgrammingPolicyEntity resolvePreviewPolicy(
+			StationEntity station,
+			ProgrammingDtos.ProgrammingPolicyRequest request,
+			ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
+		if (request == null) {
+			return policyRepository.findByStationId(station.getId()).orElse(null);
+		}
+		if (request.enabled() && request.rules().isEmpty()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "有効な番組編成には少なくとも 1 つのルールが必要です。", Map.of("stationId", station.getId()));
+		}
+		validatePolicyReferences(station.getId(), request.defaultTemplateId(), request.rules(), draftTemplate);
+		PreGenerationProfile preGeneration = request.preGeneration() != null
+				? ProgrammingPolicyProfileSupport.materializePreGenerationProfile(request.preGeneration())
+				: ProgrammingPolicyProfileSupport.defaultPreGenerationProfile();
+		ReplayProfile replay = request.replay() != null
+				? ProgrammingPolicyProfileSupport.materializeReplayProfile(request.replay())
+				: ProgrammingPolicyProfileSupport.defaultReplayProfile();
+		CompositionProfile composition = request.composition() != null
+				? ProgrammingPolicyProfileSupport.materializeCompositionProfile(request.composition())
+				: ProgrammingPolicyProfileSupport.defaultCompositionProfile();
+		ProgrammingPolicyProfileSupport.validateProfiles(preGeneration, replay, composition);
+		StationProgrammingPolicyEntity previewPolicy = new StationProgrammingPolicyEntity();
+		previewPolicy.setId("preview-policy-" + station.getId());
+		previewPolicy.setStationId(station.getId());
+		previewPolicy.setVersion(request.version());
+		previewPolicy.setDefaultTemplateId(request.defaultTemplateId());
+		previewPolicy.setFallbackStrategy(request.fallbackStrategy());
+		previewPolicy.setPlanningHorizonMinutes(request.planningHorizonMinutes());
+		previewPolicy.setPreGenerationPolicy(ProgrammingPolicyProfileSupport.toMap(preGeneration));
+		previewPolicy.setReplayPolicy(ProgrammingPolicyProfileSupport.toMap(replay));
+		previewPolicy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(composition));
+		previewPolicy.setUpdatedAt(Instant.now());
+		return previewPolicy;
+	}
+
+	private List<ProgramRuleEntity> resolvePreviewRules(
+			StationProgrammingPolicyEntity policy,
+			ProgrammingDtos.ProgrammingPolicyRequest request) {
+		if (request == null) {
+			return policy == null ? List.of() : ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId());
+		}
+		List<ProgramRuleEntity> rules = new ArrayList<>();
+		for (int index = 0; index < request.rules().size(); index++) {
+			ProgrammingDtos.ProgramRuleRequest ruleRequest = request.rules().get(index);
+			ProgramRuleEntity entity = new ProgramRuleEntity();
+			entity.setId("preview-rule-" + (index + 1));
+			entity.setPolicyId(policy.getId());
+			entity.setPriority(ruleRequest.priority());
+			entity.setDaysOfWeek(String.join(",", ProgrammingSupport.normalizeDays(ruleRequest.days())));
+			entity.setStartTime(ruleRequest.startTime());
+			entity.setEndTime(ruleRequest.endTime());
+			entity.setMinimumPendingLetters(ruleRequest.minimumPendingLetters());
+			entity.setRequiredProviderStates(ruleRequest.requiredProviderStates() == null ? List.of() : List.copyOf(ruleRequest.requiredProviderStates()));
+			entity.setTemplateId(ruleRequest.templateId());
+			rules.add(entity);
+		}
+		return List.copyOf(rules);
+	}
+
+	private Optional<ProgrammingDtos.ProgramTemplateDetail> resolveTemplate(
+			String templateId,
+			String stationId,
+			ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
+		if (draftTemplate != null && Objects.equals(draftTemplate.id(), templateId)) {
+			return isTemplateUsable(templateId, stationId, draftTemplate) ? Optional.of(draftTemplate) : Optional.empty();
+		}
+		return templateRepository.findById(templateId)
+				.filter(template -> "GLOBAL".equalsIgnoreCase(template.getScope())
+						|| ("STATION".equalsIgnoreCase(template.getScope()) && stationId.equals(template.getStationId())))
+				.map(this::toDetail);
+	}
+
+	private ProgrammingDtos.ProgramTemplateDetail toDraftTemplate(String stationId, ProgrammingDtos.ProgramTemplateRequest request) {
+		ProgramTemplateEntity entity = buildTemplate(null, request);
+		validateTemplateGraph(entity, request.slots());
+		if (!"GLOBAL".equalsIgnoreCase(request.scope()) && !"STATION".equalsIgnoreCase(request.scope())) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "template scope が不正です。", Map.of("scope", request.scope()));
+		}
+		if ("STATION".equalsIgnoreCase(request.scope()) && !stationId.equals(request.stationId())) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TEMPLATE", "preview station と異なる station scope template は評価できません。", Map.of("stationId", request.stationId()));
+		}
+		return new ProgrammingDtos.ProgramTemplateDetail(
+				request.id(),
+				request.scope().toUpperCase(Locale.ROOT),
+				request.stationId(),
+				request.name(),
+				request.version(),
+				request.targetDurationMinutes(),
+				request.planningHorizonMinutes(),
+				request.isActive(),
+				request.editorialPolicy() == null ? Map.of() : new LinkedHashMap<>(request.editorialPolicy()),
+				request.fallbackTemplateId(),
+				request.slots());
 	}
 
 	private StationEntity findStation(String id) {
@@ -435,5 +544,9 @@ public class ProgrammingAdminService {
 
 	private ProgrammingDtos.PreviewSlot toPreviewSlot(ProgramTemplateSlotEntity entity) {
 		return new ProgrammingDtos.PreviewSlot(entity.getId(), entity.getRole(), entity.getConstraintMode(), entity.getTargetDurationMs());
+	}
+
+	private ProgrammingDtos.PreviewSlot toPreviewSlot(ProgrammingDtos.ProgramSlotDto slot) {
+		return new ProgrammingDtos.PreviewSlot(slot.slotId(), slot.role(), slot.constraintMode(), slot.targetDurationMs());
 	}
 }

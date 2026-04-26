@@ -183,12 +183,24 @@ export function SettingsDashboard() {
     refetchOnWindowFocus: false,
   });
   const previewMutation = useMutation({
-    mutationFn: () =>
-      previewProgramming(selectedStationId ?? "", {
-        at: toPreviewIso(previewDraft.at),
-        pendingLetterCount: previewDraft.pendingLetterCount,
-        providerStates: previewDraft.providerStates,
-      }),
+    mutationFn: () => {
+      if (!selectedStationId) {
+        throw new Error("Preview 対象の station を選択してください。");
+      }
+      return previewProgramming(
+        selectedStationId,
+        buildProgrammingPreviewRequest({
+          stationId: selectedStationId,
+          previewDraft,
+          programmingDraft,
+          savedProgramming: stationProgrammingQuery.data,
+          isProgrammingDirty,
+          templateDraft,
+          templateEditorMode,
+          isTemplateDirty,
+        }),
+      );
+    },
   });
   const applyStationSave = (saved: StationResponse, mode: "create" | "update") => {
     queryClient.setQueryData<StationSummary[]>(["settings", "stations"], (current) => {
@@ -364,6 +376,16 @@ export function SettingsDashboard() {
   const isProgrammingDirty =
     baseProgrammingDraft !== null && programmingDraft !== null && JSON.stringify(baseProgrammingDraft) !== JSON.stringify(programmingDraft);
   const bindHostWarning = draft && isUnsafeBindHost(draft.server.bindHost);
+  const previewUsesPolicyDraft = Boolean(selectedStationId && programmingDraft && isProgrammingDirty);
+  const previewTemplateDraftId = selectedStationId
+    ? resolvePreviewTemplateDraftId({
+        stationId: selectedStationId,
+        programming: previewUsesPolicyDraft ? (programmingDraft ?? undefined) : stationProgrammingQuery.data,
+        templateDraft,
+        isTemplateDirty,
+        templateEditorMode,
+      })
+    : null;
 
   function confirmDiscardStationChanges(actionLabel: string) {
     if (!isStationDirty) {
@@ -1149,6 +1171,8 @@ export function SettingsDashboard() {
           previewResult={previewMutation.data}
           previewError={previewMutation.error}
           previewPending={previewMutation.isPending}
+          previewUsesPolicyDraft={previewUsesPolicyDraft}
+          previewTemplateDraftId={previewTemplateDraftId}
           onStationChange={setSelectedStationId}
           onPreviewDraftChange={setPreviewDraft}
           onPreview={() => previewMutation.mutate()}
@@ -3000,6 +3024,8 @@ function ProgrammingPreviewCard({
   previewResult,
   previewError,
   previewPending,
+  previewUsesPolicyDraft,
+  previewTemplateDraftId,
   onStationChange,
   onPreviewDraftChange,
   onPreview,
@@ -3010,6 +3036,8 @@ function ProgrammingPreviewCard({
   previewResult?: ProgrammingPreviewResponse;
   previewError: unknown;
   previewPending: boolean;
+  previewUsesPolicyDraft: boolean;
+  previewTemplateDraftId: string | null;
   onStationChange: (stationId: string | null) => void;
   onPreviewDraftChange: Dispatch<SetStateAction<PreviewDraft>>;
   onPreview: () => void;
@@ -3019,12 +3047,24 @@ function ProgrammingPreviewCard({
       <SectionHeader
         eyebrow="Preview"
         title="Programming preview"
-        description="station, pending letters, provider state を指定して preview API の結果を確認します。"
+        description="station, pending letters, provider state を指定し、必要に応じて未保存の policy / template draft を含めて preview API の結果を確認します。"
       />
       {!stations.length ? (
         <EmptyState title="Preview 対象の station がありません" description="局を追加すると preview を試せます。" />
       ) : (
         <div className="space-y-4">
+          {previewUsesPolicyDraft || previewTemplateDraftId ? (
+            <InlineNotice
+              tone="accent"
+              message={
+                previewUsesPolicyDraft && previewTemplateDraftId
+                  ? `未保存の station programming draft と template draft (${previewTemplateDraftId}) を含めて preview します。保存しない限り DB には反映されません。`
+                  : previewUsesPolicyDraft
+                    ? "未保存の station programming draft を含めて preview します。保存しない限り DB には反映されません。"
+                    : `未保存の template draft (${previewTemplateDraftId}) を含めて preview します。保存しない限り DB には反映されません。`
+              }
+            />
+          ) : null}
           <div>
             <Label htmlFor="preview-station-select">Station</Label>
             <select
@@ -3095,9 +3135,13 @@ function ProgrammingPreviewCard({
               </div>
             ))}
           </div>
-          <Button tone="primary" disabled={!selectedStationId || previewPending} onClick={onPreview}>
-            {previewPending ? "Previewing..." : "Run Preview"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button tone="primary" disabled={!selectedStationId || previewPending} onClick={onPreview}>
+              {previewPending ? "Previewing..." : "Run Preview"}
+            </Button>
+            {previewUsesPolicyDraft ? <Badge tone="accent">using programming draft</Badge> : null}
+            {previewTemplateDraftId ? <Badge tone="accent">using template draft {previewTemplateDraftId}</Badge> : null}
+          </div>
           {previewResult ? (
             <div className="space-y-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -3152,6 +3196,84 @@ function KeyValueGrid({ title, entries }: { title: string; entries: Array<[strin
       </div>
     </div>
   );
+}
+
+function buildProgrammingPreviewRequest({
+  stationId,
+  previewDraft,
+  programmingDraft,
+  savedProgramming,
+  isProgrammingDirty,
+  templateDraft,
+  templateEditorMode,
+  isTemplateDirty,
+}: {
+  stationId: string;
+  previewDraft: PreviewDraft;
+  programmingDraft: StationProgrammingUpdateRequest | null;
+  savedProgramming?: StationProgrammingResponse;
+  isProgrammingDirty: boolean;
+  templateDraft: ProgramTemplateEditorDraft | null;
+  templateEditorMode: "existing" | "create";
+  isTemplateDirty: boolean;
+}): ProgrammingPreviewRequest {
+  const policyDraft = programmingDraft && isProgrammingDirty ? programmingDraft : null;
+  const templateDraftId = resolvePreviewTemplateDraftId({
+    stationId,
+    programming: policyDraft ?? savedProgramming,
+    templateDraft,
+    isTemplateDirty,
+    templateEditorMode,
+  });
+  const templatePayload =
+    templateDraftId && templateDraft && templateDraft.id.trim() === templateDraftId ? serializeProgramTemplateDraft(templateDraft) : null;
+
+  return {
+    at: toPreviewIso(previewDraft.at),
+    pendingLetterCount: previewDraft.pendingLetterCount,
+    providerStates: previewDraft.providerStates,
+    policyDraft,
+    templateDraft: templatePayload,
+  };
+}
+
+function resolvePreviewTemplateDraftId({
+  stationId,
+  programming,
+  templateDraft,
+  isTemplateDirty,
+  templateEditorMode,
+}: {
+  stationId: string;
+  programming?: ProgrammingTemplateReferenceSource;
+  templateDraft: ProgramTemplateEditorDraft | null;
+  isTemplateDirty: boolean;
+  templateEditorMode: "existing" | "create";
+}) {
+  if (!templateDraft || (templateEditorMode !== "create" && !isTemplateDirty)) {
+    return null;
+  }
+  const templateId = templateDraft.id.trim();
+  if (!templateId || !doesTemplateDraftApplyToStation(templateDraft, stationId)) {
+    return null;
+  }
+  if (!programming || !doesProgrammingReferenceTemplate(programming, templateId)) {
+    return null;
+  }
+  return templateId;
+}
+
+type ProgrammingTemplateReferenceSource = {
+  defaultTemplateId: string | null;
+  rules: Array<{ templateId: string }>;
+};
+
+function doesProgrammingReferenceTemplate(programming: ProgrammingTemplateReferenceSource, templateId: string) {
+  return programming.defaultTemplateId === templateId || programming.rules.some((rule) => rule.templateId === templateId);
+}
+
+function doesTemplateDraftApplyToStation(draft: Pick<ProgramTemplateEditorDraft, "scope" | "stationId">, stationId: string) {
+  return draft.scope === "GLOBAL" || (draft.scope === "STATION" && draft.stationId === stationId);
 }
 
 function createPreviewDraft(): PreviewDraft {

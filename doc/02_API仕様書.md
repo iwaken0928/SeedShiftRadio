@@ -812,7 +812,7 @@ Response:
 
 `PUT /stations/{id}/programming` では station 側の `programmingEnabled` と `defaultProgramTemplateId` も同期更新し、`version` は楽観ロック用に扱う。`preGeneration`, `replay`, `composition` は station ごとの実行時調整プロファイルとして扱い、既存 `ProgramTemplate` の版を壊さずに運用中 block の深さ、キャッシュ優先度、再放送比率、番組の混ぜ方を調整できるようにする。`StationDetail.programming` はこの完全版の要約、`station_programming_policy` は完全版の正本とする。
 
-Web の `/settings` ではこの API を station programming policy editor の保存先として使う。Import / Export の対象である `/api/settings` `config.json` とは別の DB 正本であり、保存後は station detail と station list を再取得して要約ビューを更新する。現行 Preview UI は保存済み policy を評価し、未保存 draft policy の preview は後続拡張とする。
+Web の `/settings` ではこの API を station programming policy editor の保存先として使う。Import / Export の対象である `/api/settings` `config.json` とは別の DB 正本であり、保存後は station detail と station list を再取得して要約ビューを更新する。Preview UI は既定では保存済み policy を評価しつつ、必要に応じて未保存 `StationProgrammingPolicy` draft と `ProgramTemplate` draft を request payload に含めて評価できる。preview request に含めた draft は DB へ保存せず、実行中 block にも反映しない。
 
 ### 6.7 `POST /stations/{id}/programming/preview`
 
@@ -826,9 +826,82 @@ Request:
     "musicGen": "UP",
     "tts": "UP",
     "llm": "UP"
+  },
+  "policyDraft": {
+    "version": 3,
+    "enabled": true,
+    "defaultTemplateId": "tmpl-preview-draft",
+    "fallbackStrategy": "LEGACY_RATIO",
+    "planningHorizonMinutes": 30,
+    "preGeneration": {
+      "mode": "ASSISTED",
+      "maxPreparedMinutes": 12,
+      "maxPreparedBlocks": 2,
+      "preferCacheReuse": true
+    },
+    "replay": {
+      "intensity": "LIGHT",
+      "eligibleSegmentTypes": ["MUSIC_AI", "MUSIC_LOCAL"],
+      "minimumAssetAgeHours": 6,
+      "cooldownHours": 72,
+      "maxReplaySharePercent": 20,
+      "excludeLetterSegments": true
+    },
+    "composition": {
+      "targetSegmentShares": {
+        "talk": 40,
+        "letter": 20,
+        "music": 35,
+        "jingle": 5
+      },
+      "maxConsecutiveTalkSegments": 2,
+      "musicBreakIntervalMinutes": 8,
+      "letterPriorityBoostThreshold": 4,
+      "allowSoftFallbackRetiming": true
+    },
+    "rules": [
+      {
+        "priority": 100,
+        "days": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+        "startTime": "00:00",
+        "endTime": "23:59",
+        "minimumPendingLetters": 1,
+        "requiredProviderStates": [],
+        "templateId": "tmpl-preview-draft"
+      }
+    ]
+  },
+  "templateDraft": {
+    "id": "tmpl-preview-draft",
+    "scope": "STATION",
+    "stationId": "station-night",
+    "name": "深夜レター拾い draft",
+    "version": 0,
+    "targetDurationMinutes": 20,
+    "planningHorizonMinutes": 15,
+    "isActive": true,
+    "editorialPolicy": {
+      "tone": "calm"
+    },
+    "fallbackTemplateId": "tmpl-night-regular",
+    "slots": [
+      {
+        "slotId": "letter-main",
+        "role": "LETTER",
+        "constraintMode": "HARD",
+        "candidateSegmentTypes": ["LETTER", "TALK"],
+        "fallbackSegmentTypes": ["TALK"],
+        "targetDurationMs": 120000,
+        "slotPolicy": {
+          "preferFreshGeneration": true
+        }
+      }
+    ]
   }
 }
 ```
+
+`policyDraft`, `templateDraft` は任意です。未指定時は保存済み `StationProgrammingPolicy` / `ProgramTemplate` を評価し、指定した時だけ request 内の draft payload を優先します。`templateDraft` は preview 対象 station に対して有効な `GLOBAL` または同一 station の `STATION` scope だけを受け付けます。
 
 Response:
 

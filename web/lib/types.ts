@@ -156,6 +156,8 @@ export interface ProgrammingPreviewRequest {
   at: string;
   pendingLetterCount: number;
   providerStates: ProgrammingPreviewProviderStates;
+  policyDraft?: StationProgrammingUpdateRequest | null;
+  templateDraft?: ProgramTemplateUpdateRequest | null;
 }
 
 export interface ProgrammingPreviewProgram {

@@ -190,6 +190,78 @@ test("settings: preview uses unsaved programming and template drafts", async ({ 
   await expect(previewPanel).toContainText("draft-letter");
 });
 
+test("settings: ProgramTemplate blank create -> save and select new template", async ({ page }) => {
+  const state = createSettingsState();
+  const templateCreateRequests: RequestCapture[] = [];
+
+  await installSettingsRoutes(page, state, { templateCreateRequests });
+  await page.goto(appUrl("/settings"));
+
+  const stationPanel = panelByHeading(page, "Station overview");
+  const templatePanel = panelByHeading(page, "Program templates");
+  const createButton = templatePanel.getByRole("button", { name: "Create Template", exact: true });
+
+  await expect(templatePanel.locator("#program-template-select")).toHaveValue("tmpl-night");
+
+  await templatePanel.getByRole("button", { name: "New Template", exact: true }).click();
+
+  await expect(templatePanel.locator("#program-template-select")).toHaveValue("");
+  await expect(templatePanel.locator("#template-id")).toHaveValue("");
+  await expect(templatePanel.locator("#template-id")).toBeEditable();
+  await expect(templatePanel.locator("#template-name")).toHaveValue("");
+  await expect(templatePanel.locator("#template-scope")).toHaveValue("STATION");
+  await expect(templatePanel.locator("#template-station")).toHaveValue("station-night");
+  await expect(templatePanel.locator("#template-duration")).toHaveValue("15");
+  await expect(templatePanel.locator("#template-horizon")).toHaveValue("10");
+  await expect(templatePanel.locator("#template-slot-id-0")).toHaveValue("opening");
+  await expect(templatePanel).toContainText("Template ID は必須です。");
+  await expect(templatePanel).toContainText("Template 名は必須です。");
+  await expect(createButton).toBeDisabled();
+
+  await templatePanel.locator("#template-id").fill("tmpl-night-blank");
+  await templatePanel.locator("#template-name").fill("Night Blank");
+
+  await expect(templatePanel).not.toContainText("Template ID は必須です。");
+  await expect(templatePanel).not.toContainText("Template 名は必須です。");
+  await expect(createButton).toBeEnabled();
+
+  await createButton.click();
+
+  await expect.poll(() => templateCreateRequests.length).toBe(1);
+  await expect(templateCreateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  await expect(templateCreateRequests[0]?.body).toMatchObject({
+    version: 0,
+    id: "tmpl-night-blank",
+    scope: "STATION",
+    stationId: "station-night",
+    name: "Night Blank",
+    targetDurationMinutes: 15,
+    planningHorizonMinutes: 10,
+    isActive: true,
+    fallbackTemplateId: null,
+    editorialPolicy: {},
+  });
+  await expect(templateCreateRequests[0]?.body.slots).toEqual([
+    {
+      slotId: "opening",
+      role: "OPENING",
+      constraintMode: "HARD",
+      candidateSegmentTypes: ["JINGLE", "TALK"],
+      fallbackSegmentTypes: ["TALK"],
+      targetDurationMs: 30000,
+      slotPolicy: {},
+    },
+  ]);
+  await expect(templatePanel.locator("#program-template-select")).toHaveValue("tmpl-night-blank");
+  await expect(templatePanel.locator("#program-template-select option[value='tmpl-night-blank']")).toContainText("Night Blank");
+  await expect(templatePanel.locator("#template-id")).toHaveValue("tmpl-night-blank");
+  await expect(templatePanel.locator("#template-id")).not.toBeEditable();
+  await expect(templatePanel.locator("#template-name")).toHaveValue("Night Blank");
+  await expect(templatePanel.getByRole("button", { name: "Save Template", exact: true })).toBeVisible();
+  await expect(stationPanel.locator("#programming-default-template option[value='tmpl-night-blank']")).toContainText("Night Blank");
+  await expect(templatePanel).toContainText("ProgramTemplate を作成しました。");
+});
+
 test("settings: ProgramTemplate duplicate draft -> update existing", async ({ page }) => {
   const state = createSettingsState();
   const templateUpdateRequests: RequestCapture[] = [];

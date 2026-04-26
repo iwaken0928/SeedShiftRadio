@@ -334,7 +334,7 @@ export function SettingsDashboard() {
     setSelectedTemplateId(saved.id);
     setTemplateNotice(
       mode === "create"
-        ? "ProgramTemplate を作成しました。Preview は保存済み template / policy に対して実行されます。"
+        ? "ProgramTemplate を作成しました。必要に応じて未保存の policy / template draft を含めて Preview を確認できます。"
         : "ProgramTemplate を保存しました。変更は実行中 block ではなく次の番組から反映されます。",
     );
     void queryClient.invalidateQueries({ queryKey: ["settings", "program-templates"] });
@@ -2662,7 +2662,7 @@ function ProgramTemplateCard({
       <SectionHeader
         eyebrow="Templates"
         title="Program templates"
-        description="ProgramTemplate の作成・複製・編集を行います。Preview は保存済み template / policy に対して実行され、実行中 block ではなく次の番組から反映されます。"
+        description="ProgramTemplate の作成・複製・編集を行います。Preview は保存済みデータに加えて関連する未保存 draft も評価でき、保存した変更は実行中 block ではなく次の番組から反映されます。"
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" tone="secondary" onClick={onStartCreateTemplate}>
@@ -2744,7 +2744,7 @@ function ProgramTemplateCard({
 
                 <SettingsSection
                   title="Template Editor"
-                  description="Template 本体を編集します。scope / station / fallback の整合は保存前に確認し、Preview は保存済み template に対して実行してください。"
+                  description="Template 本体を編集します。scope / station / fallback の整合は保存前に確認し、必要に応じて未保存 draft を含めた Preview で結果を確認できます。"
                 >
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
@@ -2771,7 +2771,7 @@ function ProgramTemplateCard({
                     ))}
                     <InlineNotice
                       tone="warning"
-                      message="Template 変更は次の ProgramBlock から反映されます。Preview は未保存 draft を直接評価せず、保存済み template / policy を対象にします。"
+                      message="Template 変更は次の ProgramBlock から反映されます。Programming Preview では、関連する未保存 policy / template draft を保存せずに評価できます。"
                     />
 
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

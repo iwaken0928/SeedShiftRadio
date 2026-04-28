@@ -31,6 +31,20 @@ import {
 } from "@/lib/types";
 import { getAdminToken, getApiBaseUrl } from "@/lib/env";
 
+export class ApiRequestError extends Error {
+  status: number;
+  code: string | null;
+  fieldErrors: Record<string, string>;
+
+  constructor(message: string, options: { status: number; code?: string | null; fieldErrors?: Record<string, string> }) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = options.status;
+    this.code = options.code ?? null;
+    this.fieldErrors = options.fieldErrors ?? {};
+  }
+}
+
 export function buildApiUrl(path: string, apiBase = getApiBaseUrl()) {
   return `${apiBase}${path}`;
 }
@@ -46,8 +60,12 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   });
 
   if (!response.ok) {
-    const message = await safeReadError(response);
-    throw new Error(message || `Request failed: ${response.status}`);
+    const payload = await readApiError(response);
+    throw new ApiRequestError(payload.message || `Request failed: ${response.status}`, {
+      status: response.status,
+      code: payload.code,
+      fieldErrors: payload.fieldErrors,
+    });
   }
 
   if (response.status === 204) {
@@ -72,18 +90,47 @@ export function withAdminHeaders(headers?: HeadersInit) {
 }
 
 export async function safeReadError(response: Response) {
+  const payload = await readApiError(response);
+  return payload.message;
+}
+
+async function readApiError(response: Response) {
   try {
     const payload = await response.json();
-    if (typeof payload?.message === "string") {
-      return payload.message;
+    if (payload && typeof payload === "object") {
+      return {
+        message:
+          typeof payload.message === "string"
+            ? payload.message
+            : typeof payload.error === "string"
+              ? payload.error
+              : response.statusText || `Request failed: ${response.status}`,
+        code: typeof payload.code === "string" ? payload.code : null,
+        fieldErrors: extractFieldErrors((payload as { details?: unknown }).details),
+      };
     }
-    if (typeof payload?.error === "string") {
-      return payload.error;
-    }
-    return JSON.stringify(payload);
   } catch {
-    return response.statusText;
+    // fall through to statusText fallback
   }
+
+  return {
+    message: response.statusText || `Request failed: ${response.status}`,
+    code: null,
+    fieldErrors: {},
+  };
+}
+
+function extractFieldErrors(details: unknown) {
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return {};
+  }
+  const rawFieldErrors = (details as { fieldErrors?: unknown }).fieldErrors;
+  if (!rawFieldErrors || typeof rawFieldErrors !== "object" || Array.isArray(rawFieldErrors)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(rawFieldErrors).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 }
 
 export function getApiBase() {

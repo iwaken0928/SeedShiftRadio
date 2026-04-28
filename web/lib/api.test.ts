@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ApiRequestError,
   buildApiUrl,
   buildLettersPath,
   buildNextSpeechDirectivePath,
@@ -71,6 +72,39 @@ describe("api helpers", () => {
     );
 
     await expect(requestJson("/api/radio/tune")).rejects.toThrow("bad request");
+  });
+
+  it("requestJson は fieldErrors を持つ ApiRequestError を返す", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "VALIDATION_ERROR",
+          message: "入力値を確認してください。",
+          details: {
+            fieldErrors: {
+              "slots[0].slotId": "slotId が重複しています。",
+              fallbackTemplateId: "fallbackTemplateId が循環しています。",
+            },
+          },
+        }),
+        {
+          status: 400,
+          statusText: "Bad Request",
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await expect(requestJson("/api/program-templates")).rejects.toMatchObject({
+      name: "ApiRequestError",
+      message: "入力値を確認してください。",
+      status: 400,
+      code: "VALIDATION_ERROR",
+      fieldErrors: {
+        "slots[0].slotId": "slotId が重複しています。",
+        fallbackTemplateId: "fallbackTemplateId が循環しています。",
+      },
+    } satisfies Partial<ApiRequestError>);
   });
 
   it("safeReadError は message / error / statusText を順に使う", async () => {

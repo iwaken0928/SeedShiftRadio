@@ -20,6 +20,11 @@ type RequestCapture = {
   headers: Record<string, string>;
 };
 
+type FailureResponse = {
+  status: 400 | 409;
+  body: Record<string, unknown>;
+};
+
 type TemplateSummaryState = ReturnType<typeof buildProgramTemplateSummary>;
 
 test.beforeEach(async ({ page }) => {
@@ -262,6 +267,45 @@ test("settings: ProgramTemplate blank create -> save and select new template", a
   await expect(templatePanel).toContainText("ProgramTemplate を作成しました。");
 });
 
+test("settings: ProgramTemplate create shows safe conflict message on 409", async ({ page }) => {
+  const state = createSettingsState();
+  const templateCreateRequests: RequestCapture[] = [];
+
+  await installSettingsRoutes(page, state, {
+    templateCreateRequests,
+    templateCreateFailure: {
+      status: 409,
+      body: {
+        code: "CONFLICT",
+        message: "duplicate template id: tmpl-night-secret authorization: Bearer super-secret-token",
+        details: {
+          fieldErrors: {
+            id: "tmpl-night-secret is already used",
+          },
+        },
+      },
+    },
+  });
+  await page.goto(appUrl("/settings"));
+
+  const templatePanel = panelByHeading(page, "Program templates");
+
+  await templatePanel.getByRole("button", { name: "New Template", exact: true }).click();
+  await templatePanel.locator("#template-id").fill("tmpl-night-secret");
+  await templatePanel.locator("#template-name").fill("Night Secret");
+  await templatePanel.getByRole("button", { name: "Create Template", exact: true }).click();
+
+  await expect.poll(() => templateCreateRequests.length).toBe(1);
+  await expect(templatePanel).toContainText(
+    "同じ Template ID の ProgramTemplate が既に存在するため作成できません。別の Template ID に変更して再度保存してください。",
+  );
+  await expect(templatePanel).not.toContainText("authorization: Bearer super-secret-token");
+  await expect(templatePanel).toContainText("id: tmpl-night-secret is already used");
+  await expect(templatePanel.locator("#program-template-select")).toHaveValue("");
+  await expect(templatePanel.locator("#template-id")).toHaveValue("tmpl-night-secret");
+  await expect(templatePanel.locator("#template-id")).toBeEditable();
+});
+
 test("settings: ProgramTemplate duplicate draft -> update existing", async ({ page }) => {
   const state = createSettingsState();
   const templateUpdateRequests: RequestCapture[] = [];
@@ -295,6 +339,43 @@ test("settings: ProgramTemplate duplicate draft -> update existing", async ({ pa
     "letter-main",
   ]);
   await expect(templatePanel).toContainText("ProgramTemplate を保存しました。");
+});
+
+test("settings: ProgramTemplate update shows safe validation message on 400", async ({ page }) => {
+  const state = createSettingsState();
+  const templateUpdateRequests: RequestCapture[] = [];
+
+  await installSettingsRoutes(page, state, {
+    templateUpdateRequests,
+    templateUpdateFailure: {
+      status: 400,
+      body: {
+        code: "VALIDATION_ERROR",
+        message: "candidateSegmentTypes contains unsupported value SECRET_SEGMENT and token=abc123",
+        details: {
+          fieldErrors: {
+            "slots[0].candidateSegmentTypes": "SECRET_SEGMENT is unsupported",
+          },
+        },
+      },
+    },
+  });
+  await page.goto(appUrl("/settings"));
+
+  const templatePanel = panelByHeading(page, "Program templates");
+
+  await templatePanel.locator("#template-name").fill("Night Talk Validation");
+  await templatePanel.getByRole("button", { name: "Save Template", exact: true }).click();
+
+  await expect.poll(() => templateUpdateRequests.length).toBe(1);
+  await expect(templatePanel).toContainText(
+    "ProgramTemplate を保存できませんでした。scope / station / slot / segmentType の整合を見直してから再度保存してください。",
+  );
+  await expect(templatePanel).toContainText("slots[0].candidateSegmentTypes: SECRET_SEGMENT is unsupported");
+  await expect(templatePanel).not.toContainText("token=abc123");
+  await expect(templatePanel.locator("#program-template-select")).toHaveValue("tmpl-night");
+  await expect(templatePanel.locator("#template-name")).toHaveValue("Night Talk Validation");
+  await expect(templatePanel).not.toContainText("ProgramTemplate を保存しました。");
 });
 
 function createSettingsState() {
@@ -347,6 +428,8 @@ async function installSettingsRoutes(
     previewRequests?: RequestCapture[];
     templateCreateRequests?: RequestCapture[];
     templateUpdateRequests?: RequestCapture[];
+    templateCreateFailure?: FailureResponse;
+    templateUpdateFailure?: FailureResponse;
   },
 ) {
   await page.route(apiUrl("/api/settings"), async (route) => {
@@ -470,6 +553,10 @@ async function installSettingsRoutes(
 
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     captures.templateCreateRequests?.push({ body, headers: route.request().headers() });
+    if (captures.templateCreateFailure) {
+      await fulfillJson(route, captures.templateCreateFailure.body, captures.templateCreateFailure.status);
+      return;
+    }
     const templateId = String(body.id);
     const detail = {
       ...body,
@@ -490,6 +577,10 @@ async function installSettingsRoutes(
 
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     captures.templateUpdateRequests?.push({ body, headers: route.request().headers() });
+    if (captures.templateUpdateFailure) {
+      await fulfillJson(route, captures.templateUpdateFailure.body, captures.templateUpdateFailure.status);
+      return;
+    }
     const updated = {
       ...body,
       id: templateId,

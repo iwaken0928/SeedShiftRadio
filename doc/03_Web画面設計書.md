@@ -108,6 +108,8 @@
 - 番組テンプレート編集では `HARD` / `SOFT` の違いを明示し、dirty/reset/save、create/duplicate を持つ editor を提供する
 - `Programming Preview` は保存済み `ProgramTemplate` / `StationProgrammingPolicy` に加えて、現在の `/settings` で編集中の未保存 draft を request payload として含めて実行できる。draft preview は DB 保存や実行中 block への反映を行わない
 - ProgramTemplate editor の `editorialPolicy` / `slotPolicy` は JSON object editor とし、`scope` と `stationId` の整合、`slotId` 一意性、`candidateSegmentTypes` 必須、`targetDurationMs` 下限を UI でも確認する
+- ProgramTemplate 保存で `400` や `409` が返った時は create/edit draft を保持したまま、server message と field error を表示して修正継続できるようにする
+- ProgramTemplate の create / update が `400` または `409` を返した場合、`/settings` は safe metadata ルールに沿って message / field error を表示し、draft は保持したまま修正や再試行を続けられるようにする
 - station 基本情報編集では `PUT /api/stations/{id}` を使い、局 ID は読み取り専用、`version` 楽観ロック、dirty/reset/save、必須項目、周波数下限を UI でも確認する
 - station 作成/複製では create mode を別に持ち、`POST /api/stations` を使う。create mode では局 ID を編集可能にし、保存後は新 station を選択状態へ切り替える
 - station 複製は局基本情報だけを初期値として引き継ぎ、`id` と `frequencyMHz` は新規候補へ補正する。`STATION` scope template を指す `defaultProgramTemplateId` や policy/rules は自動複製せず、保存後に policy editor で調整する

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ApiRequestError,
   createProgramTemplate,
   createStation,
   getProgramTemplate,
@@ -19,7 +20,7 @@ import {
   updateSettings,
 } from "@/lib/api";
 import { getAdminToken } from "@/lib/env";
-import { formatSafeDisplayText, getSafeMetadataEntries } from "@/lib/safe-metadata";
+import { formatSafeDisplayText, getSafeMetadataEntries, REDACTED_METADATA_VALUE } from "@/lib/safe-metadata";
 import { buildSettingsExportFilename, buildSettingsExportPayload, parseSettingsImportPayload } from "@/lib/settings-import-export";
 import { applyProgrammingSummaryToStationDraft, cloneStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
 import {
@@ -2599,6 +2600,8 @@ function ProgramTemplateCard({
   const updateDraft = (updater: (current: ProgramTemplateEditorDraft) => ProgramTemplateEditorDraft) => {
     onDraftChange((current) => (current ? updater(current) : current));
   };
+  const saveErrorMessage = getProgramTemplateSaveErrorMessage(error, isCreatingTemplate ? "create" : "update");
+  const apiFieldErrors = getApiFieldErrorMessages(error);
 
   const fallbackOptions = draft ? templates.filter((entry) => isTemplateUsableForDraft(entry, draft) && entry.id !== draft.id.trim()) : [];
   const duplicateSlotIds = new Set(
@@ -2765,7 +2768,10 @@ function ProgramTemplateCard({
                     </div>
 
                     {notice ? <InlineNotice tone="accent" message={notice} /> : null}
-                    {error instanceof Error ? <InlineNotice tone="danger" message={formatSafeDisplayText(error.message)} /> : null}
+                    {saveErrorMessage ? <InlineNotice tone="danger" message={saveErrorMessage} /> : null}
+                    {apiFieldErrors.map((message) => (
+                      <InlineNotice key={message} tone="danger" message={message} />
+                    ))}
                     {validationMessages.map((message) => (
                       <InlineNotice key={message} tone="warning" message={message} />
                     ))}
@@ -3274,6 +3280,33 @@ function doesProgrammingReferenceTemplate(programming: ProgrammingTemplateRefere
 
 function doesTemplateDraftApplyToStation(draft: Pick<ProgramTemplateEditorDraft, "scope" | "stationId">, stationId: string) {
   return draft.scope === "GLOBAL" || (draft.scope === "STATION" && draft.stationId === stationId);
+}
+
+function getProgramTemplateSaveErrorMessage(error: unknown, mode: "create" | "update") {
+  if (error instanceof ApiRequestError) {
+    const safeMessage = formatSafeDisplayText(error.message);
+    if (safeMessage && safeMessage !== REDACTED_METADATA_VALUE) {
+      return safeMessage;
+    }
+    if (error.status === 400) {
+      return mode === "create"
+        ? "ProgramTemplate を作成できませんでした。scope / station / slot / segmentType の整合を見直してから再度保存してください。"
+        : "ProgramTemplate を保存できませんでした。scope / station / slot / segmentType の整合を見直してから再度保存してください。";
+    }
+    if (error.status === 409) {
+      return mode === "create"
+        ? "同じ Template ID の ProgramTemplate が既に存在するため作成できません。別の Template ID に変更して再度保存してください。"
+        : "ProgramTemplate の保存が競合しました。最新の template を読み直してから再度保存してください。";
+    }
+  }
+  return error instanceof Error ? formatSafeDisplayText(error.message) : null;
+}
+
+function getApiFieldErrorMessages(error: unknown) {
+  if (!(error instanceof ApiRequestError)) {
+    return [];
+  }
+  return Object.entries(error.fieldErrors).map(([field, message]) => `${field}: ${formatSafeDisplayText(message)}`);
 }
 
 function createPreviewDraft(): PreviewDraft {

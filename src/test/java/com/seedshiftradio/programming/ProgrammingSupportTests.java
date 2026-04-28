@@ -33,9 +33,14 @@ class ProgrammingSupportTests {
 				rule,
 				OffsetDateTime.of(2026, 3, 21, 23, 30, 0, 0, ZoneOffset.ofHours(9)),
 				4,
-				Map.of("MUSICGEN_UP", "UP"));
+				ProgrammingSupport.normalizeProviderStates(Map.of("musicGen", "UP")));
 
 		assertTrue(matched);
+	}
+
+	@Test
+	void matchesTimeTreatsWindowEndAsExclusive() {
+		assertFalse(ProgrammingSupport.matchesTime("22:00", "23:30", "23:30"));
 	}
 
 	@Test

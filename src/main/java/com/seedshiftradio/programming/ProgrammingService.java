@@ -1,18 +1,13 @@
 package com.seedshiftradio.programming;
 
-import java.time.DayOfWeek;
 import java.time.Instant;
-import java.time.LocalTime;
 import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -49,7 +44,6 @@ import com.seedshiftradio.settings.ProviderHealthService;
 @Service
 public class ProgrammingService {
 
-	private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 	private static final EnumSet<LetterStatus> PENDING_LETTER_STATUSES = EnumSet.of(LetterStatus.UNREAD, LetterStatus.PENDING);
 
 	private final StationRepository stationRepository;
@@ -258,12 +252,13 @@ public class ProgrammingService {
 			OffsetDateTime at,
 			int pendingLetterCount,
 			Map<String, String> providerStates) {
+		Map<String, String> normalizedProviderStates = ProgrammingSupport.normalizeProviderStates(providerStates);
 		var station = stationRepository.findById(stationId)
 				.orElseThrow(() -> notFound("stationId", stationId));
 		var policy = policyRepository.findByStationId(stationId)
 				.orElseGet(() -> defaultPolicy(stationId, station.getDefaultProgramTemplateId()));
 		List<String> warnings = new ArrayList<>();
-		ProgramRuleEntity selectedRule = selectRule(policy.getId(), at, pendingLetterCount, providerStates);
+		ProgramRuleEntity selectedRule = selectRule(policy.getId(), at, pendingLetterCount, normalizedProviderStates);
 		ProgramTemplateEntity template = null;
 		String selectedTemplateId = null;
 		boolean fallbackApplied = false;
@@ -286,7 +281,7 @@ public class ProgrammingService {
 			warnings.add("有効なテンプレートが見つからないため固定比率へ縮退しました。");
 			return legacyFallbackPlan(warnings, true);
 		}
-		ResolvedSlotResolution resolvedSlots = resolveSlots(template, providerStates, pendingLetterCount, warnings);
+		ResolvedSlotResolution resolvedSlots = resolveSlots(template, normalizedProviderStates, pendingLetterCount, warnings);
 		return new ResolvedProgramPlan(
 				selectedTemplateId,
 				template.getVersion(),
@@ -299,19 +294,9 @@ public class ProgrammingService {
 
 	private ProgramRuleEntity selectRule(String policyId, OffsetDateTime at, int pendingLetterCount, Map<String, String> providerStates) {
 		for (ProgramRuleEntity rule : ruleRepository.findByPolicyIdOrderByPriorityDesc(policyId)) {
-			if (!matchesDay(rule.getDaysOfWeek(), at.getDayOfWeek())) {
-				continue;
+			if (ProgrammingSupport.matchesRule(rule, at, pendingLetterCount, providerStates)) {
+				return rule;
 			}
-			if (!matchesTimeWindow(rule.getStartTime(), rule.getEndTime(), at.toLocalTime())) {
-				continue;
-			}
-			if (pendingLetterCount < rule.getMinimumPendingLetters()) {
-				continue;
-			}
-			if (!requiredStatesSatisfied(rule.getRequiredProviderStates(), providerStates)) {
-				continue;
-			}
-			return rule;
 		}
 		return null;
 	}
@@ -352,7 +337,7 @@ public class ProgrammingService {
 					slot.getId(),
 					HttpStatus.INTERNAL_SERVER_ERROR,
 					"INVALID_TEMPLATE");
-			if (isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
+			if (ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
 				return type;
 			}
 		}
@@ -367,21 +352,11 @@ public class ProgrammingService {
 					slot.getId(),
 					HttpStatus.INTERNAL_SERVER_ERROR,
 					"INVALID_TEMPLATE");
-			if (isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
+			if (ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
 				return type;
 			}
 		}
 		return null;
-	}
-
-	private boolean isSegmentTypeAvailable(SegmentType type, Map<String, String> providerStates, int pendingLetterCount) {
-		return switch (type) {
-			case LETTER -> pendingLetterCount > 0;
-			case MUSIC_AI -> "UP".equalsIgnoreCase(providerStates.getOrDefault("musicGen", "UNKNOWN"));
-			case TALK -> "UP".equalsIgnoreCase(providerStates.getOrDefault("tts", "UP"))
-					|| "UP".equalsIgnoreCase(providerStates.getOrDefault("llm", "UP"));
-			default -> true;
-		};
 	}
 
 	private Map<String, String> currentProviderStates() {
@@ -521,37 +496,6 @@ public class ProgrammingService {
 		if (!global && !sameStation) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TEMPLATE", "テンプレートは同一局または GLOBAL scope である必要があります。", Map.of("templateId", templateId));
 		}
-	}
-
-	private boolean matchesDay(String dayCsv, DayOfWeek dayOfWeek) {
-		String shortDay = dayOfWeek.name().substring(0, 3);
-		Set<String> daySet = Set.of(dayCsv.split(","));
-		return daySet.contains(shortDay);
-	}
-
-	private boolean matchesTimeWindow(String startTime, String endTime, LocalTime current) {
-		LocalTime start = LocalTime.parse(startTime, TIME_FORMATTER);
-		LocalTime end = LocalTime.parse(endTime, TIME_FORMATTER);
-		if (end.isAfter(start) || end.equals(start)) {
-			return !current.isBefore(start) && current.isBefore(end);
-		}
-		return !current.isBefore(start) || current.isBefore(end);
-	}
-
-	private boolean requiredStatesSatisfied(List<String> requiredStates, Map<String, String> providerStates) {
-		for (String requiredState : requiredStates) {
-			String normalized = requiredState.toUpperCase(Locale.ROOT);
-			if (normalized.equals("MUSICGEN_UP") && !"UP".equalsIgnoreCase(providerStates.getOrDefault("musicGen", "UNKNOWN"))) {
-				return false;
-			}
-			if (normalized.equals("TTS_UP") && !"UP".equalsIgnoreCase(providerStates.getOrDefault("tts", "UNKNOWN"))) {
-				return false;
-			}
-			if (normalized.equals("LLM_UP") && !"UP".equalsIgnoreCase(providerStates.getOrDefault("llm", "UNKNOWN"))) {
-				return false;
-			}
-		}
-		return true;
 	}
 
 	private Map<String, String> toProviderStateMap(com.seedshiftradio.station.StationDtos.ProviderStatesRequest providerStates) {

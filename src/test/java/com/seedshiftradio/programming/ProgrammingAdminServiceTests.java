@@ -3,6 +3,7 @@ package com.seedshiftradio.programming;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -110,6 +111,103 @@ class ProgrammingAdminServiceTests {
 		assertFalse(response.fallbackApplied());
 		assertEquals("Night Default", response.program().title());
 		assertEquals("slot-default", response.slots().getFirst().slotId());
+	}
+
+	@Test
+	void previewUsesStationDefaultTemplateWhenPersistedPolicyIsMissing() {
+		StationEntity station = station("station-night");
+		ProgramTemplateEntity defaultTemplate = template("tmpl-default", "Night Default");
+		ProgramTemplateSlotEntity defaultSlot = slot("slot-default", defaultTemplate.getId());
+
+		when(stationRepository.findById("station-night")).thenReturn(java.util.Optional.of(station));
+		when(policyRepository.findByStationId("station-night")).thenReturn(java.util.Optional.empty());
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc("policy-station-night")).thenReturn(List.of());
+		when(templateRepository.findById("tmpl-default")).thenReturn(java.util.Optional.of(defaultTemplate));
+		when(slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc("tmpl-default")).thenReturn(List.of(defaultSlot));
+
+		ProgrammingDtos.ProgrammingPreviewResponse response = programmingAdminService.preview(
+				"station-night",
+				new ProgrammingDtos.ProgrammingPreviewRequest(
+						java.time.OffsetDateTime.parse("2026-03-20T23:30:00+09:00"),
+						0,
+						Map.of(
+								"musicGen", "DOWN",
+								"tts", "UP",
+								"llm", "UP"),
+						null,
+						null));
+
+		assertEquals("tmpl-default", response.selectedTemplateId());
+		assertFalse(response.fallbackApplied());
+		assertTrue(response.validationWarnings().stream().anyMatch(warning -> "NO_RULE".equals(warning.code())));
+	}
+
+	@Test
+	void previewFlagsFallbackWhenSlotFallsBackDueToProviderHealth() {
+		StationEntity station = station("station-night");
+		StationProgrammingPolicyEntity policy = policy("policy-station-night", "station-night", "tmpl-rule");
+		ProgramRuleEntity rule = rule("rule-night", policy.getId(), "tmpl-rule");
+		rule.setRequiredProviderStates(List.of());
+		ProgramTemplateEntity selectedTemplate = template("tmpl-rule", "Night AI");
+		ProgramTemplateSlotEntity slot = slot("slot-ai", selectedTemplate.getId());
+		slot.setCandidateSegmentTypes(List.of("MUSIC_AI"));
+		slot.setFallbackSegmentTypes(List.of("MUSIC_LOCAL"));
+
+		when(stationRepository.findById("station-night")).thenReturn(java.util.Optional.of(station));
+		when(policyRepository.findByStationId("station-night")).thenReturn(java.util.Optional.of(policy));
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId())).thenReturn(List.of(rule));
+		when(templateRepository.findById("tmpl-rule")).thenReturn(java.util.Optional.of(selectedTemplate));
+		when(slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc("tmpl-rule")).thenReturn(List.of(slot));
+
+		ProgrammingDtos.ProgrammingPreviewResponse response = programmingAdminService.preview(
+				"station-night",
+				new ProgrammingDtos.ProgrammingPreviewRequest(
+						java.time.OffsetDateTime.parse("2026-03-20T23:30:00+09:00"),
+						0,
+						Map.of(
+								"musicGen", "DOWN",
+								"tts", "UP",
+								"llm", "UP"),
+						null,
+						null));
+
+		assertEquals("tmpl-rule", response.selectedTemplateId());
+		assertTrue(response.fallbackApplied());
+		assertTrue(response.validationWarnings().stream().anyMatch(warning -> "SLOT_FALLBACK".equals(warning.code())));
+	}
+
+	@Test
+	void previewSkipsInactiveRuleTemplateAndFallsBackToActiveDefault() {
+		StationEntity station = station("station-night");
+		StationProgrammingPolicyEntity policy = policy("policy-station-night", "station-night", "tmpl-default");
+		ProgramRuleEntity rule = rule("rule-night", policy.getId(), "tmpl-inactive");
+		rule.setRequiredProviderStates(List.of());
+		ProgramTemplateEntity inactiveTemplate = template("tmpl-inactive", "Inactive Night");
+		inactiveTemplate.setActive(false);
+		ProgramTemplateEntity defaultTemplate = template("tmpl-default", "Night Default");
+		ProgramTemplateSlotEntity defaultSlot = slot("slot-default", defaultTemplate.getId());
+
+		when(stationRepository.findById("station-night")).thenReturn(java.util.Optional.of(station));
+		when(policyRepository.findByStationId("station-night")).thenReturn(java.util.Optional.of(policy));
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId())).thenReturn(List.of(rule));
+		when(templateRepository.findById("tmpl-inactive")).thenReturn(java.util.Optional.of(inactiveTemplate));
+		when(templateRepository.findById("tmpl-default")).thenReturn(java.util.Optional.of(defaultTemplate));
+		when(slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc("tmpl-default")).thenReturn(List.of(defaultSlot));
+
+		ProgrammingDtos.ProgrammingPreviewResponse response = programmingAdminService.preview(
+				"station-night",
+				new ProgrammingDtos.ProgrammingPreviewRequest(
+						java.time.OffsetDateTime.parse("2026-03-20T23:30:00+09:00"),
+						0,
+						Map.of(
+								"musicGen", "UP",
+								"tts", "UP",
+								"llm", "UP"),
+						null,
+						null));
+
+		assertEquals("tmpl-default", response.selectedTemplateId());
+		assertFalse(response.fallbackApplied());
 	}
 
 	@Test

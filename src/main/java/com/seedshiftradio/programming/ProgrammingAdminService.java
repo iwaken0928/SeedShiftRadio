@@ -1,8 +1,6 @@
 package com.seedshiftradio.programming;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.common.api.ApiException;
+import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.CompositionProfile;
 import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
 import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.ReplayProfile;
@@ -167,12 +166,19 @@ public class ProgrammingAdminService {
 		Map<String, String> providerStates = normalizeProviderStates(request.providerStates());
 		Optional<ProgrammingDtos.ProgramTemplateDetail> selectedTemplate = selectTemplate(policy, rules, request, providerStates, stationId, draftTemplate);
 		ProgrammingDtos.ProgramTemplateDetail template = selectedTemplate.orElseGet(() -> policy != null && policy.getDefaultTemplateId() != null
-				? resolveTemplate(policy.getDefaultTemplateId(), stationId, draftTemplate).orElse(null)
+				? resolveActiveTemplate(policy.getDefaultTemplateId(), stationId, draftTemplate).orElse(null)
 				: null);
+		ArrayList<ProgrammingDtos.ValidationWarning> warnings = buildWarnings(template, rules);
 		boolean fallbackApplied = template == null;
-		List<ProgrammingDtos.PreviewSlot> slots = template != null
-				? template.slots().stream().map(this::toPreviewSlot).toList()
-				: ProgrammingSupport.buildLegacyFallbackSlots();
+		List<ProgrammingDtos.PreviewSlot> slots;
+		if (template != null) {
+			ResolvedPreviewSlots resolvedSlots = resolvePreviewSlots(template, providerStates, request.pendingLetterCount());
+			slots = resolvedSlots.slots();
+			fallbackApplied = resolvedSlots.fallbackApplied();
+			warnings.addAll(resolvedSlots.warnings());
+		} else {
+			slots = ProgrammingSupport.buildLegacyFallbackSlots();
+		}
 		Integer plannedDurationMs = slots.stream().mapToInt(ProgrammingDtos.PreviewSlot::targetDurationMs).sum();
 		return new ProgrammingDtos.ProgrammingPreviewResponse(
 				stationId,
@@ -180,20 +186,17 @@ public class ProgrammingAdminService {
 				fallbackApplied,
 				new ProgrammingDtos.PreviewProgram(template != null ? template.name() : "Legacy Ratio Fallback", plannedDurationMs),
 				slots,
-				buildWarnings(template, policy, rules));
+				List.copyOf(warnings));
 	}
 
-	private List<ProgrammingDtos.ValidationWarning> buildWarnings(
+	private ArrayList<ProgrammingDtos.ValidationWarning> buildWarnings(
 			ProgrammingDtos.ProgramTemplateDetail template,
-			StationProgrammingPolicyEntity policy,
 			List<ProgramRuleEntity> rules) {
-		List<ProgrammingDtos.ValidationWarning> warnings = new ArrayList<>();
+		ArrayList<ProgrammingDtos.ValidationWarning> warnings = new ArrayList<>();
 		if (template == null) {
 			warnings.add(new ProgrammingDtos.ValidationWarning("LEGACY_RATIO_FALLBACK", "番組テンプレートを解決できなかったため固定比率へフォールバックしました。"));
 		}
-		if (policy == null) {
-			warnings.add(new ProgrammingDtos.ValidationWarning("NO_POLICY", "編成ポリシーが未設定です。"));
-		} else if (rules.isEmpty()) {
+		if (rules.isEmpty()) {
 			warnings.add(new ProgrammingDtos.ValidationWarning("NO_RULE", "一致する番組ルールがありません。"));
 		}
 		return warnings;
@@ -210,41 +213,19 @@ public class ProgrammingAdminService {
 			return Optional.empty();
 		}
 		for (ProgramRuleEntity rule : rules) {
-			if (matchesRule(rule, request, providerStates) && isTemplateUsable(rule.getTemplateId(), stationId, draftTemplate)) {
-				return resolveTemplate(rule.getTemplateId(), stationId, draftTemplate);
+			if (ProgrammingSupport.matchesRule(rule, request.at(), request.pendingLetterCount(), providerStates)
+					&& isTemplateUsable(rule.getTemplateId(), stationId, draftTemplate)) {
+				return resolveActiveTemplate(rule.getTemplateId(), stationId, draftTemplate);
 			}
 		}
 		if (policy.getDefaultTemplateId() != null && isTemplateUsable(policy.getDefaultTemplateId(), stationId, draftTemplate)) {
-			return resolveTemplate(policy.getDefaultTemplateId(), stationId, draftTemplate);
+			return resolveActiveTemplate(policy.getDefaultTemplateId(), stationId, draftTemplate);
 		}
 		return Optional.empty();
 	}
 
-	private boolean matchesRule(ProgramRuleEntity rule, ProgrammingDtos.ProgrammingPreviewRequest request, Map<String, String> providerStates) {
-		if (request.pendingLetterCount() < rule.getMinimumPendingLetters()) {
-			return false;
-		}
-		if (!ProgrammingSupport.matchesDay(rule.getDaysOfWeek(), request.at().getDayOfWeek())) {
-			return false;
-		}
-		String currentTime = request.at().toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"));
-		if (!ProgrammingSupport.matchesTime(rule.getStartTime(), rule.getEndTime(), currentTime)) {
-			return false;
-		}
-		for (String required : rule.getRequiredProviderStates()) {
-			if (!providerStates.containsKey(required.toUpperCase(Locale.ROOT))) {
-				return false;
-			}
-		}
-		return true;
-	}
-
 	private Map<String, String> normalizeProviderStates(Map<String, String> providerStates) {
-		Map<String, String> normalized = new LinkedHashMap<>();
-		for (Map.Entry<String, String> entry : providerStates.entrySet()) {
-			normalized.put((entry.getKey() + "_" + entry.getValue()).toUpperCase(Locale.ROOT), entry.getValue());
-		}
-		return normalized;
+		return ProgrammingSupport.normalizeProviderStates(providerStates);
 	}
 
 	private boolean isTemplateUsable(String templateId, String stationId, ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
@@ -278,7 +259,7 @@ public class ProgrammingAdminService {
 			ProgrammingDtos.ProgrammingPolicyRequest request,
 			ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
 		if (request == null) {
-			return policyRepository.findByStationId(station.getId()).orElse(null);
+			return loadPolicy(station);
 		}
 		if (request.enabled() && request.rules().isEmpty()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "有効な番組編成には少なくとも 1 つのルールが必要です。", Map.of("stationId", station.getId()));
@@ -345,6 +326,82 @@ public class ProgrammingAdminService {
 				.map(this::toDetail);
 	}
 
+	private Optional<ProgrammingDtos.ProgramTemplateDetail> resolveActiveTemplate(
+			String templateId,
+			String stationId,
+			ProgrammingDtos.ProgramTemplateDetail draftTemplate) {
+		if (draftTemplate != null && Objects.equals(draftTemplate.id(), templateId)) {
+			return isTemplateUsable(templateId, stationId, draftTemplate) && draftTemplate.isActive()
+					? Optional.of(draftTemplate)
+					: Optional.empty();
+		}
+		return templateRepository.findById(templateId)
+				.filter(ProgramTemplateEntity::isActive)
+				.filter(template -> "GLOBAL".equalsIgnoreCase(template.getScope())
+						|| ("STATION".equalsIgnoreCase(template.getScope()) && stationId.equals(template.getStationId())))
+				.map(this::toDetail);
+	}
+
+	private ResolvedPreviewSlots resolvePreviewSlots(
+			ProgrammingDtos.ProgramTemplateDetail template,
+			Map<String, String> providerStates,
+			int pendingLetterCount) {
+		List<ProgrammingDtos.PreviewSlot> slots = new ArrayList<>();
+		List<ProgrammingDtos.ValidationWarning> warnings = new ArrayList<>();
+		boolean fallbackApplied = false;
+		for (ProgrammingDtos.ProgramSlotDto slot : template.slots()) {
+			boolean usedFallback = false;
+			SegmentType resolved = resolveAvailableSegmentType(
+					slot.candidateSegmentTypes(),
+					"candidateSegmentTypes",
+					slot.slotId(),
+					providerStates,
+					pendingLetterCount);
+			if (resolved == null) {
+				resolved = resolveAvailableSegmentType(
+						slot.fallbackSegmentTypes(),
+						"fallbackSegmentTypes",
+						slot.slotId(),
+						providerStates,
+						pendingLetterCount);
+				usedFallback = resolved != null;
+			}
+			if (resolved == null) {
+				warnings.add(new ProgrammingDtos.ValidationWarning("SLOT_TALK_FALLBACK", "slot " + slot.slotId() + " は解決不能のため TALK へ縮退しました。"));
+				usedFallback = true;
+			}
+			if (usedFallback) {
+				fallbackApplied = true;
+				warnings.add(new ProgrammingDtos.ValidationWarning("SLOT_FALLBACK", "slot " + slot.slotId() + " は fallback を適用しました。"));
+			}
+			slots.add(toPreviewSlot(slot));
+		}
+		return new ResolvedPreviewSlots(List.copyOf(slots), fallbackApplied, List.copyOf(warnings));
+	}
+
+	private SegmentType resolveAvailableSegmentType(
+			List<String> candidates,
+			String fieldName,
+			String slotId,
+			Map<String, String> providerStates,
+			int pendingLetterCount) {
+		if (candidates == null) {
+			return null;
+		}
+		for (String candidate : candidates) {
+			SegmentType type = ProgrammingSupport.parseSegmentTypeOrThrow(
+					candidate,
+					fieldName,
+					slotId,
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"INVALID_TEMPLATE");
+			if (ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
+				return type;
+			}
+		}
+		return null;
+	}
+
 	private ProgrammingDtos.ProgramTemplateDetail toDraftTemplate(String stationId, ProgrammingDtos.ProgramTemplateRequest request) {
 		ProgramTemplateEntity entity = buildTemplate(null, request);
 		validateTemplateGraph(entity, request.slots());
@@ -400,6 +457,12 @@ public class ProgrammingAdminService {
 		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(ProgrammingPolicyProfileSupport.defaultCompositionProfile()));
 		policy.setUpdatedAt(Instant.now());
 		return policy;
+	}
+
+	private record ResolvedPreviewSlots(
+			List<ProgrammingDtos.PreviewSlot> slots,
+			boolean fallbackApplied,
+			List<ProgrammingDtos.ValidationWarning> warnings) {
 	}
 
 	private ProgramTemplateEntity findTemplate(String id) {

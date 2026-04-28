@@ -901,7 +901,7 @@ Request:
 }
 ```
 
-`policyDraft`, `templateDraft` は任意です。未指定時は保存済み `StationProgrammingPolicy` / `ProgramTemplate` を評価し、指定した時だけ request 内の draft payload を優先します。`templateDraft` は preview 対象 station に対して有効な `GLOBAL` または同一 station の `STATION` scope だけを受け付けます。
+`policyDraft`, `templateDraft` は任意です。未指定時は保存済み `StationProgrammingPolicy` / `ProgramTemplate` を評価し、persisted policy が未作成でも station の `defaultProgramTemplateId` から runtime と同じ既定 policy を合成して評価します。指定した時だけ request 内の draft payload を優先します。`templateDraft` は preview 対象 station に対して有効な `GLOBAL` または同一 station の `STATION` scope だけを受け付け、inactive template は preview でも選択しません。
 
 Response:
 
@@ -925,6 +925,8 @@ Response:
   "validationWarnings": []
 }
 ```
+
+`fallbackApplied` は template 未解決時の固定比率 fallback だけでなく、slot ごとの `fallbackSegmentTypes` や最小代替 `TALK` への縮退が発生した場合も `true` になります。`validationWarnings` には `NO_RULE`, `LEGACY_RATIO_FALLBACK`, `SLOT_FALLBACK` などの安全な要約だけを返します。
 
 ### 6.8 `GET /api/settings`
 

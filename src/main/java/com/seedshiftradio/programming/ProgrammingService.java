@@ -356,7 +356,9 @@ public class ProgrammingService {
 			CompositionProfile composition,
 			int consecutiveTalkSegments,
 			int elapsedSinceMusicBreakMs) {
-		if (slot.getConstraintMode() == ConstraintMode.SOFT) {
+		boolean allowSoftFallbackRetiming = slot.getConstraintMode() == ConstraintMode.SOFT
+				&& allowsSoftFallbackRetiming(composition);
+		if (allowSoftFallbackRetiming) {
 			if (shouldPreferLetter(slot, pendingLetterCount, composition)) {
 				ResolvedSegmentChoice choice = resolveSpecificSegmentType(
 						slot,
@@ -379,7 +381,7 @@ public class ProgrammingService {
 			}
 		}
 		ResolvedSegmentChoice primary = resolveFirstAvailableSegmentType(slot.getCandidateSegmentTypes(), "candidateSegmentTypes", slot.getId(), providerStates, pendingLetterCount, false);
-		if (slot.getConstraintMode() == ConstraintMode.SOFT
+		if (allowSoftFallbackRetiming
 				&& primary.segmentType() == SegmentType.TALK
 				&& shouldAvoidTalk(consecutiveTalkSegments, composition)) {
 			ResolvedSegmentChoice alternative = resolveFirstMatchingSegmentType(
@@ -395,6 +397,10 @@ public class ProgrammingService {
 			return primary;
 		}
 		return resolveFirstAvailableSegmentType(slot.getFallbackSegmentTypes(), "fallbackSegmentTypes", slot.getId(), providerStates, pendingLetterCount, true);
+	}
+
+	private boolean allowsSoftFallbackRetiming(CompositionProfile composition) {
+		return composition == null || !Boolean.FALSE.equals(composition.allowSoftFallbackRetiming());
 	}
 
 	private ResolvedSegmentChoice resolveSpecificSegmentType(

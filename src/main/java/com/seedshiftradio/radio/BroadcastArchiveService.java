@@ -30,21 +30,25 @@ public class BroadcastArchiveService {
 			SegmentType.MUSIC_AI,
 			SegmentType.MUSIC_LOCAL,
 			SegmentType.JINGLE);
+	private static final String ARCHIVE_REPLAY = "ARCHIVE_REPLAY";
 
 	private final BroadcastArchiveRepository archiveRepository;
 	private final GeneratedAssetRepository generatedAssetRepository;
 	private final GeneratedAssetService generatedAssetService;
 	private final StationProgrammingPolicyRepository policyRepository;
+	private final QueueItemRepository queueItemRepository;
 
 	public BroadcastArchiveService(
 			BroadcastArchiveRepository archiveRepository,
 			GeneratedAssetRepository generatedAssetRepository,
 			GeneratedAssetService generatedAssetService,
-			StationProgrammingPolicyRepository policyRepository) {
+			StationProgrammingPolicyRepository policyRepository,
+			QueueItemRepository queueItemRepository) {
 		this.archiveRepository = archiveRepository;
 		this.generatedAssetRepository = generatedAssetRepository;
 		this.generatedAssetService = generatedAssetService;
 		this.policyRepository = policyRepository;
+		this.queueItemRepository = queueItemRepository;
 	}
 
 	@Transactional
@@ -87,8 +91,20 @@ public class BroadcastArchiveService {
 
 	@Transactional(readOnly = true)
 	public Optional<BroadcastArchiveEntity> findReplayCandidate(String stationId, SegmentType segmentType) {
+		return findReplayCandidate(stationId, segmentType, null, 0);
+	}
+
+	@Transactional(readOnly = true)
+	public Optional<BroadcastArchiveEntity> findReplayCandidate(
+			String stationId,
+			SegmentType segmentType,
+			String programBlockId,
+			int totalBlockSlots) {
 		ReplayProfile replayProfile = replayProfile(stationId);
 		if (!isReplayEnabledFor(replayProfile, segmentType)) {
+			return Optional.empty();
+		}
+		if (!hasReplayCapacity(programBlockId, totalBlockSlots, replayProfile)) {
 			return Optional.empty();
 		}
 		Instant now = Instant.now();
@@ -138,6 +154,26 @@ public class BroadcastArchiveService {
 			return false;
 		}
 		return replayProfile.eligibleSegmentTypes().contains(segmentType.name());
+	}
+
+	private boolean hasReplayCapacity(String programBlockId, int totalBlockSlots, ReplayProfile replayProfile) {
+		if (programBlockId == null || programBlockId.isBlank() || totalBlockSlots <= 0) {
+			return true;
+		}
+		int allowedReplayCount = allowedReplayCount(totalBlockSlots, replayProfile.maxReplaySharePercent());
+		if (allowedReplayCount <= 0) {
+			return false;
+		}
+		long currentReplayCount = queueItemRepository.countByProgramBlockIdAndContentOrigin(programBlockId, ARCHIVE_REPLAY);
+		return currentReplayCount < allowedReplayCount;
+	}
+
+	private int allowedReplayCount(int totalBlockSlots, Integer maxReplaySharePercent) {
+		if (totalBlockSlots <= 0 || maxReplaySharePercent == null || maxReplaySharePercent <= 0) {
+			return 0;
+		}
+		int clampedPercent = Math.min(100, maxReplaySharePercent);
+		return (int) Math.floor(totalBlockSlots * (clampedPercent / 100.0d));
 	}
 
 	private String resolveScriptAssetId(QueueItemEntity item) {

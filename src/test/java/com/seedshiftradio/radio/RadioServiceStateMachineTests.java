@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -118,7 +119,7 @@ class RadioServiceStateMachineTests {
 				letterSegmentBinder,
 				broadcastArchiveService,
 				eventPublisher);
-		when(broadcastArchiveService.findReplayCandidate(anyString(), any(SegmentType.class))).thenReturn(Optional.empty());
+		when(broadcastArchiveService.findReplayCandidate(anyString(), any(SegmentType.class), anyString(), anyInt())).thenReturn(Optional.empty());
 		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 2, true)));
 		when(scriptGenerationService.resolveDirective(any(PlayoutSessionEntity.class), any(QueueItemEntity.class), nullable(String.class))).thenAnswer(invocation -> {
 			PlayoutSessionEntity session = invocation.getArgument(0);
@@ -586,7 +587,8 @@ class RadioServiceStateMachineTests {
 		List<ProgramBlockSlotEntity> currentSlots = new ArrayList<>(List.of(
 				blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.DONE, SlotRole.OPENING, 30_000),
 				blockSlot("slot-2", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.TOPIC, 30_000),
-				blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.PLANNED, SlotRole.TOPIC, 30_000)));
+				blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.PLANNED, SlotRole.TOPIC, 30_000),
+				blockSlot("slot-4", "block-current", ProgramBlockSlotStatus.PLANNED, SlotRole.ENDING, 30_000)));
 
 		QueueItemEntity done = queueItem("queue-001", "playout-001", QueueItemStatus.DONE);
 		done.setProgramBlockId("block-current");
@@ -603,7 +605,7 @@ class RadioServiceStateMachineTests {
 		archive.setSegmentType(SegmentType.TALK);
 		archive.setTitle("再放送トーク");
 		archive.setPrimaryAssetId("asset-archive");
-		when(broadcastArchiveService.findReplayCandidate("station-night", SegmentType.TALK)).thenReturn(Optional.of(archive));
+		when(broadcastArchiveService.findReplayCandidate("station-night", SegmentType.TALK, "block-current", 4)).thenReturn(Optional.of(archive));
 		when(programmingService.resolveCurrentPlan(anyString(), any(OffsetDateTime.class))).thenReturn(new ProgrammingService.ResolvedProgramPlan(
 				"tmpl-next",
 				4,
@@ -786,6 +788,55 @@ class RadioServiceStateMachineTests {
 		return slot;
 	}
 
+	@Test
+	void recordPlaybackEventKeepsLiveGenerationWhenReplayQuotaIsExceeded() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-002");
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		List<ProgramBlockSlotEntity> currentSlots = new ArrayList<>(List.of(
+				blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.DONE, SlotRole.OPENING, 30_000),
+				blockSlot("slot-2", "block-current", ProgramBlockSlotStatus.DONE, SlotRole.TOPIC, 30_000),
+				blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.PLANNED, SlotRole.TOPIC, 30_000),
+				blockSlot("slot-4", "block-current", ProgramBlockSlotStatus.PLANNED, SlotRole.ENDING, 30_000)));
+		QueueItemEntity doneReplay = queueItem("queue-001", "playout-001", QueueItemStatus.DONE);
+		doneReplay.setProgramBlockId("block-current");
+		doneReplay.setProgramSlotId("slot-1");
+		doneReplay.setContentOrigin("ARCHIVE_REPLAY");
+		doneReplay.setReplayOfPlayHistoryId("play-history-source");
+		QueueItemEntity current = queueItem("queue-002", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-2");
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(doneReplay, current));
+
+		when(broadcastArchiveService.findReplayCandidate("station-night", SegmentType.TALK, "block-current", 4)).thenReturn(Optional.empty());
+		when(programmingService.resolveCurrentPlan(anyString(), any(OffsetDateTime.class))).thenReturn(new ProgrammingService.ResolvedProgramPlan(
+				"tmpl-next",
+				4,
+				"次の番組",
+				60_000,
+				List.of(new ProgrammingService.ResolvedSlot("next-slot-1", SlotRole.ENDING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.JINGLE)),
+				false,
+				List.of()));
+
+		wireRepositoryState(session, List.of(currentBlock), Map.of("block-current", currentSlots), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+
+		radioService.recordPlaybackEvent(new PlaybackEventRequest(
+				"web-client",
+				"playout-001",
+				"queue-002",
+				PlaybackEventType.SEGMENT_ENDED,
+				Instant.now()));
+
+		QueueItemEntity next = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").stream()
+				.filter(item -> "slot-3".equals(item.getProgramSlotId()))
+				.findFirst()
+				.orElseThrow();
+		assertEquals("LIVE_GEN", next.getContentOrigin());
+		assertNull(next.getReplayOfPlayHistoryId());
+		assertEquals(QueueItemStatus.READY, next.getStatus());
+	}
+
 	private void wireRepositoryState(
 			PlayoutSessionEntity session,
 			List<ProgramBlockEntity> initialBlocks,
@@ -862,6 +913,10 @@ class RadioServiceStateMachineTests {
 		});
 		when(queueItemRepository.countBySessionIdAndStatus(session.getId(), QueueItemStatus.READY)).thenAnswer(invocation -> sessionQueueItems.stream()
 				.filter(item -> item.getStatus() == QueueItemStatus.READY)
+				.count());
+		when(queueItemRepository.countByProgramBlockIdAndContentOrigin(anyString(), anyString())).thenAnswer(invocation -> sessionQueueItems.stream()
+				.filter(item -> invocation.getArgument(0).equals(item.getProgramBlockId()))
+				.filter(item -> invocation.getArgument(1).equals(item.getContentOrigin()))
 				.count());
 	}
 

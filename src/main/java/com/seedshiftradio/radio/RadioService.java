@@ -466,7 +466,7 @@ public class RadioService {
 		int targetReadyCount = Math.max(1, playout.targetReadyCount());
 		for (int i = 0; i < Math.min(targetReadyCount, blockSlots.size()); i++) {
 			ProgramBlockSlotEntity blockSlot = blockSlots.get(i);
-			queueItems.add(createQueueItem(session, block, blockSlot, sequenceStart++));
+				queueItems.add(createQueueItem(session, block, blockSlot, sequenceStart++, blockSlots.size()));
 			blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
 			if (totalReadyDuration(queueItems) >= playout.maxPreparedDurationMs()) {
 				break;
@@ -483,7 +483,7 @@ public class RadioService {
 		}
 	}
 
-	private QueueItemEntity createQueueItem(PlayoutSessionEntity session, ProgramBlockEntity block, ProgramBlockSlotEntity blockSlot, int sequenceNo) {
+	private QueueItemEntity createQueueItem(PlayoutSessionEntity session, ProgramBlockEntity block, ProgramBlockSlotEntity blockSlot, int sequenceNo, int totalBlockSlots) {
 		QueueItemEntity entity = new QueueItemEntity();
 		entity.setId(nextId("queue"));
 		entity.setSessionId(session.getId());
@@ -499,16 +499,16 @@ public class RadioService {
 		entity.setContentOrigin("LIVE_GEN");
 		entity.setDurationMs(blockSlot.getTargetDurationMs());
 		entity.setCorrelationId(session.getCorrelationId());
-		applyArchiveReplay(session, blockSlot, entity);
+		applyArchiveReplay(session, block, blockSlot, entity, totalBlockSlots);
 		return entity;
 	}
 
-	private void applyArchiveReplay(PlayoutSessionEntity session, ProgramBlockSlotEntity blockSlot, QueueItemEntity item) {
+	private void applyArchiveReplay(PlayoutSessionEntity session, ProgramBlockEntity block, ProgramBlockSlotEntity blockSlot, QueueItemEntity item, int totalBlockSlots) {
 		if (blockSlot.getConstraintMode() != com.seedshiftradio.domain.ConstraintMode.SOFT
 				|| item.getSegmentType() == SegmentType.LETTER) {
 			return;
 		}
-		broadcastArchiveService.findReplayCandidate(session.getStationId(), item.getSegmentType()).ifPresent(archive -> {
+		broadcastArchiveService.findReplayCandidate(session.getStationId(), item.getSegmentType(), block.getId(), totalBlockSlots).ifPresent(archive -> {
 			item.setAssetId(archive.getPrimaryAssetId());
 			item.setAssetUrl("/api/assets/audio/" + archive.getPrimaryAssetId() + ".wav");
 			item.setContentOrigin("ARCHIVE_REPLAY");
@@ -550,7 +550,7 @@ public class RadioService {
 		List<ProgramBlockSlotEntity> changedSlots = new ArrayList<>();
 		for (ProgramBlockSlotEntity blockSlot : blockSlots) {
 			if (blockSlot.getStatus() == ProgramBlockSlotStatus.PLANNED) {
-				QueueItemEntity item = createQueueItem(session, refillBlock, blockSlot, nextSequence++);
+					QueueItemEntity item = createQueueItem(session, refillBlock, blockSlot, nextSequence++, blockSlots.size());
 				additions.add(item);
 				blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
 				changedSlots.add(blockSlot);

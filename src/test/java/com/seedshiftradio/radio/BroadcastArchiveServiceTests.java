@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +26,7 @@ import com.seedshiftradio.domain.PlaybackMode;
 import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.programming.StationProgrammingPolicyEntity;
 import com.seedshiftradio.programming.StationProgrammingPolicyRepository;
 import com.seedshiftradio.settings.GeneratedAssetEntity;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
@@ -44,6 +47,9 @@ class BroadcastArchiveServiceTests {
 	@Mock
 	StationProgrammingPolicyRepository policyRepository;
 
+	@Mock
+	QueueItemRepository queueItemRepository;
+
 	BroadcastArchiveService service;
 
 	@BeforeEach
@@ -52,7 +58,8 @@ class BroadcastArchiveServiceTests {
 				archiveRepository,
 				generatedAssetRepository,
 				generatedAssetService,
-				policyRepository);
+				policyRepository,
+				queueItemRepository);
 	}
 
 	@Test
@@ -125,6 +132,67 @@ class BroadcastArchiveServiceTests {
 		assertEquals(3, archive.getReplayCount());
 		assertTrue(archive.getLastReplayedAt() != null);
 		verify(archiveRepository).save(archive);
+	}
+
+	@Test
+	void findReplayCandidateReturnsEmptyWhenBlockReplayQuotaIsExceeded() {
+		StationProgrammingPolicyEntity policy = org.mockito.Mockito.mock(StationProgrammingPolicyEntity.class);
+		when(policy.getReplayPolicy()).thenReturn(Map.of(
+				"intensity", "LIGHT",
+				"eligibleSegmentTypes", List.of("TALK"),
+				"minimumAssetAgeHours", 6,
+				"cooldownHours", 72,
+				"maxReplaySharePercent", 25,
+				"excludeLetterSegments", true));
+		when(policyRepository.findByStationId("station-night")).thenReturn(Optional.of(policy));
+		when(queueItemRepository.countByProgramBlockIdAndContentOrigin("block-001", "ARCHIVE_REPLAY")).thenReturn(1L);
+
+		Optional<BroadcastArchiveEntity> replay = service.findReplayCandidate("station-night", SegmentType.TALK, "block-001", 4);
+
+		assertTrue(replay.isEmpty());
+		verifyNoInteractions(archiveRepository);
+	}
+
+	@Test
+	void findReplayCandidateAllowsReplayWithinBlockQuota() {
+		StationProgrammingPolicyEntity policy = org.mockito.Mockito.mock(StationProgrammingPolicyEntity.class);
+		when(policy.getReplayPolicy()).thenReturn(Map.of(
+				"intensity", "LIGHT",
+				"eligibleSegmentTypes", List.of("TALK"),
+				"minimumAssetAgeHours", 6,
+				"cooldownHours", 72,
+				"maxReplaySharePercent", 25,
+				"excludeLetterSegments", true));
+		BroadcastArchiveEntity archive = new BroadcastArchiveEntity();
+		archive.setId("archive-001");
+		archive.setStationId("station-night");
+		archive.setSegmentType(SegmentType.TALK);
+		when(policyRepository.findByStationId("station-night")).thenReturn(Optional.of(policy));
+		when(queueItemRepository.countByProgramBlockIdAndContentOrigin("block-001", "ARCHIVE_REPLAY")).thenReturn(0L);
+		when(archiveRepository.findReplayCandidates(any(), any(), any(), any())).thenReturn(List.of(archive));
+
+		Optional<BroadcastArchiveEntity> replay = service.findReplayCandidate("station-night", SegmentType.TALK, "block-001", 4);
+
+		assertTrue(replay.isPresent());
+		assertEquals("archive-001", replay.get().getId());
+	}
+
+	@Test
+	void findReplayCandidateRoundsBlockReplayQuotaDownToWholeSlots() {
+		StationProgrammingPolicyEntity policy = org.mockito.Mockito.mock(StationProgrammingPolicyEntity.class);
+		when(policy.getReplayPolicy()).thenReturn(Map.of(
+				"intensity", "LIGHT",
+				"eligibleSegmentTypes", List.of("TALK"),
+				"minimumAssetAgeHours", 6,
+				"cooldownHours", 72,
+				"maxReplaySharePercent", 25,
+				"excludeLetterSegments", true));
+		when(policyRepository.findByStationId("station-night")).thenReturn(Optional.of(policy));
+
+		Optional<BroadcastArchiveEntity> replay = service.findReplayCandidate("station-night", SegmentType.TALK, "block-001", 2);
+
+		assertTrue(replay.isEmpty());
+		verifyNoInteractions(archiveRepository);
 	}
 
 	private PlayHistoryEntity playHistory(String id, SegmentType segmentType, PlayHistoryResultStatus status) {

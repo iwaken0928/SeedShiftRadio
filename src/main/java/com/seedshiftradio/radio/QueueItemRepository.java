@@ -26,4 +26,6 @@ public interface QueueItemRepository extends JpaRepository<QueueItemEntity, Stri
 			@Param("status") QueueItemStatus status);
 
 	Optional<QueueItemEntity> findTopBySessionIdAndStatusOrderBySequenceNoAsc(String sessionId, QueueItemStatus status);
+
+	long countByProgramBlockIdAndContentOrigin(String programBlockId, String contentOrigin);
 }

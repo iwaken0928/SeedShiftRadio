@@ -281,7 +281,8 @@ public class ProgrammingService {
 			warnings.add("有効なテンプレートが見つからないため固定比率へ縮退しました。");
 			return legacyFallbackPlan(warnings, true);
 		}
-		ResolvedSlotResolution resolvedSlots = resolveSlots(template, normalizedProviderStates, pendingLetterCount, warnings);
+		CompositionProfile composition = ProgrammingPolicyProfileSupport.toCompositionProfile(policy.getCompositionPolicy());
+		ResolvedSlotResolution resolvedSlots = resolveSlots(template, normalizedProviderStates, pendingLetterCount, composition, warnings);
 		return new ResolvedProgramPlan(
 				selectedTemplateId,
 				template.getVersion(),
@@ -305,58 +306,193 @@ public class ProgrammingService {
 			ProgramTemplateEntity template,
 			Map<String, String> providerStates,
 			int pendingLetterCount,
+			CompositionProfile composition,
 			List<String> warnings) {
 		List<ResolvedSlot> resolvedSlots = new ArrayList<>();
 		boolean fallbackApplied = false;
+		int consecutiveTalkSegments = 0;
+		int elapsedSinceMusicBreakMs = 0;
 		for (ProgramTemplateSlotEntity slot : slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc(template.getId())) {
-			SegmentType resolved = resolveSegmentType(slot, providerStates, pendingLetterCount);
-			boolean usedFallback = false;
-			if (resolved == null) {
-				resolved = resolveFallbackSegmentType(slot, providerStates, pendingLetterCount);
-				usedFallback = resolved != null;
-			}
+			ResolvedSegmentChoice choice = resolveSegmentType(
+					slot,
+					providerStates,
+					pendingLetterCount,
+					composition,
+					consecutiveTalkSegments,
+					elapsedSinceMusicBreakMs);
+			SegmentType resolved = choice.segmentType();
+			boolean usedFallback = choice.usedFallback();
 			if (resolved == null) {
 				warnings.add("slot " + slot.getId() + " は解決不能のため TALK へ縮退しました。");
 				resolved = SegmentType.TALK;
 				usedFallback = true;
 			}
+			if (choice.compositionWarning() != null) {
+				warnings.add(choice.compositionWarning());
+			}
 			if (usedFallback) {
 				fallbackApplied = true;
 				warnings.add("slot " + slot.getId() + " は fallback を適用しました。");
+			}
+			if (resolved == SegmentType.TALK) {
+				consecutiveTalkSegments++;
+			} else {
+				consecutiveTalkSegments = 0;
+			}
+			if (isMusicBreakSegment(resolved)) {
+				elapsedSinceMusicBreakMs = 0;
+			} else {
+				elapsedSinceMusicBreakMs += slot.getTargetDurationMs();
 			}
 			resolvedSlots.add(new ResolvedSlot(slot.getId(), slot.getRole(), slot.getConstraintMode(), slot.getTargetDurationMs(), resolved));
 		}
 		return new ResolvedSlotResolution(List.copyOf(resolvedSlots), fallbackApplied);
 	}
 
-	private SegmentType resolveSegmentType(ProgramTemplateSlotEntity slot, Map<String, String> providerStates, int pendingLetterCount) {
-		for (String candidate : slot.getCandidateSegmentTypes()) {
-			SegmentType type = ProgrammingSupport.parseSegmentTypeOrThrow(
-					candidate,
-					"candidateSegmentTypes",
-					slot.getId(),
-					HttpStatus.INTERNAL_SERVER_ERROR,
-					"INVALID_TEMPLATE");
-			if (ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
-				return type;
+	private ResolvedSegmentChoice resolveSegmentType(
+			ProgramTemplateSlotEntity slot,
+			Map<String, String> providerStates,
+			int pendingLetterCount,
+			CompositionProfile composition,
+			int consecutiveTalkSegments,
+			int elapsedSinceMusicBreakMs) {
+		if (slot.getConstraintMode() == ConstraintMode.SOFT) {
+			if (shouldPreferLetter(slot, pendingLetterCount, composition)) {
+				ResolvedSegmentChoice choice = resolveSpecificSegmentType(
+						slot,
+						providerStates,
+						pendingLetterCount,
+						SegmentType.LETTER);
+				if (choice.segmentType() != null) {
+					return choice.withCompositionWarning("slot " + slot.getId() + " は composition.letterPriorityBoostThreshold により LETTER を優先しました。");
+				}
+			}
+			if (shouldPreferMusicBreak(elapsedSinceMusicBreakMs, composition)) {
+				ResolvedSegmentChoice choice = resolveFirstMatchingSegmentType(
+						slot,
+						providerStates,
+						pendingLetterCount,
+						this::isMusicBreakSegment);
+				if (choice.segmentType() != null) {
+					return choice.withCompositionWarning("slot " + slot.getId() + " は composition.musicBreakIntervalMinutes により MUSIC/JINGLE を優先しました。");
+				}
 			}
 		}
-		return null;
+		ResolvedSegmentChoice primary = resolveFirstAvailableSegmentType(slot.getCandidateSegmentTypes(), "candidateSegmentTypes", slot.getId(), providerStates, pendingLetterCount, false);
+		if (slot.getConstraintMode() == ConstraintMode.SOFT
+				&& primary.segmentType() == SegmentType.TALK
+				&& shouldAvoidTalk(consecutiveTalkSegments, composition)) {
+			ResolvedSegmentChoice alternative = resolveFirstMatchingSegmentType(
+					slot,
+					providerStates,
+					pendingLetterCount,
+					type -> type != SegmentType.TALK);
+			if (alternative.segmentType() != null) {
+				return alternative.withCompositionWarning("slot " + slot.getId() + " は composition.maxConsecutiveTalkSegments により TALK 連続を回避しました。");
+			}
+		}
+		if (primary.segmentType() != null) {
+			return primary;
+		}
+		return resolveFirstAvailableSegmentType(slot.getFallbackSegmentTypes(), "fallbackSegmentTypes", slot.getId(), providerStates, pendingLetterCount, true);
 	}
 
-	private SegmentType resolveFallbackSegmentType(ProgramTemplateSlotEntity slot, Map<String, String> providerStates, int pendingLetterCount) {
-		for (String candidate : slot.getFallbackSegmentTypes()) {
+	private ResolvedSegmentChoice resolveSpecificSegmentType(
+			ProgramTemplateSlotEntity slot,
+			Map<String, String> providerStates,
+			int pendingLetterCount,
+			SegmentType target) {
+		ResolvedSegmentChoice candidate = resolveFirstMatchingSegmentType(slot.getCandidateSegmentTypes(), "candidateSegmentTypes", slot.getId(), providerStates, pendingLetterCount, false, type -> type == target);
+		if (candidate.segmentType() != null) {
+			return candidate;
+		}
+		return resolveFirstMatchingSegmentType(slot.getFallbackSegmentTypes(), "fallbackSegmentTypes", slot.getId(), providerStates, pendingLetterCount, true, type -> type == target);
+	}
+
+	private ResolvedSegmentChoice resolveFirstMatchingSegmentType(
+			ProgramTemplateSlotEntity slot,
+			Map<String, String> providerStates,
+			int pendingLetterCount,
+			java.util.function.Predicate<SegmentType> predicate) {
+		ResolvedSegmentChoice candidate = resolveFirstMatchingSegmentType(
+				slot.getCandidateSegmentTypes(),
+				"candidateSegmentTypes",
+				slot.getId(),
+				providerStates,
+				pendingLetterCount,
+				false,
+				predicate);
+		if (candidate.segmentType() != null) {
+			return candidate;
+		}
+		return resolveFirstMatchingSegmentType(
+				slot.getFallbackSegmentTypes(),
+				"fallbackSegmentTypes",
+				slot.getId(),
+				providerStates,
+				pendingLetterCount,
+				true,
+				predicate);
+	}
+
+	private ResolvedSegmentChoice resolveFirstAvailableSegmentType(
+			List<String> candidates,
+			String fieldName,
+			String slotId,
+			Map<String, String> providerStates,
+			int pendingLetterCount,
+			boolean fromFallback) {
+		return resolveFirstMatchingSegmentType(
+				candidates,
+				fieldName,
+				slotId,
+				providerStates,
+				pendingLetterCount,
+				fromFallback,
+				type -> true);
+	}
+
+	private ResolvedSegmentChoice resolveFirstMatchingSegmentType(
+			List<String> candidates,
+			String fieldName,
+			String slotId,
+			Map<String, String> providerStates,
+			int pendingLetterCount,
+			boolean fromFallback,
+			java.util.function.Predicate<SegmentType> predicate) {
+		if (candidates == null) {
+			return ResolvedSegmentChoice.unresolved();
+		}
+		for (String candidate : candidates) {
 			SegmentType type = ProgrammingSupport.parseSegmentTypeOrThrow(
 					candidate,
-					"fallbackSegmentTypes",
-					slot.getId(),
+					fieldName,
+					slotId,
 					HttpStatus.INTERNAL_SERVER_ERROR,
 					"INVALID_TEMPLATE");
-			if (ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
-				return type;
+			if (predicate.test(type) && ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
+				return new ResolvedSegmentChoice(type, fromFallback, null);
 			}
 		}
-		return null;
+		return ResolvedSegmentChoice.unresolved();
+	}
+
+	private boolean shouldPreferLetter(ProgramTemplateSlotEntity slot, int pendingLetterCount, CompositionProfile composition) {
+		return pendingLetterCount >= composition.letterPriorityBoostThreshold()
+				&& slot.getCandidateSegmentTypes() != null
+				&& slot.getCandidateSegmentTypes().contains(SegmentType.LETTER.name());
+	}
+
+	private boolean shouldPreferMusicBreak(int elapsedSinceMusicBreakMs, CompositionProfile composition) {
+		return elapsedSinceMusicBreakMs >= composition.musicBreakIntervalMinutes() * 60_000;
+	}
+
+	private boolean shouldAvoidTalk(int consecutiveTalkSegments, CompositionProfile composition) {
+		return consecutiveTalkSegments >= composition.maxConsecutiveTalkSegments();
+	}
+
+	private boolean isMusicBreakSegment(SegmentType type) {
+		return type == SegmentType.MUSIC_AI || type == SegmentType.MUSIC_LOCAL || type == SegmentType.JINGLE;
 	}
 
 	private Map<String, String> currentProviderStates() {
@@ -568,5 +704,19 @@ public class ProgrammingService {
 	private record ResolvedSlotResolution(
 			List<ResolvedSlot> slots,
 			boolean fallbackApplied) {
+	}
+
+	private record ResolvedSegmentChoice(
+			SegmentType segmentType,
+			boolean usedFallback,
+			String compositionWarning) {
+
+		private static ResolvedSegmentChoice unresolved() {
+			return new ResolvedSegmentChoice(null, false, null);
+		}
+
+		private ResolvedSegmentChoice withCompositionWarning(String warning) {
+			return new ResolvedSegmentChoice(segmentType, usedFallback, warning);
+		}
 	}
 }

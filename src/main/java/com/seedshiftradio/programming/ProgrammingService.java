@@ -308,18 +308,29 @@ public class ProgrammingService {
 			int pendingLetterCount,
 			CompositionProfile composition,
 			List<String> warnings) {
+		List<ProgramTemplateSlotEntity> templateSlots = slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc(template.getId());
 		List<ResolvedSlot> resolvedSlots = new ArrayList<>();
 		boolean fallbackApplied = false;
 		int consecutiveTalkSegments = 0;
 		int elapsedSinceMusicBreakMs = 0;
-		for (ProgramTemplateSlotEntity slot : slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc(template.getId())) {
+		Map<String, Integer> resolvedShareDurations = new LinkedHashMap<>();
+		resolvedShareDurations.put("talk", 0);
+		resolvedShareDurations.put("letter", 0);
+		resolvedShareDurations.put("music", 0);
+		resolvedShareDurations.put("jingle", 0);
+		int totalPlannedDurationMs = templateSlots.stream()
+				.mapToInt(ProgramTemplateSlotEntity::getTargetDurationMs)
+				.sum();
+		for (ProgramTemplateSlotEntity slot : templateSlots) {
 			ResolvedSegmentChoice choice = resolveSegmentType(
 					slot,
 					providerStates,
 					pendingLetterCount,
 					composition,
 					consecutiveTalkSegments,
-					elapsedSinceMusicBreakMs);
+					elapsedSinceMusicBreakMs,
+					resolvedShareDurations,
+					totalPlannedDurationMs);
 			SegmentType resolved = choice.segmentType();
 			boolean usedFallback = choice.usedFallback();
 			if (resolved == null) {
@@ -344,6 +355,7 @@ public class ProgrammingService {
 			} else {
 				elapsedSinceMusicBreakMs += slot.getTargetDurationMs();
 			}
+			addResolvedShareDuration(resolvedShareDurations, resolved, slot.getTargetDurationMs());
 			resolvedSlots.add(new ResolvedSlot(slot.getId(), slot.getRole(), slot.getConstraintMode(), slot.getTargetDurationMs(), resolved));
 		}
 		return new ResolvedSlotResolution(List.copyOf(resolvedSlots), fallbackApplied);
@@ -355,7 +367,9 @@ public class ProgrammingService {
 			int pendingLetterCount,
 			CompositionProfile composition,
 			int consecutiveTalkSegments,
-			int elapsedSinceMusicBreakMs) {
+			int elapsedSinceMusicBreakMs,
+			Map<String, Integer> resolvedShareDurations,
+			int totalPlannedDurationMs) {
 		boolean allowSoftFallbackRetiming = slot.getConstraintMode() == ConstraintMode.SOFT
 				&& allowsSoftFallbackRetiming(composition);
 		if (allowSoftFallbackRetiming) {
@@ -393,6 +407,20 @@ public class ProgrammingService {
 				return alternative.withCompositionWarning("slot " + slot.getId() + " は composition.maxConsecutiveTalkSegments により TALK 連続を回避しました。");
 			}
 		}
+		if (allowSoftFallbackRetiming && primary.segmentType() != null) {
+			ResolvedSegmentChoice balanced = resolveShareBalancedCandidate(
+					slot,
+					providerStates,
+					pendingLetterCount,
+					composition,
+					resolvedShareDurations,
+					totalPlannedDurationMs,
+					primary.segmentType());
+			if (balanced.segmentType() != null && balanced.segmentType() != primary.segmentType()) {
+				return balanced.withCompositionWarning("slot " + slot.getId() + " は composition.targetSegmentShares により "
+						+ balanced.segmentType().name() + " を優先しました。");
+			}
+		}
 		if (primary.segmentType() != null) {
 			return primary;
 		}
@@ -401,6 +429,43 @@ public class ProgrammingService {
 
 	private boolean allowsSoftFallbackRetiming(CompositionProfile composition) {
 		return composition == null || !Boolean.FALSE.equals(composition.allowSoftFallbackRetiming());
+	}
+
+	private ResolvedSegmentChoice resolveShareBalancedCandidate(
+			ProgramTemplateSlotEntity slot,
+			Map<String, String> providerStates,
+			int pendingLetterCount,
+			CompositionProfile composition,
+			Map<String, Integer> resolvedShareDurations,
+			int totalPlannedDurationMs,
+			SegmentType primarySegmentType) {
+		if (slot.getCandidateSegmentTypes() == null || slot.getCandidateSegmentTypes().size() < 2) {
+			return ResolvedSegmentChoice.unresolved();
+		}
+		String primaryShareKey = shareKey(primarySegmentType);
+		double primaryDeficit = shareDeficit(primaryShareKey, composition, resolvedShareDurations, totalPlannedDurationMs);
+		SegmentType selected = primarySegmentType;
+		double bestDeficit = primaryDeficit;
+		for (String candidate : slot.getCandidateSegmentTypes()) {
+			SegmentType type = ProgrammingSupport.parseSegmentTypeOrThrow(
+					candidate,
+					"candidateSegmentTypes",
+					slot.getId(),
+					HttpStatus.INTERNAL_SERVER_ERROR,
+					"INVALID_TEMPLATE");
+			if (!ProgrammingSupport.isSegmentTypeAvailable(type, providerStates, pendingLetterCount)) {
+				continue;
+			}
+			double candidateDeficit = shareDeficit(shareKey(type), composition, resolvedShareDurations, totalPlannedDurationMs);
+			if (candidateDeficit > bestDeficit) {
+				bestDeficit = candidateDeficit;
+				selected = type;
+			}
+		}
+		if (selected == primarySegmentType) {
+			return ResolvedSegmentChoice.unresolved();
+		}
+		return new ResolvedSegmentChoice(selected, false, null);
 	}
 
 	private ResolvedSegmentChoice resolveSpecificSegmentType(
@@ -495,6 +560,36 @@ public class ProgrammingService {
 
 	private boolean shouldAvoidTalk(int consecutiveTalkSegments, CompositionProfile composition) {
 		return consecutiveTalkSegments >= composition.maxConsecutiveTalkSegments();
+	}
+
+	private void addResolvedShareDuration(Map<String, Integer> resolvedShareDurations, SegmentType type, int durationMs) {
+		String key = shareKey(type);
+		resolvedShareDurations.put(key, resolvedShareDurations.getOrDefault(key, 0) + Math.max(0, durationMs));
+	}
+
+	private double shareDeficit(
+			String shareKey,
+			CompositionProfile composition,
+			Map<String, Integer> resolvedShareDurations,
+			int totalPlannedDurationMs) {
+		if (composition == null || composition.targetSegmentShares() == null || totalPlannedDurationMs <= 0) {
+			return Double.NEGATIVE_INFINITY;
+		}
+		Integer targetShare = composition.targetSegmentShares().get(shareKey);
+		if (targetShare == null) {
+			return Double.NEGATIVE_INFINITY;
+		}
+		double targetDuration = totalPlannedDurationMs * (targetShare / 100.0d);
+		return targetDuration - resolvedShareDurations.getOrDefault(shareKey, 0);
+	}
+
+	private String shareKey(SegmentType type) {
+		return switch (type) {
+			case TALK -> "talk";
+			case LETTER -> "letter";
+			case MUSIC_AI, MUSIC_LOCAL -> "music";
+			case JINGLE -> "jingle";
+		};
 	}
 
 	private boolean isMusicBreakSegment(SegmentType type) {

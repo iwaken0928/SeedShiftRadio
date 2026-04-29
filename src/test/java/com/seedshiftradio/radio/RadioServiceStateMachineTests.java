@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,7 +43,10 @@ import com.seedshiftradio.domain.ProgramBlockStatus;
 import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport;
 import com.seedshiftradio.programming.ProgrammingService;
+import com.seedshiftradio.programming.StationProgrammingPolicyEntity;
+import com.seedshiftradio.programming.StationProgrammingPolicyRepository;
 import com.seedshiftradio.settings.AssetService;
 import com.seedshiftradio.settings.RadioSettingsStore;
 import com.seedshiftradio.settings.SettingsDocument;
@@ -59,6 +63,9 @@ class RadioServiceStateMachineTests {
 
 	@Mock
 	ProgrammingService programmingService;
+
+	@Mock
+	StationProgrammingPolicyRepository programmingPolicyRepository;
 
 	@Mock
 	PlayoutSessionRepository playoutSessionRepository;
@@ -106,6 +113,7 @@ class RadioServiceStateMachineTests {
 		radioService = new RadioService(
 				stationRepository,
 				programmingService,
+				programmingPolicyRepository,
 				playoutSessionRepository,
 				programBlockRepository,
 				programBlockSlotRepository,
@@ -119,6 +127,7 @@ class RadioServiceStateMachineTests {
 				letterSegmentBinder,
 				broadcastArchiveService,
 				eventPublisher);
+		when(programmingPolicyRepository.findByStationId(anyString())).thenReturn(Optional.empty());
 		when(broadcastArchiveService.findReplayCandidate(anyString(), any(SegmentType.class), anyString(), anyInt())).thenReturn(Optional.empty());
 		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 2, true)));
 		when(scriptGenerationService.resolveDirective(any(PlayoutSessionEntity.class), any(QueueItemEntity.class), nullable(String.class))).thenAnswer(invocation -> {
@@ -541,6 +550,95 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void tuneRealTimeOnlyUsesMinimumReadyCountAndStationDurationCap() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(4, 2, 90_000, 480_000, 3, 4, 3, 2, true)));
+		StationProgrammingPolicyEntity realTimeOnlyPolicy = programmingPolicy("station-night", "REALTIME_ONLY", 1, 1);
+		when(programmingPolicyRepository.findByStationId("station-night")).thenReturn(Optional.of(realTimeOnlyPolicy));
+		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
+				"tmpl-night-regular",
+				3,
+				"深夜の作業ノート",
+				120_000,
+				List.of(
+						new ProgrammingService.ResolvedSlot("slot-1", SlotRole.OPENING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-2", SlotRole.TOPIC, com.seedshiftradio.domain.ConstraintMode.SOFT, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-3", SlotRole.TOPIC, com.seedshiftradio.domain.ConstraintMode.SOFT, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-4", SlotRole.ENDING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.JINGLE)),
+				false,
+				List.of());
+
+		AtomicReference<PlayoutSessionEntity> savedSession = new AtomicReference<>();
+		Map<String, ProgramBlockEntity> blocksById = new HashMap<>();
+		Map<String, List<ProgramBlockSlotEntity>> slotsByBlockId = new HashMap<>();
+		List<QueueItemEntity> queueItems = new ArrayList<>();
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station()));
+		when(programmingService.resolveCurrentPlan(anyString(), any(OffsetDateTime.class))).thenReturn(plan);
+		when(playoutSessionRepository.save(any(PlayoutSessionEntity.class))).thenAnswer(invocation -> {
+			PlayoutSessionEntity session = invocation.getArgument(0);
+			savedSession.set(session);
+			return session;
+		});
+		when(playoutSessionRepository.findFirstByOrderByStartedAtDesc()).thenAnswer(invocation -> Optional.ofNullable(savedSession.get()));
+		when(playoutSessionRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(savedSession.get()));
+		when(programBlockRepository.save(any(ProgramBlockEntity.class))).thenAnswer(invocation -> {
+			ProgramBlockEntity block = invocation.getArgument(0);
+			blocksById.put(block.getId(), block);
+			return block;
+		});
+		when(programBlockRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(blocksById.get(invocation.getArgument(0))));
+		when(programBlockRepository.findTopBySessionIdOrderByStartedAtDesc(anyString())).thenAnswer(invocation -> blocksById.values().stream()
+				.filter(block -> invocation.getArgument(0).equals(block.getSessionId()))
+				.findFirst());
+		when(programBlockSlotRepository.saveAll(any())).thenAnswer(invocation -> {
+			List<ProgramBlockSlotEntity> slots = invocation.getArgument(0);
+			for (ProgramBlockSlotEntity slot : slots) {
+				slotsByBlockId.computeIfAbsent(slot.getProgramBlockId(), ignored -> new ArrayList<>()).removeIf(existing -> existing.getId().equals(slot.getId()));
+				slotsByBlockId.computeIfAbsent(slot.getProgramBlockId(), ignored -> new ArrayList<>()).add(slot);
+			}
+			return slots;
+		});
+		when(programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> slotsByBlockId
+				.getOrDefault(invocation.getArgument(0), List.of())
+				.stream()
+				.sorted(Comparator.comparing(ProgramBlockSlotEntity::getSequenceNo))
+				.toList());
+		when(programBlockSlotRepository.findById(anyString())).thenAnswer(invocation -> slotsByBlockId.values().stream()
+				.flatMap((List<ProgramBlockSlotEntity> slotList) -> slotList.stream())
+				.filter(slot -> slot.getId().equals(invocation.getArgument(0)))
+				.findFirst());
+		when(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.sorted(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.toList());
+		when(queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.filter(item -> item.getStatus() == invocation.getArgument(1))
+				.sorted(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.findFirst());
+		when(queueItemRepository.saveAll(any())).thenAnswer(invocation -> {
+			List<QueueItemEntity> items = invocation.getArgument(0);
+			for (QueueItemEntity item : items) {
+				replaceQueueItem(queueItems, item);
+			}
+			return items;
+		});
+		when(queueItemRepository.countBySessionIdAndStatus(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.filter(item -> {
+					QueueItemStatus status = invocation.getArgument(1);
+					return item.getStatus() == status;
+				})
+				.count());
+
+		TuneResponse response = radioService.tune(new TuneRequest("station-night", "test", true), "corr-003");
+
+		assertEquals("station-night", response.stationId());
+		assertEquals(3, queueItems.size());
+		assertEquals(2, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
+		assertEquals(1, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.PLAYING).count());
+	}
+
+	@Test
 	void recordPlaybackEventRefillsQueueWhenBufferDropsBelowThreshold() {
 		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-002");
 		session.setCurrentProgramBlockId("block-current");
@@ -689,6 +787,47 @@ class RadioServiceStateMachineTests {
 		assertEquals("block-current", session.getCurrentProgramBlockId());
 		assertEquals(QueueItemStatus.DONE, current.getStatus());
 		assertEquals(ProgramBlockStatus.PLANNED, programBlockRepository.findById(nextBlockId).orElseThrow().getStatus());
+	}
+
+	@Test
+	void recordPlaybackEventDoesNotPlanNextProgramBlockInRealTimeOnlyMode() {
+		StationProgrammingPolicyEntity realTimeOnlyPolicy = programmingPolicy("station-night", "REALTIME_ONLY", 1, 1);
+		when(programmingPolicyRepository.findByStationId("station-night")).thenReturn(Optional.of(realTimeOnlyPolicy));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-002");
+		session.setCurrentProgramBlockId("block-current");
+
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		List<ProgramBlockSlotEntity> currentSlots = new ArrayList<>(List.of(
+				blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.DONE, SlotRole.OPENING, 30_000),
+				blockSlot("slot-2", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.TOPIC, 60_000),
+				blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.PLANNED, SlotRole.ENDING, 30_000)));
+
+		QueueItemEntity done = queueItem("queue-001", "playout-001", QueueItemStatus.DONE);
+		done.setProgramBlockId("block-current");
+		done.setProgramSlotId("slot-1");
+		QueueItemEntity current = queueItem("queue-002", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-2");
+		QueueItemEntity ready = queueItem("queue-003", "playout-001", QueueItemStatus.READY);
+		ready.setProgramBlockId("block-current");
+		ready.setProgramSlotId("slot-3");
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(done, current, ready));
+
+		wireRepositoryState(session, List.of(currentBlock), Map.of("block-current", currentSlots), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+
+		radioService.recordPlaybackEvent(new PlaybackEventRequest(
+				"web-client",
+				"playout-001",
+				"queue-002",
+				PlaybackEventType.SEGMENT_ENDED,
+				Instant.now()));
+
+		assertTrue(queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").stream()
+				.map(QueueItemEntity::getProgramBlockId)
+				.filter(programBlockId -> programBlockId != null)
+				.allMatch("block-current"::equals));
+		verify(programmingService, never()).resolveCurrentPlan(anyString(), any(OffsetDateTime.class));
 	}
 
 	@Test
@@ -952,6 +1091,21 @@ class RadioServiceStateMachineTests {
 				true,
 				"tmpl-night-regular",
 				true);
+	}
+
+	private StationProgrammingPolicyEntity programmingPolicy(
+			String stationId,
+			String mode,
+			int maxPreparedMinutes,
+			int maxPreparedBlocks) {
+		StationProgrammingPolicyEntity policy = org.mockito.Mockito.mock(StationProgrammingPolicyEntity.class);
+		org.mockito.Mockito.doReturn(ProgrammingPolicyProfileSupport.toMap(
+				new ProgrammingPolicyProfileSupport.PreGenerationProfile(
+						mode,
+						maxPreparedMinutes,
+						maxPreparedBlocks,
+						true))).when(policy).getPreGenerationPolicy();
+		return policy;
 	}
 
 	private SettingsDocument settingsDocument(SettingsDocument.PlayoutSettings playout) {

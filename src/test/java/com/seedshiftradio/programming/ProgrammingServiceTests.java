@@ -347,6 +347,106 @@ class ProgrammingServiceTests {
 		assertTrue(plan.validationWarnings().stream().noneMatch(message -> message.contains("musicBreakIntervalMinutes")));
 	}
 
+	@Test
+	void resolveCurrentPlanBalancesSoftCandidatesUsingTargetSegmentShares() {
+		StationEntity station = station();
+		StationProgrammingPolicyEntity policy = policy("policy-station-night", station.getId(), "tmpl-default");
+		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(
+				new ProgrammingPolicyProfileSupport.CompositionProfile(
+						Map.of("talk", 20, "letter", 0, "music", 75, "jingle", 5),
+						10,
+						99,
+						99,
+						true)));
+		ProgramTemplateEntity template = template("tmpl-default", "Night Default");
+		ProgramTemplateSlotEntity first = slot("slot-talk-1", template.getId());
+		first.setCandidateSegmentTypes(List.of("TALK"));
+		ProgramTemplateSlotEntity second = slot("slot-balance", template.getId());
+		second.setSequenceNo(2);
+		second.setCandidateSegmentTypes(List.of("TALK", "MUSIC_LOCAL"));
+
+		when(stationRepository.findById(station.getId())).thenReturn(Optional.of(station));
+		when(policyRepository.findByStationId(station.getId())).thenReturn(Optional.of(policy));
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId())).thenReturn(List.of());
+		when(providerHealthService.getLatestOrProbe()).thenReturn(health("UP", "UP", "UP"));
+		when(letterRepository.countByStationIdAndStatusIn(anyString(), any())).thenReturn(0L);
+		when(templateRepository.findById("tmpl-default")).thenReturn(Optional.of(template));
+		when(slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc("tmpl-default")).thenReturn(List.of(first, second));
+
+		ProgrammingService.ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(
+				station.getId(),
+				OffsetDateTime.parse("2026-03-20T23:30:00+09:00"));
+
+		assertEquals(List.of(SegmentType.TALK, SegmentType.MUSIC_LOCAL), plan.slots().stream().map(ProgrammingService.ResolvedSlot::resolvedSegmentType).toList());
+		assertTrue(plan.validationWarnings().stream().anyMatch(message -> message.contains("targetSegmentShares")));
+	}
+
+	@Test
+	void resolveCurrentPlanKeepsCandidateOrderWhenTargetSegmentSharesRetimingDisabled() {
+		StationEntity station = station();
+		StationProgrammingPolicyEntity policy = policy("policy-station-night", station.getId(), "tmpl-default");
+		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(
+				new ProgrammingPolicyProfileSupport.CompositionProfile(
+						Map.of("talk", 20, "letter", 0, "music", 75, "jingle", 5),
+						10,
+						99,
+						99,
+						false)));
+		ProgramTemplateEntity template = template("tmpl-default", "Night Default");
+		ProgramTemplateSlotEntity first = slot("slot-talk-1", template.getId());
+		first.setCandidateSegmentTypes(List.of("TALK"));
+		ProgramTemplateSlotEntity second = slot("slot-balance", template.getId());
+		second.setSequenceNo(2);
+		second.setCandidateSegmentTypes(List.of("TALK", "MUSIC_LOCAL"));
+
+		when(stationRepository.findById(station.getId())).thenReturn(Optional.of(station));
+		when(policyRepository.findByStationId(station.getId())).thenReturn(Optional.of(policy));
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId())).thenReturn(List.of());
+		when(providerHealthService.getLatestOrProbe()).thenReturn(health("UP", "UP", "UP"));
+		when(letterRepository.countByStationIdAndStatusIn(anyString(), any())).thenReturn(0L);
+		when(templateRepository.findById("tmpl-default")).thenReturn(Optional.of(template));
+		when(slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc("tmpl-default")).thenReturn(List.of(first, second));
+
+		ProgrammingService.ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(
+				station.getId(),
+				OffsetDateTime.parse("2026-03-20T23:30:00+09:00"));
+
+		assertEquals(List.of(SegmentType.TALK, SegmentType.TALK), plan.slots().stream().map(ProgrammingService.ResolvedSlot::resolvedSegmentType).toList());
+		assertTrue(plan.validationWarnings().stream().noneMatch(message -> message.contains("targetSegmentShares")));
+	}
+
+	@Test
+	void resolveCurrentPlanDoesNotUseFallbackOnlyToMatchTargetSegmentShares() {
+		StationEntity station = station();
+		StationProgrammingPolicyEntity policy = policy("policy-station-night", station.getId(), "tmpl-default");
+		policy.setCompositionPolicy(ProgrammingPolicyProfileSupport.toMap(
+				new ProgrammingPolicyProfileSupport.CompositionProfile(
+						Map.of("talk", 5, "letter", 0, "music", 95, "jingle", 0),
+						10,
+						99,
+						99,
+						true)));
+		ProgramTemplateEntity template = template("tmpl-default", "Night Default");
+		ProgramTemplateSlotEntity slot = slot("slot-talk-only", template.getId());
+		slot.setCandidateSegmentTypes(List.of("TALK"));
+		slot.setFallbackSegmentTypes(List.of("MUSIC_LOCAL"));
+
+		when(stationRepository.findById(station.getId())).thenReturn(Optional.of(station));
+		when(policyRepository.findByStationId(station.getId())).thenReturn(Optional.of(policy));
+		when(ruleRepository.findByPolicyIdOrderByPriorityDesc(policy.getId())).thenReturn(List.of());
+		when(providerHealthService.getLatestOrProbe()).thenReturn(health("UP", "UP", "UP"));
+		when(letterRepository.countByStationIdAndStatusIn(anyString(), any())).thenReturn(0L);
+		when(templateRepository.findById("tmpl-default")).thenReturn(Optional.of(template));
+		when(slotRepository.findByProgramTemplateIdOrderBySequenceNoAsc("tmpl-default")).thenReturn(List.of(slot));
+
+		ProgrammingService.ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(
+				station.getId(),
+				OffsetDateTime.parse("2026-03-20T23:30:00+09:00"));
+
+		assertEquals(SegmentType.TALK, plan.slots().getFirst().resolvedSegmentType());
+		assertTrue(plan.validationWarnings().stream().noneMatch(message -> message.contains("targetSegmentShares")));
+	}
+
 	private StationEntity station() {
 		StationEntity station = new StationEntity(
 				"station-night",

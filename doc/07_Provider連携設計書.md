@@ -88,7 +88,7 @@ CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセ
 
 機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。
 
-Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になるが、現行実装では MusicGen の cache-first 再利用までが先行しており、retention/eviction の定期処理は未実装である。
+Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になるが、現行実装では MusicGen の cache-first 再利用までが先行しており、station `preGeneration.preferCacheReuse=false` の場合は reusable asset が存在しても worker submit を優先する。retention/eviction の定期処理は未実装である。
 
 ### 8.1 Cache-first 実行
 

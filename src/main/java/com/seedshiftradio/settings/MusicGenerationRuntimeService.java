@@ -16,6 +16,9 @@ import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport;
+import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
+import com.seedshiftradio.programming.StationProgrammingPolicyRepository;
 import com.seedshiftradio.radio.QueueItemEntity;
 import com.seedshiftradio.station.StationRepository;
 
@@ -29,18 +32,21 @@ public class MusicGenerationRuntimeService {
 	private final GeneratedAssetService generatedAssetService;
 	private final RadioSettingsStore settingsStore;
 	private final StationRepository stationRepository;
+	private final StationProgrammingPolicyRepository programmingPolicyRepository;
 
 	public MusicGenerationRuntimeService(
 			MusicGenWorkerGateway musicGenWorkerGateway,
 			ProviderJobService providerJobService,
 			GeneratedAssetService generatedAssetService,
 			RadioSettingsStore settingsStore,
-			StationRepository stationRepository) {
+			StationRepository stationRepository,
+			StationProgrammingPolicyRepository programmingPolicyRepository) {
 		this.musicGenWorkerGateway = musicGenWorkerGateway;
 		this.providerJobService = providerJobService;
 		this.generatedAssetService = generatedAssetService;
 		this.settingsStore = settingsStore;
 		this.stationRepository = stationRepository;
+		this.programmingPolicyRepository = programmingPolicyRepository;
 	}
 
 	public GeneratedMusicAsset generate(String stationId, QueueItemEntity item) {
@@ -54,7 +60,7 @@ public class MusicGenerationRuntimeService {
 				item.getId(),
 				item.getCorrelationId());
 		try {
-			CachedAssetHit cachedAssetHit = findReusableAsset(providers, request, item, reuseScope);
+			CachedAssetHit cachedAssetHit = findReusableAsset(providers, request, item, stationId, reuseScope);
 			GeneratedAssetEntity reusableAsset = cachedAssetHit == null ? null : cachedAssetHit.asset();
 			if (reusableAsset != null) {
 				providerJobService.markRunning(providerJob.getId(), cachedAssetHit.provider().providerKey(), "cache-hit:" + reusableAsset.getId());
@@ -106,8 +112,9 @@ public class MusicGenerationRuntimeService {
 			List<MusicGenWorkerGateway.ResolvedMusicProvider> providers,
 			MusicGenerationRequest request,
 			QueueItemEntity item,
+			String stationId,
 			String reuseScope) {
-		if (NO_REUSE_SCOPES.contains(reuseScope)) {
+		if (NO_REUSE_SCOPES.contains(reuseScope) || !preferCacheReuse(stationId)) {
 			return null;
 		}
 		for (MusicGenWorkerGateway.ResolvedMusicProvider provider : providers) {
@@ -118,6 +125,15 @@ public class MusicGenerationRuntimeService {
 			}
 		}
 		return null;
+	}
+
+	private boolean preferCacheReuse(String stationId) {
+		PreGenerationProfile profile = stationId == null || stationId.isBlank()
+				? ProgrammingPolicyProfileSupport.defaultPreGenerationProfile()
+				: programmingPolicyRepository.findByStationId(stationId)
+						.map(policy -> ProgrammingPolicyProfileSupport.toPreGenerationProfile(policy.getPreGenerationPolicy()))
+						.orElseGet(ProgrammingPolicyProfileSupport::defaultPreGenerationProfile);
+		return Boolean.TRUE.equals(profile.preferCacheReuse());
 	}
 
 	private MusicGenerationRequest buildRequest(String stationId, QueueItemEntity item) {

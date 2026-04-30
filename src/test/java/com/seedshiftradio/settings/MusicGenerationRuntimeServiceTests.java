@@ -29,6 +29,8 @@ import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.programming.StationProgrammingPolicyEntity;
+import com.seedshiftradio.programming.StationProgrammingPolicyRepository;
 import com.seedshiftradio.radio.QueueItemEntity;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
@@ -51,6 +53,9 @@ class MusicGenerationRuntimeServiceTests {
 	@Mock
 	StationRepository stationRepository;
 
+	@Mock
+	StationProgrammingPolicyRepository programmingPolicyRepository;
+
 	MusicGenerationRuntimeService musicGenerationRuntimeService;
 
 	@BeforeEach
@@ -60,8 +65,10 @@ class MusicGenerationRuntimeServiceTests {
 				providerJobService,
 				generatedAssetService,
 				settingsStore,
-				stationRepository);
+				stationRepository,
+				programmingPolicyRepository);
 		lenient().when(settingsStore.load()).thenReturn(SettingsDocument.defaults().normalize());
+		lenient().when(programmingPolicyRepository.findByStationId(anyString())).thenReturn(Optional.empty());
 	}
 
 	@Test
@@ -257,6 +264,61 @@ class MusicGenerationRuntimeServiceTests {
 		verify(generatedAssetService, never()).findReusableAsset(any(), anyString());
 	}
 
+	@Test
+	void generateSkipsCacheLookupWhenPreferCacheReuseIsFalse() {
+		QueueItemEntity item = queueItem("queue-1", "corr-1");
+		ProviderJobEntity providerJob = providerJob("provider-job-1");
+		GeneratedAssetEntity createdAsset = asset("asset-created", "/tmp/music-created.wav", "cache-key-1");
+		MusicGenWorkerGateway.ResolvedMusicProvider provider = new MusicGenWorkerGateway.ResolvedMusicProvider(
+				"ace-step",
+				"http://127.0.0.1:8000",
+				5_000,
+				List.of("MUSIC_GEN"));
+		StationProgrammingPolicyEntity policy = programmingPolicy(false);
+
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station("station-night")));
+		when(programmingPolicyRepository.findByStationId("station-night"))
+				.thenReturn(Optional.of(policy));
+		when(musicGenWorkerGateway.resolveProviders()).thenReturn(List.of(provider));
+		when(providerJobService.createQueuedJob(
+				ProviderJobType.MUSIC_GEN,
+				ProviderType.MUSIC,
+				"ace-step",
+				"queue-1",
+				"corr-1")).thenReturn(providerJob);
+		when(musicGenWorkerGateway.submitWithFallback(any(), any(MusicGenerationRequest.class)))
+				.thenReturn(new MusicGenWorkerGateway.SubmittedMusicJob("worker-job-1", "QUEUED", provider));
+		when(musicGenWorkerGateway.awaitCompletion(eq(provider), eq("worker-job-1")))
+				.thenReturn(new MusicGenWorkerGateway.MusicJobStatus(
+						"worker-job-1",
+						"SUCCEEDED",
+						Path.of("/tmp/music-created.wav").toString(),
+						30,
+						"ace-step:1.0",
+						"prompt-hash-1",
+						"lyrics-hash-1",
+						null,
+						"generated",
+						"acestep-v15-turbo",
+						"acestep-5Hz-lm-0.6B",
+						"12345"));
+		when(generatedAssetService.registerExistingAsset(
+				eq(GeneratedAssetType.MUSIC),
+				eq(Path.of("/tmp/music-created.wav")),
+				eq("ace-step:1.0"),
+				eq("queue-1"),
+				eq("provider-job-1"),
+				anyString(),
+				any(Map.class)))
+				.thenReturn(createdAsset);
+
+		MusicGenerationRuntimeService.GeneratedMusicAsset response = musicGenerationRuntimeService.generate("station-night", item);
+
+		assertEquals("asset-created", response.assetId());
+		assertEquals("LIVE_GEN", response.contentOrigin());
+		verify(generatedAssetService, never()).findReusableAsset(any(), anyString());
+	}
+
 	private QueueItemEntity queueItem(String id, String correlationId) {
 		QueueItemEntity entity = org.mockito.Mockito.mock(QueueItemEntity.class);
 		when(entity.getId()).thenReturn(id);
@@ -322,5 +384,15 @@ class MusicGenerationRuntimeServiceTests {
 				defaults.providers(),
 				defaults.security(),
 				defaults.features()).normalize();
+	}
+
+	private StationProgrammingPolicyEntity programmingPolicy(boolean preferCacheReuse) {
+		StationProgrammingPolicyEntity entity = org.mockito.Mockito.mock(StationProgrammingPolicyEntity.class);
+		org.mockito.Mockito.doReturn(Map.of(
+				"mode", "ASSISTED",
+				"maxPreparedMinutes", 12,
+				"maxPreparedBlocks", 2,
+				"preferCacheReuse", preferCacheReuse)).when(entity).getPreGenerationPolicy();
+		return entity;
 	}
 }

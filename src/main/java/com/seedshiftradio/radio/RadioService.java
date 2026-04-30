@@ -374,6 +374,7 @@ public class RadioService {
 			if (session == null) {
 				return;
 			}
+			promotePendingMusicGenerations(sessionId, playoutSettings());
 			autoStartPlaybackIfRequested(session);
 			refreshSessionState(session);
 			emitSessionEvents(sessionId);
@@ -486,6 +487,7 @@ public class RadioService {
 		queueItemRepository.flush();
 		letterSegmentBinder.bindPendingSegments(session.getId());
 		materializeQueueAssets(queueItems);
+		promotePendingMusicGenerations(session.getId(), playout);
 		programBlockSlotRepository.saveAll(blockSlots);
 		if (plan.fallbackApplied()) {
 			session.setState(PlayoutState.DEGRADED);
@@ -499,7 +501,7 @@ public class RadioService {
 		entity.setSessionId(session.getId());
 		entity.setSequenceNo(sequenceNo);
 		entity.setSegmentType(blockSlot.getResolvedSegmentType());
-		entity.setStatus(blockSlot.getResolvedSegmentType() == SegmentType.MUSIC_AI ? QueueItemStatus.GENERATING : QueueItemStatus.READY);
+		entity.setStatus(blockSlot.getResolvedSegmentType() == SegmentType.MUSIC_AI ? QueueItemStatus.PLANNED : QueueItemStatus.READY);
 		entity.setProgramBlockId(block.getId());
 		entity.setProgramSlotId(blockSlot.getId());
 		entity.setSlotRole(blockSlot.getRole());
@@ -593,6 +595,7 @@ public class RadioService {
 			letterSegmentBinder.bindPendingSegments(session.getId());
 			materializeQueueAssets(additions);
 		}
+		promotePendingMusicGenerations(session.getId(), playout);
 		if (!changedSlots.isEmpty()) {
 			programBlockSlotRepository.saveAll(changedSlots);
 		}
@@ -775,6 +778,31 @@ public class RadioService {
 		eventPublisher.publishEvent(new QueueRefillRequested(sessionId));
 	}
 
+	private void promotePendingMusicGenerations(String sessionId, SettingsDocument.PlayoutSettings playout) {
+		List<QueueItemEntity> queueItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(sessionId);
+		int activeMusicCount = (int) queueItems.stream()
+				.filter(item -> item.getSegmentType() == SegmentType.MUSIC_AI)
+				.filter(item -> item.getStatus() == QueueItemStatus.GENERATING
+						|| item.getStatus() == QueueItemStatus.READY
+						|| item.getStatus() == QueueItemStatus.PLAYING)
+				.count();
+		int musicAheadCount = Math.max(1, playout.musicAheadCount());
+		for (QueueItemEntity item : queueItems) {
+			if (activeMusicCount >= musicAheadCount) {
+				return;
+			}
+			if (item.getSegmentType() != SegmentType.MUSIC_AI
+					|| item.getStatus() != QueueItemStatus.PLANNED
+					|| (item.getAssetId() != null && !item.getAssetId().isBlank())) {
+				continue;
+			}
+			item.setStatus(QueueItemStatus.GENERATING);
+			queueItemRepository.save(item);
+			requestGenerateMusic(item);
+			activeMusicCount++;
+		}
+	}
+
 	private void autoStartPlaybackIfRequested(PlayoutSessionEntity session) {
 		if (!session.isResumePlayback()
 				|| session.getCurrentQueueItemId() != null
@@ -852,11 +880,10 @@ public class RadioService {
 		}
 		List<QueueItemEntity> changedItems = new ArrayList<>();
 		for (QueueItemEntity item : items) {
-			if (item.getSegmentType() == SegmentType.MUSIC_AI && (item.getAssetId() == null || item.getAssetId().isBlank())) {
-				requestGenerateMusic(item);
+			if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
 				continue;
 			}
-			if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
+			if (item.getSegmentType() == SegmentType.MUSIC_AI) {
 				continue;
 			}
 			assetService.ensureQueueAudioAsset(item);

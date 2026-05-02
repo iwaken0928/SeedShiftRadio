@@ -932,7 +932,7 @@ Response:
 
 `config.json` の現在値に `version` を付けて返し、Web/Native が同じ契約で設定を表示できるようにします。サーバーは起動時に `schemaVersion` も検証し、一致しない場合には `400` を返します。
 
-`playout` は全局共通の上限値として扱い、station ごとの `pre_generation_policy` や queue warmup/refill の深さはこの範囲内に収めます。`targetReadyCount` と `minReadyDurationMs` は現在のサーバー実装で既に利用されている基本項目で、`minimumReadyCount`, `maxPreparedDurationMs`, `maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount`, `idlePrefetchEnabled` も `/api/settings` と `config.json` の往復対象として実装済みです。ただし追加項目の多くはまだ上限制御の保存契約として先行実装した段階であり、実行経路への反映は段階的に有効化します。
+`playout` は全局共通の上限値として扱い、station ごとの `pre_generation_policy` や queue warmup/refill の深さはこの範囲内に収めます。`targetReadyCount` と `minReadyDurationMs` は現在のサーバー実装で既に利用されている基本項目で、`minimumReadyCount`, `maxPreparedDurationMs`, `maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount`, `idlePrefetchEnabled` も `/api/settings` と `config.json` の往復対象として実装済みです。`scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は段階的に runtime 反映されており、`idlePrefetchEnabled` は「manual play を待っている間に、`minimumReadyCount` / `minReadyDurationMs` を満たした後も extra prefetch を続けるか」を制御するフラグとして first step 反映済みです。
 
 ```json
 {
@@ -1067,7 +1067,7 @@ Response:
 
 `cache` の `scriptMaxBytes`, `ttsMaxBytes`, `musicMaxBytes` は各 asset 種別ごとの保存上限を表します。`scriptReuseScope`, `ttsReuseScope`, `musicReuseScope` は `DISABLED`, `SESSION`, `STATION`, `GLOBAL`, `ARCHIVE_ONLY` のいずれかを取り、再利用候補の検索範囲を制御します。`cleanupBatchSize` は eviction job の一回あたり処理量です。eviction は参照整合性を壊さないため DB record は残し、payload file を削除したうえで `byte_size=0`, `cache_key=null`, `reuse_scope=DISABLED` とし、短い eviction metadata だけを残します。
 
-`playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は待機時 prefetch を許可するフラグです。
+`playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は manual play 待機中に安全バッファ達成後の extra prefetch を許可するフラグです。
 
 `programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、`providers.musicGen.providers.{key}` は追加で `adapter`, `apiKeyRef`, `defaultModelProfileId`, `modelProfiles` を持ちます。`adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
 

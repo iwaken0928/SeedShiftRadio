@@ -43,9 +43,6 @@ import com.seedshiftradio.stream.StreamEventService;
 @Service
 public class RadioService {
 
-	private static final int MIN_REMAINING_SLOT_COUNT = 2;
-	private static final int AGGRESSIVE_REMAINING_SLOT_THRESHOLD = 3;
-
 	private final StationRepository stationRepository;
 	private final ProgrammingService programmingService;
 	private final StationProgrammingPolicyRepository programmingPolicyRepository;
@@ -374,7 +371,9 @@ public class RadioService {
 			if (session == null) {
 				return;
 			}
-			promotePendingMusicGenerations(sessionId, playoutSettings());
+			SettingsDocument.PlayoutSettings playout = playoutSettings();
+			PreGenerationProfile preGeneration = preGenerationProfile(session.getStationId());
+			promotePendingMusicGenerations(session, queuePreparationPolicy(session, playout, preGeneration));
 			autoStartPlaybackIfRequested(session);
 			refreshSessionState(session);
 			emitSessionEvents(sessionId);
@@ -468,26 +467,23 @@ public class RadioService {
 			PlayoutSessionEntity session,
 			ProgramBlockEntity block,
 			ResolvedProgramPlan plan,
-			SettingsDocument.PlayoutSettings playout,
-			PreGenerationProfile preGeneration) {
+			QueuePreparationPolicy queuePreparationPolicy) {
 		List<ProgramBlockSlotEntity> blockSlots = programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(block.getId());
 		int sequenceStart = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()).size() + 1;
 		List<QueueItemEntity> queueItems = new ArrayList<>();
-		int targetReadyCount = targetReadyCount(playout, preGeneration);
-		int maxPreparedDurationMs = effectiveMaxPreparedDurationMs(playout, preGeneration);
-		for (int i = 0; i < Math.min(targetReadyCount, blockSlots.size()); i++) {
+		for (int i = 0; i < Math.min(queuePreparationPolicy.targetReadyCount(), blockSlots.size()); i++) {
 			ProgramBlockSlotEntity blockSlot = blockSlots.get(i);
-				queueItems.add(createQueueItem(session, block, blockSlot, sequenceStart++, blockSlots.size()));
+			queueItems.add(createQueueItem(session, block, blockSlot, sequenceStart++, blockSlots.size()));
 			blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
-			if (totalReadyDuration(queueItems) >= maxPreparedDurationMs) {
+			if (queuePreparationPolicy.hasReachedPreparedDurationLimit(totalReadyDuration(queueItems))) {
 				break;
 			}
 		}
 		queueItemRepository.saveAll(queueItems);
 		queueItemRepository.flush();
 		letterSegmentBinder.bindPendingSegments(session.getId());
-		materializeQueueAssets(queueItems);
-		promotePendingMusicGenerations(session.getId(), playout);
+		prefetchPendingSpokenAssets(session, queuePreparationPolicy);
+		promotePendingMusicGenerations(session, queuePreparationPolicy);
 		programBlockSlotRepository.saveAll(blockSlots);
 		if (plan.fallbackApplied()) {
 			session.setState(PlayoutState.DEGRADED);
@@ -550,11 +546,11 @@ public class RadioService {
 				.filter(item -> item.getStatus() == QueueItemStatus.READY)
 				.mapToInt(QueueItemEntity::getDurationMs)
 				.sum();
-		int targetReadyCount = targetReadyCount(playout, preGeneration);
-		int maxPreparedDurationMs = effectiveMaxPreparedDurationMs(playout, preGeneration);
+		QueuePreparationPolicy queuePreparationPolicy = queuePreparationPolicy(session, playout, preGeneration, items);
 		ProgramBlockEntity currentBlock = getCurrentProgramBlock(session);
-		ProgramBlockEntity latestBlock = planNextProgramBlockIfNeeded(session, currentBlock, playout, preGeneration);
-		if (readyCount >= playout.minimumReadyCount() && readyDuration >= playout.minReadyDurationMs()) {
+		ProgramBlockEntity latestBlock = planNextProgramBlockIfNeeded(session, currentBlock, queuePreparationPolicy);
+		if (queuePreparationPolicy.hasReachedSafetyBuffer(readyCount, readyDuration)) {
+			prefetchPendingSpokenAssets(session, queuePreparationPolicy);
 			completeAndAdvanceProgramBlock(session, items, currentBlock, latestBlock);
 			return;
 		}
@@ -567,7 +563,7 @@ public class RadioService {
 		List<ProgramBlockSlotEntity> changedSlots = new ArrayList<>();
 		for (ProgramBlockSlotEntity blockSlot : blockSlots) {
 			if (blockSlot.getStatus() == ProgramBlockSlotStatus.PLANNED) {
-					QueueItemEntity item = createQueueItem(session, refillBlock, blockSlot, nextSequence++, blockSlots.size());
+				QueueItemEntity item = createQueueItem(session, refillBlock, blockSlot, nextSequence++, blockSlots.size());
 				additions.add(item);
 				blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
 				changedSlots.add(blockSlot);
@@ -576,10 +572,10 @@ public class RadioService {
 					readyDuration += blockSlot.getTargetDurationMs();
 				}
 			}
-			if (readyCount >= targetReadyCount && readyDuration >= playout.minReadyDurationMs()) {
+			if (queuePreparationPolicy.hasReachedTargetBuffer(readyCount, readyDuration)) {
 				break;
 			}
-			if (readyDuration >= maxPreparedDurationMs) {
+			if (queuePreparationPolicy.hasReachedPreparedDurationLimit(readyDuration)) {
 				break;
 			}
 		}
@@ -593,9 +589,10 @@ public class RadioService {
 			queueItemRepository.saveAll(additions);
 			queueItemRepository.flush();
 			letterSegmentBinder.bindPendingSegments(session.getId());
-			materializeQueueAssets(additions);
 		}
-		promotePendingMusicGenerations(session.getId(), playout);
+		QueuePreparationPolicy updatedQueuePreparationPolicy = queuePreparationPolicy(session, playout, preGeneration);
+		prefetchPendingSpokenAssets(session, updatedQueuePreparationPolicy);
+		promotePendingMusicGenerations(session, updatedQueuePreparationPolicy);
 		if (!changedSlots.isEmpty()) {
 			programBlockSlotRepository.saveAll(changedSlots);
 		}
@@ -616,8 +613,7 @@ public class RadioService {
 	private ProgramBlockEntity planNextProgramBlockIfNeeded(
 			PlayoutSessionEntity session,
 			ProgramBlockEntity currentBlock,
-			SettingsDocument.PlayoutSettings playout,
-			PreGenerationProfile preGeneration) {
+			QueuePreparationPolicy queuePreparationPolicy) {
 		ProgramBlockEntity latestBlock = programBlockRepository.findTopBySessionIdOrderByStartedAtDesc(session.getId()).orElse(currentBlock);
 		if (currentBlock == null) {
 			return latestBlock;
@@ -628,13 +624,13 @@ public class RadioService {
 		long preparedBlockCount = programBlockRepository.findBySessionIdOrderByStartedAtAsc(session.getId()).stream()
 				.filter(block -> block.getStatus() == ProgramBlockStatus.ACTIVE || block.getStatus() == ProgramBlockStatus.PLANNED)
 				.count();
-		if (preparedBlockCount >= effectiveMaxPreparedBlocks(playout, preGeneration)) {
+		if (preparedBlockCount >= queuePreparationPolicy.maxPreparedBlocks()) {
 			return latestBlock;
 		}
 		long remainingSlotCount = programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(currentBlock.getId()).stream()
 				.filter(slot -> slot.getStatus() != ProgramBlockSlotStatus.DONE && slot.getStatus() != ProgramBlockSlotStatus.SKIPPED)
 				.count();
-		if (shouldDeferNextBlockPlanning(preGeneration, remainingSlotCount)) {
+		if (queuePreparationPolicy.shouldDeferNextBlockPlanning(remainingSlotCount)) {
 			return latestBlock;
 		}
 		ResolvedProgramPlan plan = programmingService.resolveCurrentPlan(session.getStationId(), OffsetDateTime.now());
@@ -667,41 +663,20 @@ public class RadioService {
 				.orElseGet(ProgrammingPolicyProfileSupport::defaultPreGenerationProfile);
 	}
 
-	private int targetReadyCount(SettingsDocument.PlayoutSettings playout, PreGenerationProfile preGeneration) {
-		if ("REALTIME_ONLY".equals(preGeneration.mode())) {
-			return Math.max(1, playout.minimumReadyCount());
-		}
-		return Math.max(1, playout.targetReadyCount());
+	private QueuePreparationPolicy queuePreparationPolicy(
+			PlayoutSessionEntity session,
+			SettingsDocument.PlayoutSettings playout,
+			PreGenerationProfile preGeneration) {
+		List<QueueItemEntity> queueItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
+		return queuePreparationPolicy(session, playout, preGeneration, queueItems);
 	}
 
-	private int effectiveMaxPreparedDurationMs(SettingsDocument.PlayoutSettings playout, PreGenerationProfile preGeneration) {
-		long stationCapMs = preGeneration.maxPreparedMinutes() == null || preGeneration.maxPreparedMinutes() <= 0
-				? Long.MAX_VALUE
-				: preGeneration.maxPreparedMinutes() * 60_000L;
-		return (int) Math.min(playout.maxPreparedDurationMs(), Math.min(Integer.MAX_VALUE, stationCapMs));
-	}
-
-	private int effectiveMaxPreparedBlocks(SettingsDocument.PlayoutSettings playout, PreGenerationProfile preGeneration) {
-		int globalCap = Math.max(1, playout.maxPreparedBlocks());
-		int stationCap = preGeneration.maxPreparedBlocks() == null
-				? globalCap
-				: Math.max(1, preGeneration.maxPreparedBlocks());
-		return Math.min(globalCap, stationCap);
-	}
-
-	private int remainingSlotThreshold(PreGenerationProfile preGeneration) {
-		return switch (preGeneration.mode()) {
-			case "REALTIME_ONLY" -> 0;
-			case "AGGRESSIVE" -> AGGRESSIVE_REMAINING_SLOT_THRESHOLD;
-			default -> MIN_REMAINING_SLOT_COUNT;
-		};
-	}
-
-	private boolean shouldDeferNextBlockPlanning(PreGenerationProfile preGeneration, long remainingSlotCount) {
-		if ("REALTIME_ONLY".equals(preGeneration.mode())) {
-			return remainingSlotCount > 0;
-		}
-		return remainingSlotCount >= remainingSlotThreshold(preGeneration);
+	private QueuePreparationPolicy queuePreparationPolicy(
+			PlayoutSessionEntity session,
+			SettingsDocument.PlayoutSettings playout,
+			PreGenerationProfile preGeneration,
+			List<QueueItemEntity> queueItems) {
+		return QueuePreparationPolicy.resolve(playout, preGeneration, session, queueItems);
 	}
 
 	private void completeAndAdvanceProgramBlock(
@@ -778,17 +753,16 @@ public class RadioService {
 		eventPublisher.publishEvent(new QueueRefillRequested(sessionId));
 	}
 
-	private void promotePendingMusicGenerations(String sessionId, SettingsDocument.PlayoutSettings playout) {
-		List<QueueItemEntity> queueItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(sessionId);
+	private void promotePendingMusicGenerations(PlayoutSessionEntity session, QueuePreparationPolicy queuePreparationPolicy) {
+		List<QueueItemEntity> queueItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
 		int activeMusicCount = (int) queueItems.stream()
 				.filter(item -> item.getSegmentType() == SegmentType.MUSIC_AI)
 				.filter(item -> item.getStatus() == QueueItemStatus.GENERATING
 						|| item.getStatus() == QueueItemStatus.READY
 						|| item.getStatus() == QueueItemStatus.PLAYING)
 				.count();
-		int musicAheadCount = Math.max(1, playout.musicAheadCount());
 		for (QueueItemEntity item : queueItems) {
-			if (activeMusicCount >= musicAheadCount) {
+			if (activeMusicCount >= queuePreparationPolicy.musicAheadCount()) {
 				return;
 			}
 			if (item.getSegmentType() != SegmentType.MUSIC_AI
@@ -801,6 +775,51 @@ public class RadioService {
 			requestGenerateMusic(item);
 			activeMusicCount++;
 		}
+	}
+
+	private void prefetchPendingSpokenAssets(PlayoutSessionEntity session, QueuePreparationPolicy queuePreparationPolicy) {
+		List<QueueItemEntity> queueItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
+		List<QueueItemEntity> changedItems = new ArrayList<>();
+		int preparedAudioCount = 0;
+		int preparedScriptCount = 0;
+		for (QueueItemEntity item : queueItems) {
+			if (!isFutureSpokenCandidate(item)) {
+				continue;
+			}
+			if (preparedAudioCount >= queuePreparationPolicy.ttsAheadCount()
+					&& preparedScriptCount >= queuePreparationPolicy.scriptAheadCount()) {
+				break;
+			}
+			if (hasPreparedAudioAsset(item)) {
+				preparedAudioCount++;
+				preparedScriptCount++;
+				continue;
+			}
+			if (preparedAudioCount < queuePreparationPolicy.ttsAheadCount()) {
+				assetService.ensureQueueAudioAsset(item);
+				changedItems.add(item);
+				preparedAudioCount++;
+				preparedScriptCount++;
+				continue;
+			}
+			if (preparedScriptCount < queuePreparationPolicy.scriptAheadCount()) {
+				scriptGenerationService.ensureScriptAsset(item);
+				preparedScriptCount++;
+			}
+		}
+		if (!changedItems.isEmpty()) {
+			queueItemRepository.saveAll(changedItems);
+		}
+	}
+
+	private boolean isFutureSpokenCandidate(QueueItemEntity item) {
+		return item.getStatus() == QueueItemStatus.READY
+				&& item.getSegmentType() != SegmentType.MUSIC_AI
+				&& item.getSegmentType() != SegmentType.MUSIC_LOCAL;
+	}
+
+	private boolean hasPreparedAudioAsset(QueueItemEntity item) {
+		return item.getAssetId() != null && !item.getAssetId().isBlank();
 	}
 
 	private void autoStartPlaybackIfRequested(PlayoutSessionEntity session) {
@@ -871,26 +890,6 @@ public class RadioService {
 		if (blockSlot != null && blockSlot.getStatus() != ProgramBlockSlotStatus.DONE) {
 			blockSlot.setStatus(ProgramBlockSlotStatus.SKIPPED);
 			programBlockSlotRepository.save(blockSlot);
-		}
-	}
-
-	private void materializeQueueAssets(List<QueueItemEntity> items) {
-		if (items.isEmpty()) {
-			return;
-		}
-		List<QueueItemEntity> changedItems = new ArrayList<>();
-		for (QueueItemEntity item : items) {
-			if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
-				continue;
-			}
-			if (item.getSegmentType() == SegmentType.MUSIC_AI) {
-				continue;
-			}
-			assetService.ensureQueueAudioAsset(item);
-			changedItems.add(item);
-		}
-		if (!changedItems.isEmpty()) {
-			queueItemRepository.saveAll(changedItems);
 		}
 	}
 

@@ -639,6 +639,209 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void tunePrefetchesSpokenAssetsWithinScriptAndTtsAheadCounts() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(4, 2, 90_000, 480_000, 2, 3, 0, 2, true)));
+		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
+				"tmpl-night-regular",
+				3,
+				"深夜の作業ノート",
+				120_000,
+				List.of(
+						new ProgrammingService.ResolvedSlot("slot-1", SlotRole.OPENING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-2", SlotRole.TOPIC, com.seedshiftradio.domain.ConstraintMode.SOFT, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-3", SlotRole.TOPIC, com.seedshiftradio.domain.ConstraintMode.SOFT, 30_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-4", SlotRole.ENDING, com.seedshiftradio.domain.ConstraintMode.HARD, 30_000, SegmentType.JINGLE)),
+				false,
+				List.of());
+
+		AtomicReference<PlayoutSessionEntity> savedSession = new AtomicReference<>();
+		Map<String, ProgramBlockEntity> blocksById = new HashMap<>();
+		Map<String, List<ProgramBlockSlotEntity>> slotsByBlockId = new HashMap<>();
+		List<QueueItemEntity> queueItems = new ArrayList<>();
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station()));
+		when(programmingService.resolveCurrentPlan(anyString(), any(OffsetDateTime.class))).thenReturn(plan);
+		when(playoutSessionRepository.save(any(PlayoutSessionEntity.class))).thenAnswer(invocation -> {
+			PlayoutSessionEntity session = invocation.getArgument(0);
+			savedSession.set(session);
+			return session;
+		});
+		when(playoutSessionRepository.findFirstByOrderByStartedAtDesc()).thenAnswer(invocation -> Optional.ofNullable(savedSession.get()));
+		when(playoutSessionRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(savedSession.get()));
+		when(programBlockRepository.save(any(ProgramBlockEntity.class))).thenAnswer(invocation -> {
+			ProgramBlockEntity block = invocation.getArgument(0);
+			blocksById.put(block.getId(), block);
+			return block;
+		});
+		when(programBlockRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(blocksById.get(invocation.getArgument(0))));
+		when(programBlockRepository.findTopBySessionIdOrderByStartedAtDesc(anyString())).thenAnswer(invocation -> blocksById.values().stream()
+				.filter(block -> invocation.getArgument(0).equals(block.getSessionId()))
+				.findFirst());
+		when(programBlockSlotRepository.saveAll(any())).thenAnswer(invocation -> {
+			List<ProgramBlockSlotEntity> slots = invocation.getArgument(0);
+			for (ProgramBlockSlotEntity slot : slots) {
+				slotsByBlockId.computeIfAbsent(slot.getProgramBlockId(), ignored -> new ArrayList<>()).removeIf(existing -> existing.getId().equals(slot.getId()));
+				slotsByBlockId.computeIfAbsent(slot.getProgramBlockId(), ignored -> new ArrayList<>()).add(slot);
+			}
+			return slots;
+		});
+		when(programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> slotsByBlockId
+				.getOrDefault(invocation.getArgument(0), List.of())
+				.stream()
+				.sorted(Comparator.comparing(ProgramBlockSlotEntity::getSequenceNo))
+				.toList());
+		when(programBlockSlotRepository.findById(anyString())).thenAnswer(invocation -> slotsByBlockId.values().stream()
+				.flatMap((List<ProgramBlockSlotEntity> slotList) -> slotList.stream())
+				.filter(slot -> slot.getId().equals(invocation.getArgument(0)))
+				.findFirst());
+		when(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.sorted(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.toList());
+		when(queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.filter(item -> item.getStatus() == invocation.getArgument(1))
+				.sorted(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.findFirst());
+		when(queueItemRepository.saveAll(any())).thenAnswer(invocation -> {
+			List<QueueItemEntity> items = invocation.getArgument(0);
+			for (QueueItemEntity item : items) {
+				replaceQueueItem(queueItems, item);
+			}
+			return items;
+		});
+		when(queueItemRepository.countBySessionIdAndStatus(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.filter(item -> {
+					QueueItemStatus status = invocation.getArgument(1);
+					return item.getStatus() == status;
+				})
+				.count());
+		doAnswer(invocation -> {
+			QueueItemEntity item = invocation.getArgument(0);
+			item.setAssetId("asset-" + item.getId());
+			item.setAssetUrl("/api/assets/audio/asset-" + item.getId() + ".wav");
+			return null;
+		}).when(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+		when(scriptGenerationService.ensureScriptAsset(any(QueueItemEntity.class))).thenReturn(scriptSnapshot());
+
+		TuneResponse response = radioService.tune(new TuneRequest("station-night", "test", false), "corr-004");
+
+		assertEquals("station-night", response.stationId());
+		assertEquals(4, queueItems.size());
+		assertEquals(4L, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
+		assertEquals(1L, queueItems.stream().filter(item -> item.getAssetId() != null && !item.getAssetId().isBlank()).count());
+		assertTrue(queueItems.stream().anyMatch(item -> item.getSequenceNo() == 1 && item.getAssetId() != null));
+		assertTrue(queueItems.stream().anyMatch(item -> item.getSequenceNo() == 2 && item.getAssetId() == null));
+		assertTrue(queueItems.stream().anyMatch(item -> item.getSequenceNo() == 3 && item.getAssetId() == null));
+		verify(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+		verify(scriptGenerationService, org.mockito.Mockito.times(2)).ensureScriptAsset(any(QueueItemEntity.class));
+	}
+
+	@Test
+	void tuneLimitsIdlePrefetchWhenManualPlaybackIsWaiting() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(4, 2, 90_000, 480_000, 2, 3, 2, 2, false)));
+		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
+				"tmpl-night-regular",
+				3,
+				"深夜の作業ノート",
+				120_000,
+				List.of(
+						new ProgrammingService.ResolvedSlot("slot-1", SlotRole.OPENING, com.seedshiftradio.domain.ConstraintMode.HARD, 45_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-2", SlotRole.TOPIC, com.seedshiftradio.domain.ConstraintMode.SOFT, 45_000, SegmentType.TALK),
+						new ProgrammingService.ResolvedSlot("slot-3", SlotRole.MUSIC_BREAK, com.seedshiftradio.domain.ConstraintMode.SOFT, 30_000, SegmentType.MUSIC_AI),
+						new ProgrammingService.ResolvedSlot("slot-4", SlotRole.MUSIC_BREAK, com.seedshiftradio.domain.ConstraintMode.SOFT, 30_000, SegmentType.MUSIC_AI)),
+				false,
+				List.of());
+
+		AtomicReference<PlayoutSessionEntity> savedSession = new AtomicReference<>();
+		Map<String, ProgramBlockEntity> blocksById = new HashMap<>();
+		Map<String, List<ProgramBlockSlotEntity>> slotsByBlockId = new HashMap<>();
+		List<QueueItemEntity> queueItems = new ArrayList<>();
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station()));
+		when(programmingService.resolveCurrentPlan(anyString(), any(OffsetDateTime.class))).thenReturn(plan);
+		when(playoutSessionRepository.save(any(PlayoutSessionEntity.class))).thenAnswer(invocation -> {
+			PlayoutSessionEntity session = invocation.getArgument(0);
+			savedSession.set(session);
+			return session;
+		});
+		when(playoutSessionRepository.findFirstByOrderByStartedAtDesc()).thenAnswer(invocation -> Optional.ofNullable(savedSession.get()));
+		when(playoutSessionRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(savedSession.get()));
+		when(programBlockRepository.save(any(ProgramBlockEntity.class))).thenAnswer(invocation -> {
+			ProgramBlockEntity block = invocation.getArgument(0);
+			blocksById.put(block.getId(), block);
+			return block;
+		});
+		when(programBlockRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(blocksById.get(invocation.getArgument(0))));
+		when(programBlockRepository.findTopBySessionIdOrderByStartedAtDesc(anyString())).thenAnswer(invocation -> blocksById.values().stream()
+				.filter(block -> invocation.getArgument(0).equals(block.getSessionId()))
+				.findFirst());
+		when(programBlockSlotRepository.saveAll(any())).thenAnswer(invocation -> {
+			List<ProgramBlockSlotEntity> slots = invocation.getArgument(0);
+			for (ProgramBlockSlotEntity slot : slots) {
+				slotsByBlockId.computeIfAbsent(slot.getProgramBlockId(), ignored -> new ArrayList<>()).removeIf(existing -> existing.getId().equals(slot.getId()));
+				slotsByBlockId.computeIfAbsent(slot.getProgramBlockId(), ignored -> new ArrayList<>()).add(slot);
+			}
+			return slots;
+		});
+		when(programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> slotsByBlockId
+				.getOrDefault(invocation.getArgument(0), List.of())
+				.stream()
+				.sorted(Comparator.comparing(ProgramBlockSlotEntity::getSequenceNo))
+				.toList());
+		when(programBlockSlotRepository.findById(anyString())).thenAnswer(invocation -> slotsByBlockId.values().stream()
+				.flatMap((List<ProgramBlockSlotEntity> slotList) -> slotList.stream())
+				.filter(slot -> slot.getId().equals(invocation.getArgument(0)))
+				.findFirst());
+		when(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(anyString())).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.sorted(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.toList());
+		when(queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.filter(item -> item.getStatus() == invocation.getArgument(1))
+				.sorted(Comparator.comparing(QueueItemEntity::getSequenceNo))
+				.findFirst());
+		when(queueItemRepository.save(any(QueueItemEntity.class))).thenAnswer(invocation -> {
+			QueueItemEntity item = invocation.getArgument(0);
+			replaceQueueItem(queueItems, item);
+			return item;
+		});
+		when(queueItemRepository.saveAll(any())).thenAnswer(invocation -> {
+			List<QueueItemEntity> items = invocation.getArgument(0);
+			for (QueueItemEntity item : items) {
+				replaceQueueItem(queueItems, item);
+			}
+			return items;
+		});
+		when(queueItemRepository.countBySessionIdAndStatus(anyString(), any(QueueItemStatus.class))).thenAnswer(invocation -> queueItems.stream()
+				.filter(item -> savedSession.get() != null && savedSession.get().getId().equals(invocation.getArgument(0)))
+				.filter(item -> {
+					QueueItemStatus status = invocation.getArgument(1);
+					return item.getStatus() == status;
+				})
+				.count());
+		doAnswer(invocation -> {
+			QueueItemEntity item = invocation.getArgument(0);
+			item.setAssetId("asset-" + item.getId());
+			item.setAssetUrl("/api/assets/audio/asset-" + item.getId() + ".wav");
+			return null;
+		}).when(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+		when(scriptGenerationService.ensureScriptAsset(any(QueueItemEntity.class))).thenReturn(scriptSnapshot());
+
+		TuneResponse response = radioService.tune(new TuneRequest("station-night", "test", false), "corr-004-idle");
+
+		assertEquals("station-night", response.stationId());
+		assertEquals(4, queueItems.size());
+		assertEquals(2L, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
+		assertEquals(1L, queueItems.stream().filter(item -> item.getSegmentType() == SegmentType.MUSIC_AI && item.getStatus() == QueueItemStatus.GENERATING).count());
+		assertEquals(1L, queueItems.stream().filter(item -> item.getSegmentType() == SegmentType.MUSIC_AI && item.getStatus() == QueueItemStatus.PLANNED).count());
+		assertEquals(1L, queueItems.stream().filter(item -> item.getAssetId() != null && !item.getAssetId().isBlank()).count());
+		verify(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+		verify(scriptGenerationService, never()).ensureScriptAsset(any(QueueItemEntity.class));
+		verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof GenerateMusicRequested));
+	}
+
+	@Test
 	void tuneKeepsOnlyFirstPendingMusicGenerationWhenMusicAheadCountIsZero() {
 		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 0, true)));
 		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
@@ -730,6 +933,60 @@ class RadioServiceStateMachineTests {
 		assertEquals(1L, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.PLAYING).count());
 		assertEquals(1L, queueItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
 		verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof GenerateMusicRequested));
+	}
+
+	@Test
+	void refillQueueAdvancesSpokenPrefetchWindowWithoutChangingReadyCounts() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(4, 2, 90_000, 480_000, 2, 3, 2, 2, false)));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		List<ProgramBlockSlotEntity> currentSlots = new ArrayList<>(List.of(
+				blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.OPENING, 30_000),
+				blockSlot("slot-2", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.TOPIC, 30_000),
+				blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.TOPIC, 30_000),
+				blockSlot("slot-4", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.ENDING, 30_000)));
+		QueueItemEntity current = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-1");
+		current.setAssetId("asset-queue-001");
+		QueueItemEntity nextReady = queueItem("queue-002", "playout-001", QueueItemStatus.READY);
+		nextReady.setSequenceNo(2);
+		nextReady.setProgramBlockId("block-current");
+		nextReady.setProgramSlotId("slot-2");
+		nextReady.setAssetId("asset-queue-002");
+		QueueItemEntity nextAudioPending = queueItem("queue-003", "playout-001", QueueItemStatus.READY);
+		nextAudioPending.setSequenceNo(3);
+		nextAudioPending.setProgramBlockId("block-current");
+		nextAudioPending.setProgramSlotId("slot-3");
+		nextAudioPending.setAssetId(null);
+		nextAudioPending.setAssetUrl(null);
+		QueueItemEntity nextScriptPending = queueItem("queue-004", "playout-001", QueueItemStatus.READY);
+		nextScriptPending.setSequenceNo(4);
+		nextScriptPending.setProgramBlockId("block-current");
+		nextScriptPending.setProgramSlotId("slot-4");
+		nextScriptPending.setAssetId(null);
+		nextScriptPending.setAssetUrl(null);
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(current, nextReady, nextAudioPending, nextScriptPending));
+
+		wireRepositoryState(session, List.of(currentBlock), Map.of("block-current", currentSlots), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		doAnswer(invocation -> {
+			QueueItemEntity item = invocation.getArgument(0);
+			item.setAssetId("asset-" + item.getId());
+			item.setAssetUrl("/api/assets/audio/asset-" + item.getId() + ".wav");
+			return null;
+		}).when(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+		when(scriptGenerationService.ensureScriptAsset(any(QueueItemEntity.class))).thenReturn(scriptSnapshot());
+
+		radioService.refillQueue("playout-001");
+
+		List<QueueItemEntity> updatedItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001");
+		assertEquals(3L, updatedItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-003".equals(item.getId()) && item.getAssetId() != null));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-004".equals(item.getId()) && item.getAssetId() == null));
+		verify(assetService).ensureQueueAudioAsset(argThat(item -> "queue-003".equals(item.getId())));
+		verify(scriptGenerationService).ensureScriptAsset(argThat(item -> "queue-004".equals(item.getId())));
 	}
 
 	@Test
@@ -1051,6 +1308,19 @@ class RadioServiceStateMachineTests {
 		slot.setTargetDurationMs(durationMs);
 		slot.setSequenceNo(1);
 		return slot;
+	}
+
+	private ScriptDirectiveSnapshot scriptSnapshot() {
+		return new ScriptDirectiveSnapshot(
+				"台本",
+				"台本",
+				List.of(),
+				"calm",
+				"medium",
+				List.of(),
+				"persona-night-main",
+				"voice-night-main",
+				List.of());
 	}
 
 	@Test

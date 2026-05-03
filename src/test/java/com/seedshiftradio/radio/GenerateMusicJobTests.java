@@ -91,7 +91,7 @@ class GenerateMusicJobTests {
 
 		generateMusicJob.run("queue-1", "corr-1");
 
-		verify(queueItemRepository).save(item);
+		verify(queueItemRepository, never()).save(any(QueueItemEntity.class));
 		verify(radioService).handleAsyncGenerationFailure("playout-1", "queue-1", "PROVIDER_TIMEOUT");
 		verify(radioService, never()).synchronizeSessionAfterAsyncUpdate(any());
 	}

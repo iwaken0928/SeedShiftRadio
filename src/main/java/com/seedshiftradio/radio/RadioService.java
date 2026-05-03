@@ -392,10 +392,13 @@ public class RadioService {
 			if (session == null) {
 				return;
 			}
+			boolean fallbackApplied = false;
 			if (queueItemId != null && !queueItemId.isBlank()) {
-				queueItemRepository.findById(queueItemId)
-						.map(QueueItemEntity::getProgramSlotId)
-						.ifPresent(this::markSlotSkipped);
+				QueueItemEntity latestItem = queueItemRepository.findById(queueItemId).orElse(null);
+				fallbackApplied = applyAsyncMusicFailureFallback(latestItem, degradedReason);
+				if (!fallbackApplied && latestItem != null) {
+					markSlotSkipped(latestItem.getProgramSlotId());
+				}
 			}
 			session.setDegradedReason(degradedReason);
 			requestQueueRefill(sessionId);
@@ -403,6 +406,25 @@ public class RadioService {
 			refreshSessionState(session);
 			emitSessionEvents(sessionId);
 		});
+	}
+
+	private boolean applyAsyncMusicFailureFallback(QueueItemEntity item, String degradedReason) {
+		if (item == null
+				|| item.getSegmentType() != SegmentType.MUSIC_AI
+				|| item.getStatus() != QueueItemStatus.GENERATING) {
+			return false;
+		}
+		AssetService.MusicFailureFallback fallback = assetService.prepareMusicFailureFallback(item, degradedReason);
+		item.setSegmentType(fallback.segmentType());
+		item.setStatus(QueueItemStatus.READY);
+		item.setAssetId(fallback.assetId());
+		item.setAssetUrl(fallback.assetUrl());
+		item.setTitle(fallback.title());
+		item.setContentOrigin(fallback.contentOrigin());
+		item.setReplayOfPlayHistoryId(null);
+		item.setAssetBanned(false);
+		queueItemRepository.save(item);
+		return true;
 	}
 
 	private ProgramBlockEntity createProgramBlock(PlayoutSessionEntity session, ResolvedProgramPlan plan, ProgramBlockStatus status) {
@@ -761,20 +783,38 @@ public class RadioService {
 						|| item.getStatus() == QueueItemStatus.READY
 						|| item.getStatus() == QueueItemStatus.PLAYING)
 				.count();
+		int preparedFutureBlockMusicCount = (int) queueItems.stream()
+				.filter(item -> item.getSegmentType() == SegmentType.MUSIC_AI)
+				.filter(item -> item.getStatus() == QueueItemStatus.GENERATING
+						|| item.getStatus() == QueueItemStatus.READY
+						|| item.getStatus() == QueueItemStatus.PLAYING)
+				.filter(item -> isFutureBlockMusicCandidate(session, item))
+				.count();
 		for (QueueItemEntity item : queueItems) {
 			if (activeMusicCount >= queuePreparationPolicy.musicAheadCount()) {
 				return;
 			}
 			if (item.getSegmentType() != SegmentType.MUSIC_AI
 					|| item.getStatus() != QueueItemStatus.PLANNED
-					|| (item.getAssetId() != null && !item.getAssetId().isBlank())) {
+					|| (item.getAssetId() != null && !item.getAssetId().isBlank())
+					|| !queuePreparationPolicy.allowsMusicGeneration(session, item, preparedFutureBlockMusicCount)) {
 				continue;
 			}
 			item.setStatus(QueueItemStatus.GENERATING);
 			queueItemRepository.save(item);
 			requestGenerateMusic(item);
 			activeMusicCount++;
+			if (isFutureBlockMusicCandidate(session, item)) {
+				preparedFutureBlockMusicCount++;
+			}
 		}
+	}
+
+	private boolean isFutureBlockMusicCandidate(PlayoutSessionEntity session, QueueItemEntity item) {
+		String currentProgramBlockId = session.getCurrentProgramBlockId();
+		return currentProgramBlockId != null
+				&& item.getProgramBlockId() != null
+				&& !currentProgramBlockId.equals(item.getProgramBlockId());
 	}
 
 	private void prefetchPendingSpokenAssets(PlayoutSessionEntity session, QueuePreparationPolicy queuePreparationPolicy) {
@@ -782,8 +822,10 @@ public class RadioService {
 		List<QueueItemEntity> changedItems = new ArrayList<>();
 		int preparedAudioCount = 0;
 		int preparedScriptCount = 0;
+		int preparedCurrentBlockLetterCount = 0;
 		for (QueueItemEntity item : queueItems) {
-			if (!isFutureSpokenCandidate(item)) {
+			if (!isFutureSpokenCandidate(item)
+					|| !queuePreparationPolicy.allowsFutureSpokenPrefetch(session, item, preparedCurrentBlockLetterCount)) {
 				continue;
 			}
 			if (preparedAudioCount >= queuePreparationPolicy.ttsAheadCount()
@@ -793,6 +835,7 @@ public class RadioService {
 			if (hasPreparedAudioAsset(item)) {
 				preparedAudioCount++;
 				preparedScriptCount++;
+				preparedCurrentBlockLetterCount += currentBlockLetterPrefetchIncrement(item);
 				continue;
 			}
 			if (preparedAudioCount < queuePreparationPolicy.ttsAheadCount()) {
@@ -800,16 +843,22 @@ public class RadioService {
 				changedItems.add(item);
 				preparedAudioCount++;
 				preparedScriptCount++;
+				preparedCurrentBlockLetterCount += currentBlockLetterPrefetchIncrement(item);
 				continue;
 			}
 			if (preparedScriptCount < queuePreparationPolicy.scriptAheadCount()) {
 				scriptGenerationService.ensureScriptAsset(item);
 				preparedScriptCount++;
+				preparedCurrentBlockLetterCount += currentBlockLetterPrefetchIncrement(item);
 			}
 		}
 		if (!changedItems.isEmpty()) {
 			queueItemRepository.saveAll(changedItems);
 		}
+	}
+
+	private int currentBlockLetterPrefetchIncrement(QueueItemEntity item) {
+		return item.getSegmentType() == SegmentType.LETTER ? 1 : 0;
 	}
 
 	private boolean isFutureSpokenCandidate(QueueItemEntity item) {

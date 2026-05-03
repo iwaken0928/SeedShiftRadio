@@ -111,6 +111,7 @@ cache key は少なくとも以下を正規化して含める。
 5. 通常 TTS セグメントへの置換
 
 歌もの生成は queue の即時補充をブロックしない。再生予定時刻までに `SUCCEEDED` でなければ上記順で縮退し、`provider_job` と SSE `provider.job.failed` に分類済み理由だけを残す。
+現行 runtime では `GenerateMusicJob` の async failure 時、対象 `MUSIC_AI` item をそのまま使って `paths.musicLibrary` 配下の `.wav` を優先的に `MUSIC_LOCAL` `READY` へ差し替え、候補が無い場合は placeholder 音声付き `JINGLE` `READY` に降ろす。どちらも `queue_item.assetId` と `content_origin` を更新して無音停止を避ける。
 
 ## 9. 監視項目
 
@@ -131,6 +132,7 @@ cache key は少なくとも以下を正規化して含める。
 - config validation で未知 profile、不正 duration、秘密値直書き、`wav` / `wav32` 以外の outputFormat を検出すること
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に生で出ないこと
 - fake ACE-Step HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現すること
+- FastAPI worker contract test で `/health`, `POST /music/jobs`, `GET /music/jobs/{jobId}` の `RUNNING/SUCCEEDED/FAILED` 応答に safe metadata だけが含まれ、prompt / lyrics 本文が response に出ないことを固定すること
 
 ## 11. ライセンスと運用注意
 

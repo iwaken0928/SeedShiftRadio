@@ -110,7 +110,7 @@ class MusicGenWorkerGatewayTests {
 			MusicGenWorkerGateway.ResolvedMusicProvider provider = new MusicGenWorkerGateway.ResolvedMusicProvider(
 					"worker",
 					baseUrl,
-					2_000,
+					5_000,
 					List.of("MUSIC_GEN"),
 					"MUSICGEN_WORKER",
 					null,
@@ -310,6 +310,103 @@ class MusicGenWorkerGatewayTests {
 			assertEquals("12345", status.seed());
 			assertTrue(Path.of(status.assetPath()).toFile().exists());
 			assertTrue(status.providerFingerprint().contains("acestep-v15-turbo"));
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void aceStepPollParsesResultJsonObjectAndDownloadsAudio() throws IOException {
+		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/query_result", exchange -> {
+			byte[] body = """
+					{
+					  "data": [
+					    {
+					      "status": 1,
+					      "result": {
+					        "file": "/v1/audio?path=out.wav",
+					        "metas": {"duration": 30},
+					        "dit_model": "acestep-v15-sft",
+					        "lm_model": "acestep-5Hz-lm-1.7B",
+					        "prompt": "secret prompt",
+					        "lyrics": "secret lyrics",
+					        "seed_value": "24680",
+					        "audio_format": "wav"
+					      }
+					    }
+					  ]
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.createContext("/v1/audio", exchange -> {
+			byte[] body = "RIFF-test-audio".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "audio/wav");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.start();
+		try {
+			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+			MusicGenWorkerGateway.MusicJobStatus status = gateway.poll(aceProvider(baseUrl), "ace-task-002");
+
+			assertEquals("SUCCEEDED", status.status());
+			assertEquals(30, status.durationSec());
+			assertEquals("acestep-v15-sft", status.model());
+			assertEquals("acestep-5Hz-lm-1.7B", status.lmModel());
+			assertEquals("24680", status.seed());
+			assertTrue(Path.of(status.assetPath()).toFile().exists());
+			assertTrue(status.providerFingerprint().contains("acestep-v15-sft"));
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void awaitCompletionPropagatesWorkerFailureContract() throws IOException {
+		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/music/jobs/job-001", exchange -> {
+			byte[] body = """
+					{
+					  "jobId": "job-001",
+					  "status": "FAILED",
+					  "assetPath": null,
+					  "durationSec": null,
+					  "providerFingerprint": "failing-worker:1.0",
+					  "promptHash": "prompt-hash",
+					  "lyricsHash": "lyrics-hash",
+					  "errorCode": "PROVIDER_RESOURCE_EXHAUSTED",
+					  "message": "gpu busy"
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.start();
+		try {
+			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+			MusicGenWorkerGateway.ResolvedMusicProvider provider = new MusicGenWorkerGateway.ResolvedMusicProvider(
+					"worker",
+					baseUrl,
+					2_000,
+					List.of("MUSIC_GEN"));
+
+			MusicGenWorkerException exception = assertThrows(
+					MusicGenWorkerException.class,
+					() -> gateway.awaitCompletion(provider, "job-001"));
+
+			assertEquals("PROVIDER_RESOURCE_EXHAUSTED", exception.errorCode());
+			assertEquals("gpu busy", exception.getMessage());
 		} finally {
 			server.stop(0);
 		}

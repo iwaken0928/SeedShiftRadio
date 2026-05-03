@@ -55,13 +55,6 @@ public class GenerateMusicJob {
 	}
 
 	private void handleFailure(String queueItemId, String sessionId, String errorCode) {
-		QueueItemEntity latestItem = queueItemRepository.findById(queueItemId).orElse(null);
-		if (latestItem == null) {
-			return;
-		}
-		latestItem.setStatus(QueueItemStatus.FAILED);
-		latestItem.setAssetBanned(true);
-		queueItemRepository.save(latestItem);
 		radioService.handleAsyncGenerationFailure(sessionId, queueItemId, errorCode);
 	}
 }

@@ -176,6 +176,7 @@ def create_app(backend: MusicBackend | None = None) -> FastAPI:
         job = WorkerJob(
             job_id=job_id,
             request=request,
+            provider_fingerprint=selected_backend.provider_fingerprint,
             prompt_hash=build_prompt_hash(request),
             lyrics_hash=build_lyrics_hash(request),
         )

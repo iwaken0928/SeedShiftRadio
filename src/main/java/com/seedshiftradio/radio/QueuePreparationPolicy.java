@@ -3,6 +3,7 @@ package com.seedshiftradio.radio;
 import java.util.List;
 
 import com.seedshiftradio.domain.QueueItemStatus;
+import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
 import com.seedshiftradio.settings.SettingsDocument;
 
@@ -10,6 +11,8 @@ final class QueuePreparationPolicy {
 
 	private static final int DEFAULT_REMAINING_SLOT_THRESHOLD = 2;
 	private static final int AGGRESSIVE_REMAINING_SLOT_THRESHOLD = 3;
+	private static final int CURRENT_BLOCK_LETTER_AHEAD_LIMIT = 1;
+	private static final int ASSISTED_NEXT_BLOCK_MUSIC_AHEAD_LIMIT = 1;
 
 	private final int minimumReadyCount;
 	private final int minReadyDurationMs;
@@ -97,6 +100,36 @@ final class QueuePreparationPolicy {
 
 	int musicAheadCount() {
 		return musicAheadCount;
+	}
+
+	boolean allowsFutureSpokenPrefetch(
+			PlayoutSessionEntity session,
+			QueueItemEntity item,
+			int preparedCurrentBlockLetterCount) {
+		if (item.getSegmentType() != SegmentType.LETTER) {
+			return true;
+		}
+		if (preparedCurrentBlockLetterCount >= CURRENT_BLOCK_LETTER_AHEAD_LIMIT) {
+			return false;
+		}
+		return session.getCurrentProgramBlockId() != null
+				&& session.getCurrentProgramBlockId().equals(item.getProgramBlockId());
+	}
+
+	boolean allowsMusicGeneration(
+			PlayoutSessionEntity session,
+			QueueItemEntity item,
+			int preparedFutureBlockMusicCount) {
+		String currentProgramBlockId = session.getCurrentProgramBlockId();
+		if (currentProgramBlockId == null
+				|| currentProgramBlockId.equals(item.getProgramBlockId())) {
+			return true;
+		}
+		return switch (preGenerationMode) {
+			case "REALTIME_ONLY" -> false;
+			case "ASSISTED" -> preparedFutureBlockMusicCount < ASSISTED_NEXT_BLOCK_MUSIC_AHEAD_LIMIT;
+			default -> true;
+		};
 	}
 
 	boolean hasReachedSafetyBuffer(long readyCount, int readyDurationMs) {

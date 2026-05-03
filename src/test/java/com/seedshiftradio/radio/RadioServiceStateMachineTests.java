@@ -990,6 +990,92 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void refillQueuePrefetchesOnlyFirstCurrentBlockLetterAndSkipsLaterLetters() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(4, 2, 90_000, 480_000, 2, 4, 2, 2, false)));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		ProgramBlockEntity nextBlock = programBlock("block-next", "playout-001", ProgramBlockStatus.PLANNED);
+		nextBlock.setStartedAt(Instant.parse("2026-03-20T09:01:00Z"));
+		List<ProgramBlockSlotEntity> currentSlots = new ArrayList<>(List.of(
+				blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.OPENING, 30_000),
+				blockSlot("slot-2", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.TOPIC, 30_000),
+				blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.LETTER, 30_000),
+				blockSlot("slot-4", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.LETTER, 30_000)));
+		QueueItemEntity current = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-1");
+		current.setAssetId("asset-queue-001");
+		QueueItemEntity nextReady = queueItem("queue-002", "playout-001", QueueItemStatus.READY);
+		nextReady.setSequenceNo(2);
+		nextReady.setProgramBlockId("block-current");
+		nextReady.setProgramSlotId("slot-2");
+		nextReady.setAssetId("asset-queue-002");
+		QueueItemEntity currentBlockLetter = queueItem("queue-003", "playout-001", QueueItemStatus.READY);
+		currentBlockLetter.setSequenceNo(3);
+		currentBlockLetter.setProgramBlockId("block-current");
+		currentBlockLetter.setProgramSlotId("slot-3");
+		currentBlockLetter.setSegmentType(SegmentType.LETTER);
+		currentBlockLetter.setSlotRole(SlotRole.LETTER);
+		currentBlockLetter.setAssetId(null);
+		currentBlockLetter.setAssetUrl(null);
+		QueueItemEntity laterCurrentBlockLetter = queueItem("queue-004", "playout-001", QueueItemStatus.READY);
+		laterCurrentBlockLetter.setSequenceNo(4);
+		laterCurrentBlockLetter.setProgramBlockId("block-current");
+		laterCurrentBlockLetter.setProgramSlotId("slot-4");
+		laterCurrentBlockLetter.setSegmentType(SegmentType.LETTER);
+		laterCurrentBlockLetter.setSlotRole(SlotRole.LETTER);
+		laterCurrentBlockLetter.setAssetId(null);
+		laterCurrentBlockLetter.setAssetUrl(null);
+		QueueItemEntity nextBlockTalk = queueItem("queue-005", "playout-001", QueueItemStatus.READY);
+		nextBlockTalk.setSequenceNo(5);
+		nextBlockTalk.setProgramBlockId("block-next");
+		nextBlockTalk.setProgramSlotId("slot-5");
+		nextBlockTalk.setAssetId(null);
+		nextBlockTalk.setAssetUrl(null);
+		QueueItemEntity nextBlockLetter = queueItem("queue-006", "playout-001", QueueItemStatus.READY);
+		nextBlockLetter.setSequenceNo(6);
+		nextBlockLetter.setProgramBlockId("block-next");
+		nextBlockLetter.setProgramSlotId("slot-6");
+		nextBlockLetter.setSegmentType(SegmentType.LETTER);
+		nextBlockLetter.setSlotRole(SlotRole.LETTER);
+		nextBlockLetter.setAssetId(null);
+		nextBlockLetter.setAssetUrl(null);
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(
+				current,
+				nextReady,
+				currentBlockLetter,
+				laterCurrentBlockLetter,
+				nextBlockTalk,
+				nextBlockLetter));
+
+		wireRepositoryState(session, List.of(currentBlock, nextBlock), Map.of("block-current", currentSlots), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		doAnswer(invocation -> {
+			QueueItemEntity item = invocation.getArgument(0);
+			item.setAssetId("asset-" + item.getId());
+			item.setAssetUrl("/api/assets/audio/asset-" + item.getId() + ".wav");
+			return null;
+		}).when(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+		when(scriptGenerationService.ensureScriptAsset(any(QueueItemEntity.class))).thenReturn(scriptSnapshot());
+
+		radioService.refillQueue("playout-001");
+
+		List<QueueItemEntity> updatedItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001");
+		assertEquals(5L, updatedItems.stream().filter(item -> item.getStatus() == QueueItemStatus.READY).count());
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-003".equals(item.getId()) && item.getAssetId() != null));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-004".equals(item.getId()) && item.getAssetId() == null));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-005".equals(item.getId()) && item.getAssetId() == null));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-006".equals(item.getId()) && item.getAssetId() == null));
+		verify(assetService).ensureQueueAudioAsset(argThat(item -> "queue-003".equals(item.getId())));
+		verify(assetService, never()).ensureQueueAudioAsset(argThat(item -> "queue-004".equals(item.getId())));
+		verify(assetService, never()).ensureQueueAudioAsset(argThat(item -> "queue-006".equals(item.getId())));
+		verify(scriptGenerationService).ensureScriptAsset(argThat(item -> "queue-005".equals(item.getId())));
+		verify(scriptGenerationService, never()).ensureScriptAsset(argThat(item -> "queue-004".equals(item.getId())));
+		verify(scriptGenerationService, never()).ensureScriptAsset(argThat(item -> "queue-006".equals(item.getId())));
+	}
+
+	@Test
 	void synchronizeSessionAfterAsyncUpdateStartsNextPlannedMusicWhenAheadCapacityAllows() {
 		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 2, true)));
 		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
@@ -1017,6 +1103,191 @@ class RadioServiceStateMachineTests {
 				.findFirst()
 				.orElseThrow();
 		assertEquals(QueueItemStatus.GENERATING, promoted.getStatus());
+		verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof GenerateMusicRequested requested
+				&& "queue-003".equals(requested.queueItemId())));
+	}
+
+	@Test
+	void synchronizeSessionAfterAsyncUpdatePromotesCurrentAndOnlyFirstNextBlockMusicInAssistedMode() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 3, true)));
+		StationProgrammingPolicyEntity assistedPolicy = programmingPolicy("station-night", "ASSISTED", 4, 2);
+		when(programmingPolicyRepository.findByStationId("station-night")).thenReturn(Optional.of(assistedPolicy));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		ProgramBlockEntity nextBlock = programBlock("block-next", "playout-001", ProgramBlockStatus.PLANNED);
+		nextBlock.setStartedAt(Instant.parse("2026-03-20T09:01:00Z"));
+		QueueItemEntity current = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-1");
+		current.setAssetId("asset-queue-001");
+		QueueItemEntity currentBlockMusic = queueItem("queue-002", "playout-001", QueueItemStatus.PLANNED);
+		currentBlockMusic.setSequenceNo(2);
+		currentBlockMusic.setProgramBlockId("block-current");
+		currentBlockMusic.setProgramSlotId("slot-2");
+		currentBlockMusic.setSegmentType(SegmentType.MUSIC_AI);
+		currentBlockMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		currentBlockMusic.setAssetId(null);
+		QueueItemEntity nextBlockMusic = queueItem("queue-003", "playout-001", QueueItemStatus.PLANNED);
+		nextBlockMusic.setSequenceNo(3);
+		nextBlockMusic.setProgramBlockId("block-next");
+		nextBlockMusic.setProgramSlotId("slot-3");
+		nextBlockMusic.setSegmentType(SegmentType.MUSIC_AI);
+		nextBlockMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		nextBlockMusic.setAssetId(null);
+		QueueItemEntity secondNextBlockMusic = queueItem("queue-004", "playout-001", QueueItemStatus.PLANNED);
+		secondNextBlockMusic.setSequenceNo(4);
+		secondNextBlockMusic.setProgramBlockId("block-next");
+		secondNextBlockMusic.setProgramSlotId("slot-4");
+		secondNextBlockMusic.setSegmentType(SegmentType.MUSIC_AI);
+		secondNextBlockMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		secondNextBlockMusic.setAssetId(null);
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(current, currentBlockMusic, nextBlockMusic, secondNextBlockMusic));
+
+		wireRepositoryState(session, List.of(currentBlock, nextBlock), Map.of(), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+
+		radioService.synchronizeSessionAfterAsyncUpdate("playout-001");
+
+		List<QueueItemEntity> updatedItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001");
+		assertEquals(1L, updatedItems.stream().filter(item -> item.getStatus() == QueueItemStatus.PLAYING).count());
+		assertEquals(2L, updatedItems.stream().filter(item -> item.getStatus() == QueueItemStatus.GENERATING).count());
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-002".equals(item.getId()) && item.getStatus() == QueueItemStatus.GENERATING));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-003".equals(item.getId()) && item.getStatus() == QueueItemStatus.GENERATING));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-004".equals(item.getId()) && item.getStatus() == QueueItemStatus.PLANNED));
+	}
+
+	@Test
+	void synchronizeSessionAfterAsyncUpdateDoesNotPromoteMusicWhenAheadCapacityIsFull() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 1, true)));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		QueueItemEntity current = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-1");
+		current.setSegmentType(SegmentType.MUSIC_AI);
+		current.setSlotRole(SlotRole.MUSIC_BREAK);
+		current.setAssetId("asset-queue-001");
+		QueueItemEntity plannedMusic = queueItem("queue-002", "playout-001", QueueItemStatus.PLANNED);
+		plannedMusic.setSequenceNo(2);
+		plannedMusic.setProgramBlockId("block-current");
+		plannedMusic.setProgramSlotId("slot-2");
+		plannedMusic.setSegmentType(SegmentType.MUSIC_AI);
+		plannedMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		plannedMusic.setAssetId(null);
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(current, plannedMusic));
+
+		wireRepositoryState(session, List.of(currentBlock), Map.of(), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+
+		radioService.synchronizeSessionAfterAsyncUpdate("playout-001");
+
+		List<QueueItemEntity> updatedItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001");
+		assertEquals(1L, updatedItems.stream().filter(item -> item.getStatus() == QueueItemStatus.PLAYING).count());
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-002".equals(item.getId()) && item.getStatus() == QueueItemStatus.PLANNED));
+	}
+
+	@Test
+	void handleAsyncGenerationFailureConvertsMusicToFallbackAndAutoStartsWhenResumePlaybackIsEnabled() {
+		StationProgrammingPolicyEntity realTimeOnlyPolicy = programmingPolicy("station-night", "REALTIME_ONLY", 1, 1);
+		when(programmingPolicyRepository.findByStationId("station-night")).thenReturn(Optional.of(realTimeOnlyPolicy));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		session.setResumePlayback(true);
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		ProgramBlockSlotEntity musicSlot = blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.MUSIC_BREAK, 45_000);
+		musicSlot.setResolvedSegmentType(SegmentType.MUSIC_AI);
+		QueueItemEntity failedMusic = queueItem("queue-001", "playout-001", QueueItemStatus.GENERATING);
+		failedMusic.setProgramBlockId("block-current");
+		failedMusic.setProgramSlotId("slot-1");
+		failedMusic.setSegmentType(SegmentType.MUSIC_AI);
+		failedMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		failedMusic.setTitle("AIミュージック");
+		failedMusic.setAssetId(null);
+		failedMusic.setAssetUrl(null);
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(failedMusic));
+
+		wireRepositoryState(session, List.of(currentBlock), Map.of("block-current", new ArrayList<>(List.of(musicSlot))), queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(assetService.prepareMusicFailureFallback(failedMusic, "PROVIDER_TIMEOUT")).thenReturn(new AssetService.MusicFailureFallback(
+				SegmentType.JINGLE,
+				"フォールバックジングル",
+				"asset-fallback",
+				"/api/assets/audio/asset-fallback.wav",
+				"JINGLE_FALLBACK"));
+
+		radioService.handleAsyncGenerationFailure("playout-001", "queue-001", "PROVIDER_TIMEOUT");
+
+		QueueItemEntity updated = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").stream()
+				.filter(item -> "queue-001".equals(item.getId()))
+				.findFirst()
+				.orElseThrow();
+		assertEquals(QueueItemStatus.PLAYING, updated.getStatus());
+		assertEquals(SegmentType.JINGLE, updated.getSegmentType());
+		assertEquals("asset-fallback", updated.getAssetId());
+		assertEquals("/api/assets/audio/asset-fallback.wav", updated.getAssetUrl());
+		assertEquals("JINGLE_FALLBACK", updated.getContentOrigin());
+		assertEquals("queue-001", session.getCurrentQueueItemId());
+		assertEquals(ProgramBlockSlotStatus.QUEUED, musicSlot.getStatus());
+	}
+
+	@Test
+	void handleAsyncGenerationFailureReleasesMusicAheadCapacityForNextPlannedMusic() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 2, 4, 3, 1, true)));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		ProgramBlockSlotEntity currentSlot = blockSlot("slot-1", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.TOPIC, 30_000);
+		ProgramBlockSlotEntity failedSlot = blockSlot("slot-2", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.MUSIC_BREAK, 45_000);
+		failedSlot.setResolvedSegmentType(SegmentType.MUSIC_AI);
+		ProgramBlockSlotEntity nextMusicSlot = blockSlot("slot-3", "block-current", ProgramBlockSlotStatus.QUEUED, SlotRole.MUSIC_BREAK, 45_000);
+		nextMusicSlot.setResolvedSegmentType(SegmentType.MUSIC_AI);
+		QueueItemEntity current = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);
+		current.setProgramBlockId("block-current");
+		current.setProgramSlotId("slot-1");
+		current.setAssetId("asset-current");
+		QueueItemEntity failedMusic = queueItem("queue-002", "playout-001", QueueItemStatus.GENERATING);
+		failedMusic.setSequenceNo(2);
+		failedMusic.setProgramBlockId("block-current");
+		failedMusic.setProgramSlotId("slot-2");
+		failedMusic.setSegmentType(SegmentType.MUSIC_AI);
+		failedMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		failedMusic.setTitle("失敗したAIミュージック");
+		failedMusic.setAssetId(null);
+		failedMusic.setAssetUrl(null);
+		QueueItemEntity plannedMusic = queueItem("queue-003", "playout-001", QueueItemStatus.PLANNED);
+		plannedMusic.setSequenceNo(3);
+		plannedMusic.setProgramBlockId("block-current");
+		plannedMusic.setProgramSlotId("slot-3");
+		plannedMusic.setSegmentType(SegmentType.MUSIC_AI);
+		plannedMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		plannedMusic.setTitle("次のAIミュージック");
+		plannedMusic.setAssetId(null);
+		plannedMusic.setAssetUrl(null);
+		List<QueueItemEntity> queueItems = new ArrayList<>(List.of(current, failedMusic, plannedMusic));
+
+		wireRepositoryState(
+				session,
+				List.of(currentBlock),
+				Map.of("block-current", new ArrayList<>(List.of(currentSlot, failedSlot, nextMusicSlot))),
+				queueItems);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(assetService.prepareMusicFailureFallback(failedMusic, "PROVIDER_TIMEOUT")).thenReturn(new AssetService.MusicFailureFallback(
+				SegmentType.JINGLE,
+				"フォールバックジングル",
+				"asset-fallback",
+				"/api/assets/audio/asset-fallback.wav",
+				"JINGLE_FALLBACK"));
+
+		radioService.handleAsyncGenerationFailure("playout-001", "queue-002", "PROVIDER_TIMEOUT");
+
+		List<QueueItemEntity> updatedItems = queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001");
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-002".equals(item.getId())
+				&& item.getSegmentType() == SegmentType.JINGLE
+				&& item.getStatus() == QueueItemStatus.READY));
+		assertTrue(updatedItems.stream().anyMatch(item -> "queue-003".equals(item.getId())
+				&& item.getStatus() == QueueItemStatus.GENERATING));
 		verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof GenerateMusicRequested requested
 				&& "queue-003".equals(requested.queueItemId())));
 	}

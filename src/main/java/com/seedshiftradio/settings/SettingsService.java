@@ -18,6 +18,7 @@ public class SettingsService {
 	private static final Set<String> MUSIC_PROVIDER_ADAPTERS = Set.of("MUSICGEN_WORKER", "ACE_STEP");
 	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("wav", "wav32");
 	private static final Set<String> LYRICS_TRANSLITERATION_MODES = Set.of("native", "kana", "romaji");
+	private static final List<String> SECRET_REF_PREFIXES = List.of("env:", "file:");
 
 	private final RadioSettingsStore settingsStore;
 	private final ProviderHealthService providerHealthService;
@@ -91,6 +92,7 @@ public class SettingsService {
 		validateProviderGroup("providers.tts", document.providers().tts());
 		validateProviderGroup("providers.musicGen", document.providers().musicGen());
 		validateCache(document.cache());
+		validateSecretRef(document.security().adminTokenRef(), "security.adminTokenRef");
 	}
 
 	private void validatePlayout(SettingsDocument.PlayoutSettings playout) {
@@ -148,6 +150,7 @@ public class SettingsService {
 			if (endpoint.healthPath() == null || endpoint.healthPath().isBlank()) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + "." + entry.getKey() + ".healthPath は必須です。", Map.of("field", field + "." + entry.getKey() + ".healthPath"));
 			}
+			validateSecretRef(endpoint.apiKeyRef(), field + "." + entry.getKey() + ".apiKeyRef");
 			if ("providers.musicGen".equals(field)) {
 				validateMusicProviderEndpoint(field + "." + entry.getKey(), endpoint);
 			}
@@ -161,15 +164,6 @@ public class SettingsService {
 					"VALIDATION_ERROR",
 					field + ".adapter は MUSICGEN_WORKER または ACE_STEP のいずれかで指定してください。",
 					Map.of("field", field + ".adapter", "value", endpoint.adapter()));
-		}
-		if (endpoint.apiKeyRef() != null && !endpoint.apiKeyRef().isBlank()
-				&& !endpoint.apiKeyRef().startsWith("env:")
-				&& !endpoint.apiKeyRef().startsWith("file:")) {
-			throw new ApiException(
-					HttpStatus.BAD_REQUEST,
-					"VALIDATION_ERROR",
-					field + ".apiKeyRef は env: または file: 参照で指定してください。",
-					Map.of("field", field + ".apiKeyRef"));
 		}
 		Map<String, SettingsDocument.MusicGenerationModelProfile> profiles = endpoint.modelProfiles() == null ? Map.of() : endpoint.modelProfiles();
 		if (endpoint.defaultModelProfileId() != null && !endpoint.defaultModelProfileId().isBlank() && !profiles.containsKey(endpoint.defaultModelProfileId())) {
@@ -246,6 +240,20 @@ public class SettingsService {
 					"VALIDATION_ERROR",
 					field + " は " + String.join(", ", List.copyOf(CACHE_REUSE_SCOPES)) + " のいずれかで指定してください。",
 					Map.of("field", field, "value", reuseScope));
+		}
+	}
+
+	private void validateSecretRef(String value, String field) {
+		if (value == null || value.isBlank()) {
+			return;
+		}
+		boolean supported = SECRET_REF_PREFIXES.stream().anyMatch(value::startsWith);
+		if (!supported) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + " は env: または file: 参照で指定してください。",
+					Map.of("field", field));
 		}
 	}
 

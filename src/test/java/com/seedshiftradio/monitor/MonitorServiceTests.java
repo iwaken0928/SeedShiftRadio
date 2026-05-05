@@ -161,6 +161,51 @@ class MonitorServiceTests {
 	}
 
 	@Test
+	void summaryDoesNotLeakSensitiveProviderJobPayloadIntoAuditSummary() {
+		RadioStatusResponse status = new RadioStatusResponse(
+				"playout-001",
+				"station-night",
+				"program-001",
+				"tmpl-night-regular",
+				"深夜の作業ノート",
+				PlayoutState.PLAYING,
+				"queue-001",
+				2,
+				false,
+				Instant.parse("2026-03-20T09:00:00Z"),
+				"corr-001");
+		when(radioService.getStatus()).thenReturn(status);
+		when(letterService.countPendingLetters("station-night")).thenReturn(0L);
+		when(providerHealthService.getLatestOrProbe()).thenReturn(Map.of());
+		when(generatedAssetService.cacheMetrics()).thenReturn(cacheMetrics());
+		when(queueItemRepository.sumDurationMsBySessionIdAndStatus("playout-001", QueueItemStatus.READY)).thenReturn(0L);
+		when(broadcastArchiveRepository.countEligibleArchivesByStationId(eq("station-night"), any(Instant.class))).thenReturn(0L);
+		when(broadcastArchiveRepository.countByStationId("station-night")).thenReturn(0L);
+		when(playHistoryRepository.countByStationIdAndResultStatus("station-night", PlayHistoryResultStatus.DONE)).thenReturn(0L);
+		when(playHistoryRepository.countByStationIdAndResultStatusAndContentOrigin("station-night", PlayHistoryResultStatus.DONE, "ARCHIVE_REPLAY")).thenReturn(0L);
+		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING)).thenReturn(List.of());
+		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.FAILED)).thenReturn(List.of());
+		when(streamEventService.recentEvents(20)).thenReturn(List.of(
+				new RadioEventRecord("12", "provider.job.failed", Instant.parse("2026-03-20T09:15:00Z"), Map.of(
+						"providerJobId", "job-failed",
+						"jobType", "TTS_GEN",
+						"status", "FAILED",
+						"errorCode", "PROVIDER_TIMEOUT",
+						"prompt", "raw prompt",
+						"lyrics", "raw lyrics",
+						"adminToken", "super-secret"))));
+
+		MonitorSummaryResponse summary = monitorService.summary();
+
+		assertEquals(1, summary.auditEvents().size());
+		String auditSummary = summary.auditEvents().getFirst().summary();
+		assertTrue(auditSummary.contains("job=job-failed"));
+		assertFalse(auditSummary.contains("raw prompt"));
+		assertFalse(auditSummary.contains("raw lyrics"));
+		assertFalse(auditSummary.contains("super-secret"));
+	}
+
+	@Test
 	void assetConsistencyDelegatesToGeneratedAssetService() {
 		GeneratedAssetService.AssetConsistencyReport report = new GeneratedAssetService.AssetConsistencyReport(
 				Instant.parse("2026-03-20T09:30:00Z"),

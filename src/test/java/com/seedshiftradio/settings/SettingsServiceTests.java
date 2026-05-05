@@ -226,6 +226,89 @@ class SettingsServiceTests {
 	}
 
 	@Test
+	void updateSettingsRejectsNonSecretAdminTokenRef() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						current.playout(),
+						current.cache(),
+						current.programming(),
+						current.providers(),
+						new SettingsDocument.SecuritySettings("plain-admin-token"),
+						current.features())));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+		assertEquals("security.adminTokenRef", exception.getDetails().get("field"));
+	}
+
+	@Test
+	void updateSettingsRejectsNonSecretApiKeyRefForLlmAndTtsProviders() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.ProviderEndpoint llmEndpoint = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:11434",
+				"/api/tags",
+				5_000,
+				List.of("SCRIPT_GEN"),
+				null,
+				"plain-llm-key",
+				null,
+				null);
+		SettingsDocument.ProviderEndpoint ttsEndpoint = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:50021",
+				"/version",
+				5_000,
+				List.of("TTS_GEN"),
+				null,
+				"plain-tts-key",
+				null,
+				null);
+
+		ApiException llmException = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						current.playout(),
+						current.cache(),
+						current.programming(),
+						new SettingsDocument.ProviderCatalog(
+								new SettingsDocument.ProviderGroup("ollama", List.of(), Map.of("ollama", llmEndpoint)),
+								current.providers().tts(),
+								current.providers().musicGen()),
+						current.security(),
+						current.features())));
+		assertEquals("VALIDATION_ERROR", llmException.getCode());
+		assertEquals("providers.llm.ollama.apiKeyRef", llmException.getDetails().get("field"));
+
+		ApiException ttsException = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						current.playout(),
+						current.cache(),
+						current.programming(),
+						new SettingsDocument.ProviderCatalog(
+								current.providers().llm(),
+								new SettingsDocument.ProviderGroup("voicevox", List.of(), Map.of("voicevox", ttsEndpoint)),
+								current.providers().musicGen()),
+						current.security(),
+						current.features())));
+		assertEquals("VALIDATION_ERROR", ttsException.getCode());
+		assertEquals("providers.tts.voicevox.apiKeyRef", ttsException.getDetails().get("field"));
+	}
+
+	@Test
 	void updateSettingsPersistsCacheConfiguration() {
 		SettingsDtos.SettingsResponse current = settingsService.getSettings();
 		SettingsDocument.CacheSettings updatedCache = new SettingsDocument.CacheSettings(

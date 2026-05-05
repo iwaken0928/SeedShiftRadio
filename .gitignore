@@ -1,4 +1,8 @@
 HELP.md
+.env
+infra/compose/.env
+web/.env.local
+data/
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar

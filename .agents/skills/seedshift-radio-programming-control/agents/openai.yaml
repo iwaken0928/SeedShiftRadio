@@ -1,0 +1,4 @@
+interface:
+  display_name: "SeedShiftRadio Programming Control"
+  short_description: "Guide station programming policies, templates, and previews"
+  default_prompt: "Use $seedshift-radio-programming-control to work on station programming policies, templates, preview logic, or queue planning inputs."

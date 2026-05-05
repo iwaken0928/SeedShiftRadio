@@ -1,0 +1,64 @@
+name: seedshift-radio-local
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${SEEDSHIFT_RADIO_DB_NAME:-seedshift_radio}
+      POSTGRES_USER: ${SEEDSHIFT_RADIO_DB_USERNAME:-seedshift}
+      POSTGRES_PASSWORD: ${SEEDSHIFT_RADIO_DB_PASSWORD:-seedshift}
+    ports:
+      - "127.0.0.1:${SEEDSHIFT_RADIO_DB_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${SEEDSHIFT_RADIO_DB_USERNAME:-seedshift} -d ${SEEDSHIFT_RADIO_DB_NAME:-seedshift_radio}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  musicgen:
+    build:
+      context: ../..
+      dockerfile: workers/musicgen/Dockerfile.local
+    environment:
+      SEEDSHIFT_MUSICGEN_DATA_ROOT: /data
+      SEEDSHIFT_MUSICGEN_BACKEND: ${SEEDSHIFT_MUSICGEN_BACKEND:-deterministic}
+    ports:
+      - "127.0.0.1:${SEEDSHIFT_RADIO_MUSICGEN_PORT:-8000}:8000"
+    volumes:
+      - musicgen-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ollama:
+    profiles: ["ai"]
+    image: ollama/ollama
+    ports:
+      - "127.0.0.1:${SEEDSHIFT_RADIO_OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+  voicevox:
+    profiles: ["ai"]
+    image: voicevox/voicevox_engine:cpu-latest
+    ports:
+      - "127.0.0.1:${SEEDSHIFT_RADIO_VOICEVOX_PORT:-50021}:50021"
+
+volumes:
+  postgres-data:
+  musicgen-data:
+  ollama-data:

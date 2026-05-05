@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "2026-04",
+  "server": {
+    "bindHost": "127.0.0.1",
+    "port": 8080
+  },
+  "paths": {
+    "dataRoot": "./data",
+    "musicLibrary": "./data/library/music"
+  },
+  "providers": {
+    "llm": {
+      "defaultProvider": "ollama",
+      "fallbackProviders": [],
+      "providers": {
+        "ollama": {
+          "baseUrl": "http://127.0.0.1:11434",
+          "healthPath": "/api/tags",
+          "timeoutMs": 5000,
+          "capabilities": [
+            "SCRIPT_GEN"
+          ]
+        }
+      }
+    },
+    "tts": {
+      "defaultProvider": "voicevox",
+      "fallbackProviders": [],
+      "providers": {
+        "voicevox": {
+          "baseUrl": "http://127.0.0.1:50021",
+          "healthPath": "/version",
+          "timeoutMs": 5000,
+          "capabilities": [
+            "TTS_GEN"
+          ]
+        }
+      }
+    },
+    "musicGen": {
+      "defaultProvider": "worker",
+      "fallbackProviders": [],
+      "providers": {
+        "worker": {
+          "baseUrl": "http://127.0.0.1:8000",
+          "healthPath": "/health",
+          "timeoutMs": 10000,
+          "capabilities": [
+            "MUSIC_GEN"
+          ],
+          "adapter": "MUSICGEN_WORKER",
+          "defaultModelProfileId": "default",
+          "modelProfiles": {
+            "default": {
+              "model": "deterministic-sine",
+              "lmModel": "deterministic-sine",
+              "thinking": false,
+              "lyricsLanguage": "ja",
+              "lyricsTransliterationMode": "native",
+              "outputFormat": "wav",
+              "maxDurationSeconds": 30
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": {
+    "adminTokenRef": "env:SEEDSHIFT_ADMIN_TOKEN"
+  },
+  "features": {
+    "streaming": {
+      "placeholderEnabled": true
+    }
+  }
+}

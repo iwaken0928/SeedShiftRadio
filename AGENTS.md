@@ -1,0 +1,101 @@
+# AGENTS.md
+
+## 目的
+
+このリポジトリは `SeedShiftRadio` の実装・設計ベースであり、現時点では `doc/` 配下の設計書が最重要の正本です。実装や更新を行う時は、関係する設計書を先に確認し、コードと設計のずれを放置しないでください。
+
+## 基本方針
+
+- 返答、説明、コミット要約、補助ドキュメントは日本語を基本にする
+- API First を維持し、`Web Client` と将来の `C# Native Client` が同じ契約を使えるようにする
+- `Server` を再生状態、キュー状態、設定、永続化の正本にする
+- `Web` は表示、操作、音声再生、SSE購読に集中させる
+- 重い AI 推論は `Server` 本体へ閉じ込めず、外部 Provider または Worker として分離する
+- MusicGen は非同期ワーカー前提とし、再生停止より縮退継続を優先する
+- 管理系 API と秘密情報は最小権限で扱い、ログへ秘密値や本文を過剰に残さない
+
+## 標準スタック
+
+- Server: `Java 21`, `Spring Boot`, `Spring MVC`, `Spring Actuator`, `JobRunr`
+- Web: `Next.js App Router`, `React`, `TypeScript`, `TanStack Query`, `Zustand`, `Tailwind CSS`
+- Persistence: `PostgreSQL`, `Flyway`, file storage
+- AI / Worker: `Ollama`, `VOICEVOX`, `FastAPI` ベースの MusicGen worker
+- Test: `JUnit 5`, `Testcontainers`, `Vitest`, `Playwright`
+
+## 参照優先ドキュメント
+
+- 全体像と実装順序: `doc/00_実装ドキュメント一覧.md`
+- アーキテクチャと責務境界: `doc/01_アーキテクチャ方針設計書.md`
+- API, DTO, SSE 契約: `doc/02_API仕様書.md`
+- Web UI の画面・状態・再生挙動: `doc/03_Web画面設計書.md`
+- 設定, DB, ファイル配置, キャッシュ: `doc/04_データ構造設計書.md`
+- プレイアウトとキュー制御: `doc/05_プレイアウト・キュー制御設計書.md`
+- LLM 台本生成: `doc/06_LLM台本生成設計書.md`
+- Provider 抽象と接続: `doc/07_Provider連携設計書.md`
+- 日本語パーソナリティ, TTS, 読み辞書: `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
+- MusicGen worker 契約: `doc/09_MusicGen連携設計書.md`
+- 将来の C# Native Client 契約: `doc/10_CSharpネイティブクライアント連携設計書.md`
+- 運用, 監視, セキュリティ, テスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
+- レター機能の状態遷移: `doc/12_レター機能設計書.md`
+
+## 変更時の更新ルール
+
+- API, DTO, SSE の変更時は `doc/02_API仕様書.md` を更新する
+- 画面遷移, UI状態, プレイヤー挙動の変更時は `doc/03_Web画面設計書.md` を更新する
+- DB, `config.json`, asset path, cache policy の変更時は `doc/04_データ構造設計書.md` を更新する
+- Tune, Queue, fallback, 先読み制御の変更時は `doc/05_プレイアウト・キュー制御設計書.md` と必要に応じて `doc/11_運用・監視・セキュリティ・テスト設計書.md` を更新する
+- LLM, TTS, 読み辞書, persona, speech directive の変更時は `doc/06_LLM台本生成設計書.md`, `doc/07_Provider連携設計書.md`, `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md` を見直す
+- MusicGen worker の API やジョブ制御を変える時は `doc/09_MusicGen連携設計書.md` を更新する
+- レター状態や放送採用フローの変更時は `doc/12_レター機能設計書.md` を更新する
+- 将来の `C# Native Client` と共有する契約を壊す変更は避け、必要時は `doc/10_CSharpネイティブクライアント連携設計書.md` を確認する
+
+## 実装境界
+
+- `server` は REST API, SSE, playout, queue, persistence, provider gateway, jobs を担当する
+- `web` はラジオ UI, レター UI, 設定 UI, 監視 UI, audio playback を担当する
+- `workers/musicgen` は高遅延な音楽生成を非同期ジョブとして担当する
+- `infra/compose` はローカル起動と依存サービス定義を担当する
+- `doc` は設計正本として扱う
+
+推奨構成がまだ未作成でも、基本的には以下を維持します。
+
+```text
+/server
+/web
+/workers/musicgen
+/infra/compose
+/doc
+```
+
+## 守るべき実装ルール
+
+- `Server` を radio status と queue の正本にする
+- `Web` に業務判断や重い AI 推論を持ち込まない
+- MusicGen は別プロセスまたは HTTP worker 前提を崩さない
+- provider 障害時は無音停止ではなく代替セグメントや縮退運転を優先する
+- `bind host` の既定は `127.0.0.1` を前提にする
+- 管理系 API はトークン保護前提で設計する
+- レター本文は信頼せず、prompt injection 前提で扱う
+- `radioName`, letter body, prompt 本文, API key, 管理トークンを標準ログへそのまま出さない
+
+## エージェント運用
+
+`.codex/config.toml` では以下の役割を定義しています。
+
+- `planner`: 関連ドキュメントを読み、影響範囲と実行順を整理する
+- `architect`: API first と責務境界の整合を確認する
+- `server`: `/server` の実装を担当する
+- `web`: `/web` の実装を担当する
+- `worker`: `/workers` と provider 連携を担当する
+- `qa`: テスト、回帰確認、設計ずれの確認を担当する
+
+ファイル所有が重なる変更は一度に複数エージェントへ書かせず、主担当を決めて進めてください。
+
+## ローカル skill
+
+`.agents/skills` にプロジェクト専用 skill を置いています。
+
+- `seedshift-radio-architecture`: 設計書の読み分け、責務境界、API first の確認用
+- `seedshift-radio-broadcast-quality`: 日本語台本、TTS、読み辞書、レター安全性、縮退品質の確認用
+
+タスクが合う場合は、これらの skill を前提知識として先に参照してください。

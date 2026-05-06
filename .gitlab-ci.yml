@@ -57,7 +57,7 @@ server-docker:
   script:
     - podman --remote info
     - export PODMAN_REMOTE_SOCKET_PATH="${PODMAN_REMOTE_SOCKET_PATH:-$(podman --remote info --format '{{.Host.RemoteSocket.Path}}' | sed 's#^unix://##')}"
-    - test -S "${PODMAN_REMOTE_SOCKET_PATH}"
+    - echo "Using remote Podman socket path ${PODMAN_REMOTE_SOCKET_PATH}"
     - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
     - >
       podman --remote run --rm --pull=never

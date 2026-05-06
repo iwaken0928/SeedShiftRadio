@@ -57,7 +57,10 @@ server-docker:
   script:
     - podman --remote info
     - export PODMAN_REMOTE_SOCKET_PATH="${PODMAN_REMOTE_SOCKET_PATH:-$(podman --remote info --format '{{.Host.RemoteSocket.Path}}' | sed 's#^unix://##')}"
+    - export PODMAN_REMOTE_SOCKET_URI="unix://${PODMAN_REMOTE_SOCKET_PATH}"
+    - export PODMAN_REMOTE_RUNTIME_DIR="$(dirname "$(dirname "${PODMAN_REMOTE_SOCKET_PATH}")")"
     - echo "Using remote Podman socket path ${PODMAN_REMOTE_SOCKET_PATH}"
+    - echo "Using remote Podman runtime dir ${PODMAN_REMOTE_RUNTIME_DIR}"
     - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
     - >
       podman --remote run --rm --pull=never
@@ -66,15 +69,17 @@ server-docker:
       --security-opt=label=disable
       -e HOME=/tmp/home
       -e GRADLE_USER_HOME=/workspace/.gradle
+      -e XDG_RUNTIME_DIR="${PODMAN_REMOTE_RUNTIME_DIR}"
       -e TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED}"
       -e TESTCONTAINERS_CHECKS_DISABLE="${TESTCONTAINERS_CHECKS_DISABLE}"
       -e TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
-      -e DOCKER_HOST=unix:///var/run/docker.sock
+      -e TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${PODMAN_REMOTE_SOCKET_PATH}"
+      -e DOCKER_HOST="${PODMAN_REMOTE_SOCKET_URI}"
       -v "${CI_PROJECT_DIR}:/workspace"
-      -v "${PODMAN_REMOTE_SOCKET_PATH}:/var/run/docker.sock"
+      -v "${PODMAN_REMOTE_RUNTIME_DIR}:${PODMAN_REMOTE_RUNTIME_DIR}"
       -w /workspace
       "${PODMAN_TEST_JAVA_IMAGE}"
-      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew dockerTest'
+      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew dockerTest --stacktrace --info'
 
 web-typecheck:
   extends: .test-job

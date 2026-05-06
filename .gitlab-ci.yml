@@ -9,9 +9,6 @@ include:
 
 default:
   interruptible: true
-  tags:
-    - shared
-    - test
 
 variables:
   GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
@@ -24,13 +21,16 @@ variables:
   PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
 
+# 通常テストはShell executor Runnerへ固定
 .test-job:
   tags:
     - shared
     - test
+    - shell
   before_script:
     - set -euo pipefail
 
+# デプロイはDeploy用Runnerへ固定
 .deploy-job:
   tags:
     - shared
@@ -38,11 +38,31 @@ variables:
   before_script:
     - set -euo pipefail
 
+# mainブランチのみ手動デプロイ
 .main-manual-deploy:
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
     - when: never
+
+# GitLab公式セキュリティスキャンはDocker executor Runnerへ固定
+semgrep-sast:
+  tags:
+    - shared
+    - test
+    - docker
+
+kics-iac-sast:
+  tags:
+    - shared
+    - test
+    - docker
+
+secret_detection:
+  tags:
+    - shared
+    - test
+    - docker
 
 server-unit:
   extends: .test-job

@@ -1,6 +1,8 @@
 package com.seedshiftradio.radio;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.domain.PlayHistoryResultStatus;
 
@@ -20,6 +22,7 @@ public class PromoteArchiveCandidateJob {
 		this.broadcastArchiveService = broadcastArchiveService;
 	}
 
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void run(String playHistoryId, String queueItemId, String replayOfPlayHistoryId) {
 		PlayHistoryEntity history = playHistoryRepository.findById(playHistoryId).orElse(null);
 		if (history == null || history.getResultStatus() != PlayHistoryResultStatus.DONE) {

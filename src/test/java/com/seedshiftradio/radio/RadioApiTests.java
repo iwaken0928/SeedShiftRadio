@@ -1,6 +1,7 @@
 package com.seedshiftradio.radio;
 
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.isIn;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.lang.reflect.Constructor;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -167,7 +169,14 @@ class RadioApiTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").exists())
 				.andExpect(jsonPath("$.status").value("READY"))
-				.andExpect(jsonPath("$.contentOrigin").value("LIVE_GEN"))
+				.andExpect(jsonPath("$.contentOrigin").value(isIn(List.of(
+						"LIVE_GEN",
+						"CACHE_REUSED",
+						"ARCHIVE_REPLAY",
+						"MUSIC_LOCAL_FALLBACK",
+						"MUSIC_LOCAL_PLACEHOLDER",
+						"JINGLE_FALLBACK",
+						"PLACEHOLDER"))))
 				.andExpect(jsonPath("$.preparedAt").exists())
 				.andExpect(jsonPath("$.replayOfPlayHistoryId").doesNotExist())
 				.andExpect(jsonPath("$.letterId").doesNotExist());

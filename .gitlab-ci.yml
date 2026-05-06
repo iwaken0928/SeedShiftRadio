@@ -11,7 +11,7 @@ default:
   interruptible: true
   tags:
     - shared
-    - test
+    - shell
 
 variables:
   GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
@@ -27,7 +27,7 @@ variables:
 .test-job:
   tags:
     - shared
-    - test
+    - shell
   before_script:
     - set -euo pipefail
 
@@ -43,6 +43,50 @@ variables:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
     - when: never
+
+semgrep-sast:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
+
+spotbugs-sast:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
+
+kics-iac-sast:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
+
+secret_detection:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
 
 server-unit:
   extends: .test-job

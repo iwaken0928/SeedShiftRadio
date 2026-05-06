@@ -24,6 +24,8 @@ variables:
   PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
 
+# Shell executor Runner 用
+# 対象Runnerタグ: shared, shell
 .test-job:
   tags:
     - shared
@@ -43,6 +45,23 @@ variables:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
     - when: never
+
+# GitLab公式セキュリティスキャンはDocker executor Runnerへ固定
+# 注意: extends は使わず tags だけ上書きする
+semgrep-sast:
+  tags:
+    - shared
+    - docker
+
+kics-iac-sast:
+  tags:
+    - shared
+    - docker
+
+secret_detection:
+  tags:
+    - shared
+    - docker
 
 semgrep-sast:
   tags:

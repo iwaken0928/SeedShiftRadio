@@ -10,6 +10,10 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   TESTCONTAINERS_RYUK_DISABLED: "true"
   TESTCONTAINERS_CHECKS_DISABLE: "true"
+  PODMAN_TEST_JAVA_IMAGE: "docker.io/eclipse-temurin:21-jdk"
+  PODMAN_TEST_NODE_IMAGE: "docker.io/node:22-bookworm"
+  PODMAN_TEST_PYTHON_IMAGE: "docker.io/python:3.12-slim"
+  PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
 
 .test-job:
   tags:
@@ -35,59 +39,107 @@ server-unit:
   extends: .test-job
   stage: test
   script:
-    - chmod +x ./gradlew
-    - ./gradlew test
+    - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e GRADLE_USER_HOME=/workspace/.gradle
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace
+      "${PODMAN_TEST_JAVA_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew test'
 
 server-docker:
   extends: .test-job
   stage: test
   script:
-    - chmod +x ./gradlew
     - podman --remote info
-    - |
-      if [ -n "${TESTCONTAINERS_DOCKER_HOST:-}" ]; then
-        export DOCKER_HOST="${TESTCONTAINERS_DOCKER_HOST}"
-      fi
-      if [ -z "${DOCKER_HOST:-}" ]; then
-        echo "Set TESTCONTAINERS_DOCKER_HOST or DOCKER_HOST to the Podman service endpoint before running dockerTest." >&2
-        exit 1
-      fi
-      echo "Using DOCKER_HOST=${DOCKER_HOST}"
-    - ./gradlew dockerTest
+    - export PODMAN_REMOTE_SOCKET_PATH="${PODMAN_REMOTE_SOCKET_PATH:-$(podman --remote info --format '{{.Host.RemoteSocket.Path}}' | sed 's#^unix://##')}"
+    - test -S "${PODMAN_REMOTE_SOCKET_PATH}"
+    - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --network=host
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e GRADLE_USER_HOME=/workspace/.gradle
+      -e TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED}"
+      -e TESTCONTAINERS_CHECKS_DISABLE="${TESTCONTAINERS_CHECKS_DISABLE}"
+      -e TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
+      -e DOCKER_HOST=unix:///var/run/docker.sock
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -v "${PODMAN_REMOTE_SOCKET_PATH}:/var/run/docker.sock"
+      -w /workspace
+      "${PODMAN_TEST_JAVA_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew dockerTest'
 
 web-typecheck:
   extends: .test-job
   stage: test
   script:
-    - cd web
-    - npm ci
-    - npm run typecheck
+    - podman --remote pull "${PODMAN_TEST_NODE_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e npm_config_cache=/tmp/npm-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/web
+      "${PODMAN_TEST_NODE_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && npm ci && npm run typecheck'
 
 web-unit:
   extends: .test-job
   stage: test
   script:
-    - cd web
-    - npm ci
-    - npm test
+    - podman --remote pull "${PODMAN_TEST_NODE_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e npm_config_cache=/tmp/npm-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/web
+      "${PODMAN_TEST_NODE_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && npm ci && npm test'
 
 web-e2e:
   extends: .test-job
   stage: test
   script:
-    - cd web
-    - npm ci
-    - PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium
-    - npm run e2e
+    - podman --remote pull "${PODMAN_TEST_PLAYWRIGHT_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --ipc=host
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e npm_config_cache=/tmp/npm-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/web
+      "${PODMAN_TEST_PLAYWRIGHT_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && npm ci && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium && npm run e2e'
 
 worker-contract:
   extends: .test-job
   stage: test
   script:
-    - cd workers/musicgen
-    - python3 -m pip install --upgrade pip
-    - python3 -m pip install -r requirements-dev.txt
-    - python3 -m pytest tests/test_main.py
+    - podman --remote pull "${PODMAN_TEST_PYTHON_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e PIP_CACHE_DIR=/tmp/pip-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/workers/musicgen
+      "${PODMAN_TEST_PYTHON_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && python3 -m pip install --upgrade pip && python3 -m pip install -r requirements-dev.txt && python3 -m pytest tests/test_main.py'
 
 gpu-smoke:
   extends: .test-job

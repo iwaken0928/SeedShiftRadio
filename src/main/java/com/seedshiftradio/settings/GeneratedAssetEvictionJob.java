@@ -14,7 +14,7 @@ public class GeneratedAssetEvictionJob {
 		this.generatedAssetService = generatedAssetService;
 	}
 
-	@Scheduled(cron = "${seedshift.radio.cache.eviction.cron}")
+	@Scheduled(cron = "${seedshift.radio.cache.eviction.cron:0 17 * * * *}")
 	public void runScheduled() {
 		runOnce();
 	}

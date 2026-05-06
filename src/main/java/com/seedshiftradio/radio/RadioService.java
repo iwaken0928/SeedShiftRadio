@@ -825,6 +825,13 @@ public class RadioService {
 		int preparedScriptCount = 0;
 		int preparedCurrentBlockLetterCount = 0;
 		for (QueueItemEntity item : queueItems) {
+			if (item.getStatus() == QueueItemStatus.READY
+					&& item.getSegmentType() == SegmentType.MUSIC_LOCAL
+					&& !hasPreparedAudioAsset(item)) {
+				assetService.ensureQueueAudioAsset(item);
+				changedItems.add(item);
+				continue;
+			}
 			if (!isFutureSpokenCandidate(item)
 					|| !queuePreparationPolicy.allowsFutureSpokenPrefetch(session, item, preparedCurrentBlockLetterCount)) {
 				continue;
@@ -1046,8 +1053,6 @@ public class RadioService {
 		if (session.getState() != PlayoutState.STOPPED && session.getState() != PlayoutState.ERROR) {
 			if (session.getCurrentQueueItemId() != null) {
 				session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
-			} else if (session.getDegradedReason() != null) {
-				session.setState(PlayoutState.DEGRADED);
 			} else {
 				session.setState(PlayoutState.PREPARING);
 			}

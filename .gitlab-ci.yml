@@ -21,6 +21,12 @@ stages:          # List of stages for jobs, and their order of execution
   - test
   - deploy
 
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/SAST-IaC.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+
 build-job:       # This job runs in the build stage, which runs first.
   stage: build
   script:

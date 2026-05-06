@@ -21,20 +21,21 @@ variables:
   PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
 
-# 通常テストはShell executor Runnerへ固定
+# Shell executor Runner 用
+# 対象Runnerタグ: shared, shell
 .test-job:
   tags:
     - shared
-    - test
     - shell
   before_script:
     - set -euo pipefail
 
-# デプロイはDeploy用Runnerへ固定
+# デプロイもShell executor Runnerで実行
+# 対象Runnerタグ: shared, shell
 .deploy-job:
   tags:
     - shared
-    - deploy
+    - shell
   before_script:
     - set -euo pipefail
 
@@ -46,22 +47,20 @@ variables:
     - when: never
 
 # GitLab公式セキュリティスキャンはDocker executor Runnerへ固定
+# 注意: extends は使わず tags だけ上書きする
 semgrep-sast:
   tags:
     - shared
-    - test
     - docker
 
 kics-iac-sast:
   tags:
     - shared
-    - test
     - docker
 
 secret_detection:
   tags:
     - shared
-    - test
     - docker
 
 server-unit:

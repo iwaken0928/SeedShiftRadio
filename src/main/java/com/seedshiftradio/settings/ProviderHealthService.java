@@ -27,13 +27,17 @@ public class ProviderHealthService {
 
 	private final ProviderRegistry providerRegistry;
 	private final StreamEventService streamEventService;
-	private final ObjectMapper objectMapper = new ObjectMapper();
+	private final ObjectMapper objectMapper;
 
 	private volatile Map<String, SettingsDtos.ProviderHealthPayload> latestSnapshot = Map.of();
 
-	public ProviderHealthService(ProviderRegistry providerRegistry, StreamEventService streamEventService) {
+	public ProviderHealthService(
+			ProviderRegistry providerRegistry,
+			StreamEventService streamEventService,
+			ObjectMapper objectMapper) {
 		this.providerRegistry = providerRegistry;
 		this.streamEventService = streamEventService;
+		this.objectMapper = objectMapper.copy().findAndRegisterModules();
 	}
 
 	public synchronized Map<String, SettingsDtos.ProviderHealthPayload> refreshHealth() {

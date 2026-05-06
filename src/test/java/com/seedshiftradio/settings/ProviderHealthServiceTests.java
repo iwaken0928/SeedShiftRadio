@@ -74,10 +74,11 @@ class ProviderHealthServiceTests {
 				SettingsDocument.FeatureSettings.defaults())
 				.normalize();
 
-		RadioSettingsStore store = new RadioSettingsStore(new ObjectMapper().findAndRegisterModules(), new RadioConfigProperties(tempDir.resolve("config.json").toString()));
+		ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+		RadioSettingsStore store = new RadioSettingsStore(objectMapper, new RadioConfigProperties(tempDir.resolve("config.json").toString()));
 		store.save(settings);
 		streamEventService = new StreamEventService();
-		providerHealthService = new ProviderHealthService(new ProviderRegistry(store), streamEventService);
+		providerHealthService = new ProviderHealthService(new ProviderRegistry(store), streamEventService, objectMapper);
 	}
 
 	@AfterEach

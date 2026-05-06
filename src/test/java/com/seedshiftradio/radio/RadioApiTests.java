@@ -202,6 +202,27 @@ class RadioApiTests {
 
 	@Test
 	void monitorSummaryIncludesJobsAndAuditEvents() throws Exception {
+		PlayoutSessionEntity session = createSession(
+				"playout-monitor-001",
+				com.seedshiftradio.domain.PlayoutState.PREPARING,
+				"corr-monitor-001");
+		createQueueItem(
+				"queue-001",
+				session,
+				1,
+				SegmentType.MUSIC_AI,
+				com.seedshiftradio.domain.QueueItemStatus.GENERATING,
+				SlotRole.MUSIC_BREAK,
+				"生成中のBGM");
+		createQueueItem(
+				"queue-002",
+				session,
+				2,
+				SegmentType.TALK,
+				com.seedshiftradio.domain.QueueItemStatus.READY,
+				SlotRole.TOPIC,
+				"読み上げ原稿");
+
 		ProviderJobEntity running = newProviderJobEntity();
 		running.setId("provider-job-running-001");
 		running.setJobType(ProviderJobType.MUSIC_GEN);
@@ -209,7 +230,7 @@ class RadioApiTests {
 		running.setProviderKey("ace-step");
 		running.setQueueItemId("queue-001");
 		running.setStatus(ProviderJobStatus.RUNNING);
-		running.setCorrelationId("corr-001");
+		running.setCorrelationId(session.getCorrelationId());
 		running.setExternalRef("worker-job-001");
 		running.setStartedAt(Instant.parse("2026-03-20T09:00:00Z"));
 		running.setCreatedAt(Instant.parse("2026-03-20T09:00:00Z"));
@@ -223,7 +244,7 @@ class RadioApiTests {
 		failed.setProviderKey("voicevox");
 		failed.setQueueItemId("queue-002");
 		failed.setStatus(ProviderJobStatus.FAILED);
-		failed.setCorrelationId("corr-002");
+		failed.setCorrelationId(session.getCorrelationId());
 		failed.setExternalRef("worker-job-002");
 		failed.setErrorCode("PROVIDER_TIMEOUT");
 		failed.setStartedAt(Instant.parse("2026-03-20T09:10:00Z"));
@@ -233,7 +254,7 @@ class RadioApiTests {
 		providerJobRepository.save(failed);
 
 		streamEventService.publish("buffer.warning", Map.of(
-				"sessionId", "playout-001",
+				"sessionId", session.getId(),
 				"readyCount", 1));
 
 		mockMvc.perform(get("/api/monitor/summary").header("X-Admin-Token", "test-admin-token"))
@@ -397,12 +418,10 @@ class RadioApiTests {
 
 	@Test
 	void playHistoryApiResolvesLetterReference() throws Exception {
-		PlayoutSessionEntity session = new PlayoutSessionEntity();
-		session.setId("playout-history-001");
-		session.setStationId("station-night");
-		session.setState(com.seedshiftradio.domain.PlayoutState.PLAYING);
-		session.setCorrelationId("corr-history-001");
-		playoutSessionRepository.save(session);
+		PlayoutSessionEntity session = createSession(
+				"playout-history-001",
+				com.seedshiftradio.domain.PlayoutState.PLAYING,
+				"corr-history-001");
 
 		LetterEntity letter = new LetterEntity(
 				"letter-history-001",
@@ -495,6 +514,41 @@ class RadioApiTests {
 				.andExpect(jsonPath("$.body").value("本文"))
 				.andExpect(jsonPath("$.playHistory[0].id").value(history.getId()))
 				.andExpect(jsonPath("$.playHistory[0].letter.subject").value("今夜のおすすめ曲"));
+	}
+
+	private PlayoutSessionEntity createSession(
+			String sessionId,
+			com.seedshiftradio.domain.PlayoutState state,
+			String correlationId) {
+		PlayoutSessionEntity session = new PlayoutSessionEntity();
+		session.setId(sessionId);
+		session.setStationId("station-night");
+		session.setState(state);
+		session.setBufferReadyCount(0);
+		session.setCorrelationId(correlationId);
+		return playoutSessionRepository.save(session);
+	}
+
+	private QueueItemEntity createQueueItem(
+			String itemId,
+			PlayoutSessionEntity session,
+			int sequenceNo,
+			SegmentType segmentType,
+			com.seedshiftradio.domain.QueueItemStatus status,
+			SlotRole slotRole,
+			String title) {
+		QueueItemEntity item = new QueueItemEntity();
+		item.setId(itemId);
+		item.setSessionId(session.getId());
+		item.setSequenceNo(sequenceNo);
+		item.setSegmentType(segmentType);
+		item.setStatus(status);
+		item.setSlotRole(slotRole);
+		item.setTitle(title);
+		item.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
+		item.setDurationMs(60_000);
+		item.setCorrelationId(session.getCorrelationId());
+		return queueItemRepository.save(item);
 	}
 
 	private void awaitWarmup(String stationId, String expectedState) throws Exception {

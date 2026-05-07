@@ -1,23 +1,4 @@
-# This file is a template, and might need editing before it works on your project.
-# This is a sample GitLab CI/CD configuration file that should run without any modifications.
-# It demonstrates a basic 3 stage CI/CD pipeline. Instead of real tests or scripts,
-# it uses echo commands to simulate the pipeline execution.
-#
-# A pipeline is composed of independent jobs that run scripts, grouped into stages.
-# Stages run in sequential order, but jobs within stages run in parallel.
-#
-# For more information, see: https://docs.gitlab.com/ee/ci/yaml/#stages
-#
-# You can copy and paste this template into a new `.gitlab-ci.yml` file.
-# You should not add this template to an existing `.gitlab-ci.yml` file by using the `include:` keyword.
-#
-# To contribute improvements to CI/CD templates, please follow the Development guide at:
-# https://docs.gitlab.com/development/cicd/templates/
-# This specific template is located at:
-# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Getting-Started.gitlab-ci.yml
-
-stages:          # List of stages for jobs, and their order of execution
-  - build
+stages:
   - test
   - deploy
 
@@ -26,32 +7,247 @@ include:
   - template: Jobs/SAST-IaC.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
 
+default:
+  interruptible: true
+  tags:
+    - shared
+    - shell
+
 variables:
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  TESTCONTAINERS_RYUK_DISABLED: "true"
+  TESTCONTAINERS_CHECKS_DISABLE: "true"
+  PODMAN_TEST_JAVA_IMAGE: "docker.io/eclipse-temurin:21-jdk"
+  PODMAN_TEST_NODE_IMAGE: "docker.io/node:22-bookworm"
+  PODMAN_TEST_PYTHON_IMAGE: "docker.io/python:3.12-slim"
+  PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
 
-build-job:       # This job runs in the build stage, which runs first.
-  stage: build
-  script:
-    - echo "Compiling the code..."
-    - echo "Compile complete."
+# Shell executor Runner 用
+# 対象Runnerタグ: shared, shell
+.test-job:
+  tags:
+    - shared
+    - shell
+  before_script:
+    - set -euo pipefail
 
-unit-test-job:   # This job runs in the test stage.
-  stage: test    # It only starts when the job in the build stage completes successfully.
-  script:
-    - echo "Running unit tests... This will take about 60 seconds."
-    - sleep 60
-    - echo "Code coverage is 90%"
+.deploy-job:
+  tags:
+    - shared
+    - deploy
+  before_script:
+    - set -euo pipefail
 
-lint-test-job:   # This job also runs in the test stage.
-  stage: test    # It can run at the same time as unit-test-job (in parallel).
-  script:
-    - echo "Linting code... This will take about 10 seconds."
-    - sleep 10
-    - echo "No lint issues found."
+.main-manual-deploy:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+    - when: never
 
-deploy-job:      # This job runs in the deploy stage.
-  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
-  environment: production
+semgrep-sast:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
+
+spotbugs-sast:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
+
+kics-iac-sast:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
   script:
-    - echo "Deploying application..."
-    - echo "Application successfully deployed."
+    - >
+      kics scan --ci
+      --path "$CI_PROJECT_DIR"
+      --queries-path /usr/local/bin/assets/queries
+      --disable-full-descriptions
+      --disable-secrets
+      --log-level DEBUG
+      --output-path "$CI_PROJECT_DIR/.tmp"
+      --output-name kics
+      --report-formats glsast
+      --ignore-on-exit results
+    - mv "$CI_PROJECT_DIR/.tmp/gl-sast-kics.json" "$CI_PROJECT_DIR/gl-sast-report.json"
+
+secret_detection:
+  tags:
+    - shared
+    - docker
+  variables:
+    TMPDIR: "$CI_PROJECT_DIR/.tmp"
+    TMP: "$CI_PROJECT_DIR/.tmp"
+    TEMP: "$CI_PROJECT_DIR/.tmp"
+  before_script:
+    - mkdir -p "$CI_PROJECT_DIR/.tmp"
+
+server-unit:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e GRADLE_USER_HOME=/workspace/.gradle
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace
+      "${PODMAN_TEST_JAVA_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew test'
+
+server-docker:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote info
+    - export PODMAN_REMOTE_SOCKET_PATH="${PODMAN_REMOTE_SOCKET_PATH:-$(podman --remote info --format '{{.Host.RemoteSocket.Path}}' | sed 's#^unix://##')}"
+    - export PODMAN_REMOTE_SOCKET_URI="unix://${PODMAN_REMOTE_SOCKET_PATH}"
+    - export PODMAN_REMOTE_RUNTIME_DIR="$(dirname "$(dirname "${PODMAN_REMOTE_SOCKET_PATH}")")"
+    - echo "Using remote Podman socket path ${PODMAN_REMOTE_SOCKET_PATH}"
+    - echo "Using remote Podman runtime dir ${PODMAN_REMOTE_RUNTIME_DIR}"
+    - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --network=host
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e GRADLE_USER_HOME=/workspace/.gradle
+      -e XDG_RUNTIME_DIR="${PODMAN_REMOTE_RUNTIME_DIR}"
+      -e TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED}"
+      -e TESTCONTAINERS_CHECKS_DISABLE="${TESTCONTAINERS_CHECKS_DISABLE}"
+      -e TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1
+      -e TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${PODMAN_REMOTE_SOCKET_PATH}"
+      -e DOCKER_HOST="${PODMAN_REMOTE_SOCKET_URI}"
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -v "${PODMAN_REMOTE_RUNTIME_DIR}:${PODMAN_REMOTE_RUNTIME_DIR}"
+      -w /workspace
+      "${PODMAN_TEST_JAVA_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew dockerTest --stacktrace --info'
+
+web-typecheck:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote pull "${PODMAN_TEST_NODE_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e npm_config_cache=/tmp/npm-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/web
+      "${PODMAN_TEST_NODE_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && npm ci && npm run typecheck'
+
+web-unit:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote pull "${PODMAN_TEST_NODE_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e npm_config_cache=/tmp/npm-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/web
+      "${PODMAN_TEST_NODE_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && npm ci && npm test'
+
+web-e2e:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote pull "${PODMAN_TEST_PLAYWRIGHT_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --ipc=host
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e npm_config_cache=/tmp/npm-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/web
+      "${PODMAN_TEST_PLAYWRIGHT_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && npm ci && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium && npm run e2e'
+
+worker-contract:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote pull "${PODMAN_TEST_PYTHON_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e PIP_CACHE_DIR=/tmp/pip-cache
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace/workers/musicgen
+      "${PODMAN_TEST_PYTHON_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && python3 -m pip install --upgrade pip && python3 -m pip install -r requirements-dev.txt && python3 -m pytest tests/test_main.py'
+
+gpu-smoke:
+  extends: .test-job
+  stage: test
+  when: manual
+  allow_failure: true
+  variables:
+    GPU_SMOKE_IMAGE: "docker.io/nvidia/cuda:12.4.1-base-ubuntu22.04"
+  script:
+    - podman --remote info
+    - podman --remote pull "${GPU_SMOKE_IMAGE}"
+    - podman --remote run --rm --device nvidia.com/gpu=all --security-opt=label=disable "${GPU_SMOKE_IMAGE}" nvidia-smi
+
+deploy-musicgen:
+  extends:
+    - .deploy-job
+    - .main-manual-deploy
+  stage: deploy
+  resource_group: musicgen-deploy
+  script:
+    - export MUSICGEN_CONTAINER_NAME="${MUSICGEN_CONTAINER_NAME:-seedshift-radio-musicgen}"
+    - export MUSICGEN_IMAGE_NAME="${MUSICGEN_IMAGE_NAME:-localhost/seedshift-radio/musicgen:${CI_COMMIT_SHORT_SHA}}"
+    - export MUSICGEN_HOST_PORT="${MUSICGEN_HOST_PORT:-8000}"
+    - export MUSICGEN_DATA_DIR="${MUSICGEN_DATA_DIR:-$HOME/containers/seedshift-radio/musicgen-data}"
+    - mkdir -p "${MUSICGEN_DATA_DIR}"
+    - podman --remote info
+    - podman --remote build -t "${MUSICGEN_IMAGE_NAME}" -f workers/musicgen/Dockerfile.local .
+    - podman --remote ps --all
+    - |
+      if podman --remote container exists "${MUSICGEN_CONTAINER_NAME}"; then
+        podman --remote inspect "${MUSICGEN_CONTAINER_NAME}"
+        podman --remote stop "${MUSICGEN_CONTAINER_NAME}"
+        podman --remote rm "${MUSICGEN_CONTAINER_NAME}"
+      fi
+    - podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped -p "127.0.0.1:${MUSICGEN_HOST_PORT}:8000" -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data -v "${MUSICGEN_DATA_DIR}:/data" "${MUSICGEN_IMAGE_NAME}"
+    - podman --remote ps --all
+    - podman --remote inspect "${MUSICGEN_CONTAINER_NAME}"
+    - curl --fail --silent --show-error "http://127.0.0.1:${MUSICGEN_HOST_PORT}/health"

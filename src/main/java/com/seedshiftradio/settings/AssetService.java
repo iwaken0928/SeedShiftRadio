@@ -57,6 +57,10 @@ public class AssetService {
 		if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
 			return;
 		}
+		if (item.getSegmentType() == SegmentType.MUSIC_LOCAL) {
+			ensureLocalMusicAsset(item);
+			return;
+		}
 		ProviderRegistry.ResolvedProvider provider = resolveTtsProvider();
 		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
 				resolveJobType(item),
@@ -76,6 +80,15 @@ public class AssetService {
 		providerJobService.markSucceeded(providerJob.getId());
 		item.setAssetId(asset.getId());
 		item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+	}
+
+	private void ensureLocalMusicAsset(QueueItemEntity item) {
+		MusicFailureFallback fallback = resolveLocalMusicFallback(item, "MUSIC_LOCAL_SELECTED")
+				.orElseGet(() -> createLocalMusicPlaceholderAsset(item));
+		item.setAssetId(fallback.assetId());
+		item.setAssetUrl(fallback.assetUrl());
+		item.setTitle(fallback.title());
+		item.setContentOrigin(fallback.contentOrigin());
 	}
 
 	@Transactional
@@ -208,6 +221,29 @@ public class AssetService {
 				asset.getId(),
 				"/api/assets/audio/" + asset.getId() + ".wav",
 				"JINGLE_FALLBACK");
+	}
+
+	private MusicFailureFallback createLocalMusicPlaceholderAsset(QueueItemEntity item) {
+		int durationMs = item.getDurationMs() == null || item.getDurationMs() < 1
+				? 30_000
+				: item.getDurationMs();
+		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
+				placeholderAudioFactory.createSilentWav(durationMs),
+				"server:music-local-placeholder",
+				item.getId(),
+				null,
+				Map.of(
+						"archiveEligible", false,
+						"fallbackKind", "MUSIC_LOCAL_PLACEHOLDER"));
+		String title = item.getTitle() == null || item.getTitle().isBlank()
+				? "ローカルBGM"
+				: item.getTitle();
+		return new MusicFailureFallback(
+				SegmentType.MUSIC_LOCAL,
+				title,
+				asset.getId(),
+				"/api/assets/audio/" + asset.getId() + ".wav",
+				"MUSIC_LOCAL_PLACEHOLDER");
 	}
 
 	private Optional<Path> findFirstLocalMusicFile() {

@@ -358,6 +358,58 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void synchronizeSessionAfterAsyncUpdateKeepsPreparingBeforePlaybackEvenWhenDegradedReasonExists() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		session.setDegradedReason("LEGACY_RATIO");
+		QueueItemEntity first = queueItem("queue-001", "playout-001", QueueItemStatus.READY);
+		first.setAssetId("asset-queue-001");
+		first.setAssetUrl("/api/assets/audio/asset-queue-001.wav");
+		QueueItemEntity second = queueItem("queue-002", "playout-001", QueueItemStatus.READY);
+		second.setSequenceNo(2);
+		second.setAssetId("asset-queue-002");
+		second.setAssetUrl("/api/assets/audio/asset-queue-002.wav");
+		wireRepositoryState(session, List.of(), Map.of(), new ArrayList<>(List.of(first, second)));
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+
+		radioService.synchronizeSessionAfterAsyncUpdate("playout-001");
+
+		assertEquals(PlayoutState.PREPARING, session.getState());
+		assertEquals(2, session.getBufferReadyCount());
+	}
+
+	@Test
+	void refillQueuePrefetchesReadyLocalMusicAssets() {
+		when(settingsStore.load()).thenReturn(settingsDocument(new SettingsDocument.PlayoutSettings(3, 2, 90_000, 480_000, 1, 4, 3, 2, true)));
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", "playout-001", ProgramBlockStatus.ACTIVE);
+		QueueItemEntity localMusic = queueItem("queue-001", "playout-001", QueueItemStatus.READY);
+		localMusic.setSegmentType(SegmentType.MUSIC_LOCAL);
+		localMusic.setSlotRole(SlotRole.MUSIC_BREAK);
+		localMusic.setAssetId(null);
+		localMusic.setAssetUrl(null);
+		QueueItemEntity jingle = queueItem("queue-002", "playout-001", QueueItemStatus.READY);
+		jingle.setSequenceNo(2);
+		jingle.setAssetId("asset-queue-002");
+		jingle.setAssetUrl("/api/assets/audio/asset-queue-002.wav");
+		wireRepositoryState(session, List.of(currentBlock), Map.of("block-current", new ArrayList<>()), new ArrayList<>(List.of(localMusic, jingle)));
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(programBlockRepository.findBySessionIdOrderByStartedAtAsc("playout-001")).thenReturn(List.of(currentBlock));
+		doAnswer(invocation -> {
+			QueueItemEntity item = invocation.getArgument(0);
+			item.setAssetId("asset-" + item.getId());
+			item.setAssetUrl("/api/assets/audio/asset-" + item.getId() + ".wav");
+			return null;
+		}).when(assetService).ensureQueueAudioAsset(any(QueueItemEntity.class));
+
+		radioService.refillQueue("playout-001");
+
+		assertEquals("asset-queue-001", localMusic.getAssetId());
+		assertEquals("/api/assets/audio/asset-queue-001.wav", localMusic.getAssetUrl());
+		verify(assetService).ensureQueueAudioAsset(argThat(item -> "queue-001".equals(item.getId())));
+	}
+
+	@Test
 	void tuneCreatesInitialWarmupQueueAndAutoStartsPlaybackWhenRequested() {
 		ProgrammingService.ResolvedProgramPlan plan = new ProgrammingService.ResolvedProgramPlan(
 				"tmpl-night-regular",

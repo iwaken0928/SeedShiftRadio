@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Constructor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -135,11 +136,77 @@ class AssetServiceTests {
 		assertEquals("フォールバックジングル", fallback.title());
 	}
 
+	@Test
+	void ensureQueueAudioAssetUsesLocalMusicAssetForMusicLocalItems() throws Exception {
+		when(settingsStore.load()).thenReturn(settingsDocument());
+		Path localMusic = tempDir.resolve("data").resolve("library").resolve("music").resolve("night-drive.wav");
+		Files.createDirectories(localMusic.getParent());
+		Files.write(localMusic, "wav".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-local-music");
+		when(generatedAssetService.registerExistingAsset(
+				eq(GeneratedAssetType.MUSIC),
+				eq(localMusic.toAbsolutePath().normalize()),
+				eq("server:music-library"),
+				eq("queue-3"),
+				nullable(String.class),
+				anyMap())).thenReturn(asset);
+		QueueItemEntity item = newQueueItemEntity();
+		item.setId("queue-3");
+		item.setSegmentType(SegmentType.MUSIC_LOCAL);
+		item.setDurationMs(45_000);
+		item.setTitle("BGM");
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-local-music", item.getAssetId());
+		assertEquals("/api/assets/audio/asset-local-music.wav", item.getAssetUrl());
+		assertEquals("ローカルBGM: night-drive", item.getTitle());
+		assertEquals("MUSIC_LOCAL_FALLBACK", item.getContentOrigin());
+	}
+
+	@Test
+	void ensureQueueAudioAssetFallsBackToPlaceholderForMusicLocalItemsWithoutLibrary() {
+		when(settingsStore.load()).thenReturn(settingsDocument());
+		byte[] wav = "music-local-placeholder".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		when(placeholderAudioFactory.createSilentWav(45_000)).thenReturn(wav);
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-music-local-placeholder");
+		when(generatedAssetService.createAudioAsset(
+				eq(wav),
+				eq("server:music-local-placeholder"),
+				eq("queue-4"),
+				nullable(String.class),
+				anyMap())).thenReturn(asset);
+		QueueItemEntity item = newQueueItemEntity();
+		item.setId("queue-4");
+		item.setSegmentType(SegmentType.MUSIC_LOCAL);
+		item.setDurationMs(45_000);
+		item.setTitle("BGM");
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-music-local-placeholder", item.getAssetId());
+		assertEquals("/api/assets/audio/asset-music-local-placeholder.wav", item.getAssetUrl());
+		assertEquals("BGM", item.getTitle());
+		assertEquals("MUSIC_LOCAL_PLACEHOLDER", item.getContentOrigin());
+	}
+
 	private QueueItemEntity queueItem(String id, int durationMs) {
 		QueueItemEntity item = org.mockito.Mockito.mock(QueueItemEntity.class);
 		when(item.getId()).thenReturn(id);
 		org.mockito.Mockito.lenient().when(item.getDurationMs()).thenReturn(durationMs);
 		return item;
+	}
+
+	private QueueItemEntity newQueueItemEntity() {
+		try {
+			Constructor<QueueItemEntity> constructor = QueueItemEntity.class.getDeclaredConstructor();
+			constructor.setAccessible(true);
+			return constructor.newInstance();
+		} catch (ReflectiveOperationException exception) {
+			throw new IllegalStateException("QueueItemEntity を生成できません", exception);
+		}
 	}
 
 	private SettingsDocument settingsDocument() {

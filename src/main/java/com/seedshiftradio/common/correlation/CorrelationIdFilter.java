@@ -31,6 +31,14 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
 	public static String getCorrelationId(HttpServletRequest request) {
 		Object value = request.getAttribute(ATTRIBUTE_NAME);
-		return value instanceof String string ? string : null;
+		if (value instanceof String string && !string.isBlank()) {
+			return string;
+		}
+		String correlationId = request.getHeader(HEADER_NAME);
+		if (correlationId == null || correlationId.isBlank()) {
+			correlationId = "corr-" + UUID.randomUUID().toString().replace("-", "");
+		}
+		request.setAttribute(ATTRIBUTE_NAME, correlationId);
+		return correlationId;
 	}
 }

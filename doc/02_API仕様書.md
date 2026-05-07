@@ -172,6 +172,16 @@
 }
 ```
 
+`QueueItem.contentOrigin` は少なくとも次を取りうる。
+
+- `LIVE_GEN`: MusicGen などで新規生成した asset
+- `CACHE_REUSED`: 既存 generated asset を再利用した asset
+- `ARCHIVE_REPLAY`: 過去放送 archive の再放送
+- `MUSIC_LOCAL_FALLBACK`: MusicGen 失敗時に local music library へ切り替えた asset
+- `MUSIC_LOCAL_PLACEHOLDER`: local music slot に対応する実ファイルがないため silent placeholder を割り当てた asset
+- `JINGLE_FALLBACK`: MusicGen 失敗かつ local music library も使えないため jingle placeholder を割り当てた asset
+- `PLACEHOLDER`: queue 維持用の fallback placeholder segment
+
 ### 4.6 LetterDetail
 
 ```json

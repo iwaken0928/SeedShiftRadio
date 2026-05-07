@@ -64,12 +64,18 @@ public class PlayoutSessionEntity {
 	@PrePersist
 	void onCreate() {
 		Instant now = Instant.now();
+		if (bufferReadyCount == null) {
+			bufferReadyCount = 0;
+		}
 		startedAt = now;
 		updatedAt = now;
 	}
 
 	@PreUpdate
 	void onUpdate() {
+		if (bufferReadyCount == null) {
+			bufferReadyCount = 0;
+		}
 		updatedAt = Instant.now();
 	}
 }

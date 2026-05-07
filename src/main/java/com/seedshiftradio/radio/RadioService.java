@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.common.api.ApiException;
@@ -354,17 +355,17 @@ public class RadioService {
 		return buffer.array();
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void warmupQueue(String sessionId) {
 		withSessionLock(sessionId, () -> maintainQueue(sessionId, true));
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void refillQueue(String sessionId) {
 		withSessionLock(sessionId, () -> maintainQueue(sessionId, false));
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void synchronizeSessionAfterAsyncUpdate(String sessionId) {
 		withSessionLock(sessionId, () -> {
 			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
@@ -380,12 +381,12 @@ public class RadioService {
 		});
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void handleAsyncGenerationFailure(String sessionId, String degradedReason) {
 		handleAsyncGenerationFailure(sessionId, null, degradedReason);
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void handleAsyncGenerationFailure(String sessionId, String queueItemId, String degradedReason) {
 		withSessionLock(sessionId, () -> {
 			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
@@ -824,6 +825,13 @@ public class RadioService {
 		int preparedScriptCount = 0;
 		int preparedCurrentBlockLetterCount = 0;
 		for (QueueItemEntity item : queueItems) {
+			if (item.getStatus() == QueueItemStatus.READY
+					&& item.getSegmentType() == SegmentType.MUSIC_LOCAL
+					&& !hasPreparedAudioAsset(item)) {
+				assetService.ensureQueueAudioAsset(item);
+				changedItems.add(item);
+				continue;
+			}
 			if (!isFutureSpokenCandidate(item)
 					|| !queuePreparationPolicy.allowsFutureSpokenPrefetch(session, item, preparedCurrentBlockLetterCount)) {
 				continue;
@@ -1045,8 +1053,6 @@ public class RadioService {
 		if (session.getState() != PlayoutState.STOPPED && session.getState() != PlayoutState.ERROR) {
 			if (session.getCurrentQueueItemId() != null) {
 				session.setState(session.getDegradedReason() == null ? PlayoutState.PLAYING : PlayoutState.DEGRADED);
-			} else if (session.getDegradedReason() != null) {
-				session.setState(PlayoutState.DEGRADED);
 			} else {
 				session.setState(PlayoutState.PREPARING);
 			}

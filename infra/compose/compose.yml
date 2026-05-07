@@ -3,6 +3,10 @@ name: seedshift-radio-local
 services:
   postgres:
     image: postgres:17-alpine
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_DB: ${SEEDSHIFT_RADIO_DB_NAME:-seedshift_radio}
       POSTGRES_USER: ${SEEDSHIFT_RADIO_DB_USERNAME:-seedshift}
@@ -25,6 +29,10 @@ services:
     build:
       context: ../..
       dockerfile: workers/musicgen/Dockerfile.local
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
     environment:
       SEEDSHIFT_MUSICGEN_DATA_ROOT: /data
       SEEDSHIFT_MUSICGEN_BACKEND: ${SEEDSHIFT_MUSICGEN_BACKEND:-deterministic}
@@ -47,16 +55,40 @@ services:
   ollama:
     profiles: ["ai"]
     image: ollama/ollama
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:${SEEDSHIFT_RADIO_OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
   voicevox:
     profiles: ["ai"]
     image: voicevox/voicevox_engine:cpu-latest
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:${SEEDSHIFT_RADIO_VOICEVOX_PORT:-50021}:50021"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:50021/version', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
 volumes:
   postgres-data:

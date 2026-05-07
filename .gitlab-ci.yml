@@ -46,23 +46,6 @@ variables:
       when: manual
     - when: never
 
-# GitLab公式セキュリティスキャンはDocker executor Runnerへ固定
-# 注意: extends は使わず tags だけ上書きする
-semgrep-sast:
-  tags:
-    - shared
-    - docker
-
-kics-iac-sast:
-  tags:
-    - shared
-    - docker
-
-secret_detection:
-  tags:
-    - shared
-    - docker
-
 semgrep-sast:
   tags:
     - shared
@@ -95,6 +78,19 @@ kics-iac-sast:
     TEMP: "$CI_PROJECT_DIR/.tmp"
   before_script:
     - mkdir -p "$CI_PROJECT_DIR/.tmp"
+  script:
+    - >
+      kics scan --ci
+      --path "$CI_PROJECT_DIR"
+      --queries-path /usr/local/bin/assets/queries
+      --disable-full-descriptions
+      --disable-secrets
+      --log-level DEBUG
+      --output-path "$CI_PROJECT_DIR/.tmp"
+      --output-name kics
+      --report-formats glsast
+      --ignore-on-exit results
+    - mv "$CI_PROJECT_DIR/.tmp/gl-sast-kics.json" "$CI_PROJECT_DIR/gl-sast-report.json"
 
 secret_detection:
   tags:

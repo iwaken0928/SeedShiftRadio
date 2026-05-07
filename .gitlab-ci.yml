@@ -237,8 +237,6 @@ deploy-musicgen:
     - export MUSICGEN_IMAGE_NAME="${MUSICGEN_IMAGE_NAME:-localhost/seedshift-radio/musicgen:${CI_COMMIT_SHORT_SHA}}"
     - export MUSICGEN_HOST_BIND="${MUSICGEN_HOST_BIND:-0.0.0.0}"
     - export MUSICGEN_HOST_PORT="${MUSICGEN_HOST_PORT:-28080}"
-    - export MUSICGEN_DATA_DIR="${MUSICGEN_DATA_DIR:-$HOME/containers/seedshift-radio/musicgen-data}"
-    - mkdir -p "${MUSICGEN_DATA_DIR}"
     - podman --remote info
     - podman --remote build -t "${MUSICGEN_IMAGE_NAME}" -f workers/musicgen/Dockerfile.local .
     - podman --remote ps --all
@@ -248,7 +246,7 @@ deploy-musicgen:
         podman --remote stop "${MUSICGEN_CONTAINER_NAME}"
         podman --remote rm "${MUSICGEN_CONTAINER_NAME}"
       fi
-    - podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped -p "${MUSICGEN_HOST_BIND}:${MUSICGEN_HOST_PORT}:8000" -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data -v "${MUSICGEN_DATA_DIR}:/data" "${MUSICGEN_IMAGE_NAME}"
+    - podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped -p "${MUSICGEN_HOST_BIND}:${MUSICGEN_HOST_PORT}:8000" -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data "${MUSICGEN_IMAGE_NAME}"
     - podman --remote ps --all
     - podman --remote inspect "${MUSICGEN_CONTAINER_NAME}"
     - curl --fail --silent --show-error "http://127.0.0.1:${MUSICGEN_HOST_PORT}/health"

@@ -249,4 +249,14 @@ deploy-musicgen:
     - podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped -p "${MUSICGEN_HOST_BIND}:${MUSICGEN_HOST_PORT}:8000" -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data "${MUSICGEN_IMAGE_NAME}"
     - podman --remote ps --all
     - podman --remote inspect "${MUSICGEN_CONTAINER_NAME}"
-    - curl --fail --silent --show-error "http://127.0.0.1:${MUSICGEN_HOST_PORT}/health"
+    - |
+      for attempt in $(seq 1 20); do
+        if podman --remote exec "${MUSICGEN_CONTAINER_NAME}" python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" >/dev/null 2>&1; then
+          break
+        fi
+        if [ "${attempt}" -eq 20 ]; then
+          podman --remote logs "${MUSICGEN_CONTAINER_NAME}"
+          exit 1
+        fi
+        sleep 1
+      done

@@ -1,0 +1,41 @@
+name: ${SEEDSHIFT_COMPOSE_PROJECT_NAME:-seedshift-radio}
+
+services:
+  server:
+    image: ${SEEDSHIFT_SERVER_IMAGE:?SEEDSHIFT_SERVER_IMAGE is required}
+    container_name: ${SEEDSHIFT_SERVER_CONTAINER_NAME:-seedshift-radio-server}
+    network_mode: host
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SERVER_ADDRESS: ${SEEDSHIFT_RADIO_SERVER_BIND:-127.0.0.1}
+      SEEDSHIFT_RADIO_SERVER_PORT: ${SEEDSHIFT_RADIO_SERVER_PORT:-8080}
+      SEEDSHIFT_RADIO_DB_HOST: ${SEEDSHIFT_RADIO_DB_HOST:-127.0.0.1}
+      SEEDSHIFT_RADIO_DB_PORT: ${SEEDSHIFT_RADIO_DB_PORT:-5432}
+      SEEDSHIFT_RADIO_DB_NAME: ${SEEDSHIFT_RADIO_DB_NAME:?SEEDSHIFT_RADIO_DB_NAME is required}
+      SEEDSHIFT_RADIO_DB_USERNAME: ${SEEDSHIFT_RADIO_DB_USERNAME:?SEEDSHIFT_RADIO_DB_USERNAME is required}
+      SEEDSHIFT_RADIO_DB_PASSWORD: ${SEEDSHIFT_RADIO_DB_PASSWORD:?SEEDSHIFT_RADIO_DB_PASSWORD is required}
+      SEEDSHIFT_ADMIN_TOKEN: ${SEEDSHIFT_ADMIN_TOKEN:?SEEDSHIFT_ADMIN_TOKEN is required}
+      SEEDSHIFT_RADIO_CONFIG_PATH: ${SEEDSHIFT_RADIO_CONFIG_PATH:-/var/lib/seedshift-radio/config/config.json}
+      SEEDSHIFT_RADIO_JOBRUNR_ENABLED: ${SEEDSHIFT_RADIO_JOBRUNR_ENABLED:-true}
+    volumes:
+      - ${SEEDSHIFT_RADIO_DATA_VOLUME:-seedshift-radio-data}:/var/lib/seedshift-radio:Z
+
+  web:
+    image: ${SEEDSHIFT_WEB_IMAGE:?SEEDSHIFT_WEB_IMAGE is required}
+    container_name: ${SEEDSHIFT_WEB_CONTAINER_NAME:-seedshift-radio-web}
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - server
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOSTNAME: ${SEEDSHIFT_WEB_HOSTNAME:-0.0.0.0}
+      PORT: ${SEEDSHIFT_WEB_PORT:-3000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api-proxy}
+      SERVER_INTERNAL_API_BASE_URL: ${SERVER_INTERNAL_API_BASE_URL:-http://127.0.0.1:8080}
+
+volumes:
+  seedshift-radio-data:

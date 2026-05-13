@@ -1,0 +1,11 @@
+.git
+.gradle
+build
+bin
+data
+doc
+infra
+web
+.tmp
+*.log
+*.tmp

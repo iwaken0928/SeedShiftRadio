@@ -1,6 +1,12 @@
 stages:
+  - validate
   - test
+  - build
+  - publish
+  - migrate
   - deploy
+  - smoke
+  - docs-check
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
@@ -22,6 +28,13 @@ variables:
   PODMAN_TEST_NODE_IMAGE: "docker.io/node:22-bookworm"
   PODMAN_TEST_PYTHON_IMAGE: "docker.io/python:3.12-slim"
   PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
+  PODMAN_TEST_RUBY_IMAGE: "docker.io/ruby:3.3-alpine"
+  SEEDSHIFT_SERVER_IMAGE_COMMIT: "$CI_REGISTRY_IMAGE/server:$CI_COMMIT_SHORT_SHA"
+  SEEDSHIFT_SERVER_IMAGE_REF: "$CI_REGISTRY_IMAGE/server:$CI_COMMIT_REF_SLUG"
+  SEEDSHIFT_WEB_IMAGE_COMMIT: "$CI_REGISTRY_IMAGE/web:$CI_COMMIT_SHORT_SHA"
+  SEEDSHIFT_WEB_IMAGE_REF: "$CI_REGISTRY_IMAGE/web:$CI_COMMIT_REF_SLUG"
+  NEXT_PUBLIC_API_BASE_URL: "/api-proxy"
+  SERVER_INTERNAL_API_BASE_URL: "http://127.0.0.1:8080"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
 
 # Shell executor Runner 用
@@ -37,6 +50,13 @@ variables:
   tags:
     - shared
     - deploy
+  before_script:
+    - set -euo pipefail
+
+.container-build-job:
+  tags:
+    - shared
+    - shell
   before_script:
     - set -euo pipefail
 
@@ -213,6 +233,158 @@ worker-contract:
       -w /workspace/workers/musicgen
       "${PODMAN_TEST_PYTHON_IMAGE}"
       sh -lc 'mkdir -p "$HOME" && python3 -m pip install --upgrade pip && python3 -m pip install -r requirements-dev.txt && python3 -m pytest tests/test_main.py'
+
+
+ci-yaml-validate:
+  extends: .test-job
+  stage: validate
+  script:
+    - podman --remote pull "${PODMAN_TEST_RUBY_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace
+      "${PODMAN_TEST_RUBY_IMAGE}"
+      ruby -e "require 'yaml'; YAML.load_file('.gitlab-ci.yml'); puts 'gitlab-ci-yaml-ok'"
+
+compose-prod-validate:
+  extends: .test-job
+  stage: validate
+  script:
+    - export SEEDSHIFT_SERVER_IMAGE=localhost/seedshift-radio/server:validate
+    - export SEEDSHIFT_WEB_IMAGE=localhost/seedshift-radio/web:validate
+    - export SEEDSHIFT_RADIO_DB_NAME=seedshift_radio
+    - export SEEDSHIFT_RADIO_DB_USERNAME=seedshift
+    - export SEEDSHIFT_RADIO_DB_PASSWORD=validate-password
+    - export SEEDSHIFT_ADMIN_TOKEN=validate-token
+    - podman --remote compose -f infra/compose/compose.prod.yml config >/dev/null
+
+server-container-build:
+  extends: .container-build-job
+  stage: build
+  script:
+    - podman --remote build --pull -t "${SEEDSHIFT_SERVER_IMAGE_COMMIT}" -f infra/containers/server.Containerfile .
+
+web-container-build:
+  extends: .container-build-job
+  stage: build
+  script:
+    - >
+      podman --remote build --pull
+      --build-arg NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL}"
+      --build-arg SERVER_INTERNAL_API_BASE_URL="${SERVER_INTERNAL_API_BASE_URL}"
+      -t "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
+      -f infra/containers/web.Containerfile web
+
+server-container-publish:
+  extends: .container-build-job
+  stage: publish
+  script:
+    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - podman --remote build --pull -t "${SEEDSHIFT_SERVER_IMAGE_COMMIT}" -t "${SEEDSHIFT_SERVER_IMAGE_REF}" -f infra/containers/server.Containerfile .
+    - podman --remote push "${SEEDSHIFT_SERVER_IMAGE_COMMIT}"
+    - podman --remote push "${SEEDSHIFT_SERVER_IMAGE_REF}"
+
+web-container-publish:
+  extends: .container-build-job
+  stage: publish
+  script:
+    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - >
+      podman --remote build --pull
+      --build-arg NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL}"
+      --build-arg SERVER_INTERNAL_API_BASE_URL="${SERVER_INTERNAL_API_BASE_URL}"
+      -t "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
+      -t "${SEEDSHIFT_WEB_IMAGE_REF}"
+      -f infra/containers/web.Containerfile web
+    - podman --remote push "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
+    - podman --remote push "${SEEDSHIFT_WEB_IMAGE_REF}"
+
+deploy-migrate:
+  extends:
+    - .deploy-job
+    - .main-manual-deploy
+  stage: migrate
+  resource_group: seedshift-radio-deploy
+  script:
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_NAME SEEDSHIFT_RADIO_DB_USERNAME SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
+    - export SEEDSHIFT_SERVER_IMAGE="${SEEDSHIFT_SERVER_IMAGE_COMMIT}"
+    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - podman --remote pull "${SEEDSHIFT_SERVER_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --network=host
+      --security-opt=label=disable
+      -e SERVER_ADDRESS=127.0.0.1
+      -e SEEDSHIFT_RADIO_DB_HOST="${SEEDSHIFT_RADIO_DB_HOST:-127.0.0.1}"
+      -e SEEDSHIFT_RADIO_DB_PORT="${SEEDSHIFT_RADIO_DB_PORT:-5432}"
+      -e SEEDSHIFT_RADIO_DB_NAME="${SEEDSHIFT_RADIO_DB_NAME}"
+      -e SEEDSHIFT_RADIO_DB_USERNAME="${SEEDSHIFT_RADIO_DB_USERNAME}"
+      -e SEEDSHIFT_RADIO_DB_PASSWORD="${SEEDSHIFT_RADIO_DB_PASSWORD}"
+      -e SEEDSHIFT_ADMIN_TOKEN="${SEEDSHIFT_ADMIN_TOKEN}"
+      -e SEEDSHIFT_RADIO_CONFIG_PATH=/tmp/seedshift-radio/config.json
+      -e SEEDSHIFT_RADIO_JOBRUNR_ENABLED=false
+      -e JOBRUNR_JOB_SCHEDULER_ENABLED=false
+      -e SPRING_MAIN_WEB_APPLICATION_TYPE=none
+      "${SEEDSHIFT_SERVER_IMAGE}"
+
+deploy-app:
+  extends:
+    - .deploy-job
+    - .main-manual-deploy
+  stage: deploy
+  needs:
+    - deploy-migrate
+  resource_group: seedshift-radio-deploy
+  script:
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_NAME SEEDSHIFT_RADIO_DB_USERNAME SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
+    - export SEEDSHIFT_SERVER_IMAGE="${SEEDSHIFT_SERVER_IMAGE_COMMIT}"
+    - export SEEDSHIFT_WEB_IMAGE="${SEEDSHIFT_WEB_IMAGE_COMMIT}"
+    - export SEEDSHIFT_DEPLOY_DIR="${SEEDSHIFT_DEPLOY_DIR:-$HOME/seedshift-radio-deploy}"
+    - DEPLOY_DIR="$(sh scripts/ci/write-prod-env.sh)"
+    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" pull
+    - podman --remote ps --all
+    - podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" up -d
+    - podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" ps
+
+smoke-production:
+  extends: .deploy-job
+  stage: smoke
+  needs:
+    - deploy-app
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - when: never
+  script:
+    - export SEEDSHIFT_SMOKE_API_BASE_URL="${SEEDSHIFT_SMOKE_API_BASE_URL:-http://127.0.0.1:8080}"
+    - export SEEDSHIFT_SMOKE_WEB_BASE_URL="${SEEDSHIFT_SMOKE_WEB_BASE_URL:-http://127.0.0.1:3000}"
+    - export SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL="${SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL:-http://127.0.0.1:3000/api-proxy}"
+    - |
+      for attempt in $(seq 1 30); do
+        if curl -fsS "${SEEDSHIFT_SMOKE_API_BASE_URL}/api/health" >/dev/null; then
+          break
+        fi
+        if [ "${attempt}" -eq 30 ]; then
+          podman --remote logs "${SEEDSHIFT_SERVER_CONTAINER_NAME:-seedshift-radio-server}" || true
+          exit 1
+        fi
+        sleep 2
+      done
+    - curl -fsS "${SEEDSHIFT_SMOKE_WEB_BASE_URL}/" >/dev/null
+    - curl -fsS "${SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL}/api/health" >/dev/null
+    - podman --remote ps --filter "name=${SEEDSHIFT_SERVER_CONTAINER_NAME:-seedshift-radio-server}"
+    - podman --remote ps --filter "name=${SEEDSHIFT_WEB_CONTAINER_NAME:-seedshift-radio-web}"
+
+pipeline-docs-check:
+  extends: .test-job
+  stage: docs-check
+  script:
+    - test -f doc/16_パイプライン・コンテナデプロイ仕様書.md
+    - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
 
 gpu-smoke:
   extends: .test-job

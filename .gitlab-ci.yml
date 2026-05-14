@@ -413,7 +413,7 @@ pipeline-docs-check:
     - test -f doc/16_パイプライン・コンテナデプロイ仕様書.md
     - test -f doc/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
-    - rg -n "GitLab CI/CD Variables|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|CI_REGISTRY" doc/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|CI_REGISTRY" doc/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:
   extends: .test-job

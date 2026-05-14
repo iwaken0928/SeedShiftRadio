@@ -281,24 +281,26 @@ server-container-publish:
   extends: .container-build-job
   stage: publish
   script:
-    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-}}"
-    - sh scripts/ci/require-env.sh CI_REGISTRY CI_REGISTRY_USER CI_REGISTRY_PASSWORD SEEDSHIFT_IMAGE_REPOSITORY
+    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}}}"
     - export SEEDSHIFT_SERVER_IMAGE_COMMIT="${SEEDSHIFT_IMAGE_REPOSITORY}/server:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_SERVER_IMAGE_REF="${SEEDSHIFT_IMAGE_REPOSITORY}/server:${CI_COMMIT_REF_SLUG}"
-    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
     - podman --remote build --pull -t "${SEEDSHIFT_SERVER_IMAGE_COMMIT}" -t "${SEEDSHIFT_SERVER_IMAGE_REF}" -f infra/containers/server.Containerfile .
-    - podman --remote push "${SEEDSHIFT_SERVER_IMAGE_COMMIT}"
-    - podman --remote push "${SEEDSHIFT_SERVER_IMAGE_REF}"
+    - |
+      if [ -n "${CI_REGISTRY:-}" ]; then
+        podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+        podman --remote push "${SEEDSHIFT_SERVER_IMAGE_COMMIT}"
+        podman --remote push "${SEEDSHIFT_SERVER_IMAGE_REF}"
+      else
+        echo "CI_REGISTRY is not configured; keeping server image in local Podman storage."
+      fi
 
 web-container-publish:
   extends: .container-build-job
   stage: publish
   script:
-    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-}}"
-    - sh scripts/ci/require-env.sh CI_REGISTRY CI_REGISTRY_USER CI_REGISTRY_PASSWORD SEEDSHIFT_IMAGE_REPOSITORY
+    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}}}"
     - export SEEDSHIFT_WEB_IMAGE_COMMIT="${SEEDSHIFT_IMAGE_REPOSITORY}/web:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_WEB_IMAGE_REF="${SEEDSHIFT_IMAGE_REPOSITORY}/web:${CI_COMMIT_REF_SLUG}"
-    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
     - >
       podman --remote build --pull
       --build-arg NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL}"
@@ -306,8 +308,14 @@ web-container-publish:
       -t "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
       -t "${SEEDSHIFT_WEB_IMAGE_REF}"
       -f infra/containers/web.Containerfile web
-    - podman --remote push "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
-    - podman --remote push "${SEEDSHIFT_WEB_IMAGE_REF}"
+    - |
+      if [ -n "${CI_REGISTRY:-}" ]; then
+        podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+        podman --remote push "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
+        podman --remote push "${SEEDSHIFT_WEB_IMAGE_REF}"
+      else
+        echo "CI_REGISTRY is not configured; keeping web image in local Podman storage."
+      fi
 
 deploy-migrate:
   extends:
@@ -316,11 +324,16 @@ deploy-migrate:
   stage: migrate
   resource_group: seedshift-radio-deploy
   script:
-    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-}}"
-    - sh scripts/ci/require-env.sh CI_REGISTRY CI_REGISTRY_USER CI_REGISTRY_PASSWORD SEEDSHIFT_IMAGE_REPOSITORY SEEDSHIFT_RADIO_DB_NAME SEEDSHIFT_RADIO_DB_USERNAME SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
+    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}}}"
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_NAME SEEDSHIFT_RADIO_DB_USERNAME SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
     - export SEEDSHIFT_SERVER_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/server:${CI_COMMIT_SHORT_SHA}"
-    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
-    - podman --remote pull "${SEEDSHIFT_SERVER_IMAGE}"
+    - |
+      if [ -n "${CI_REGISTRY:-}" ]; then
+        podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+        podman --remote pull "${SEEDSHIFT_SERVER_IMAGE}"
+      else
+        echo "CI_REGISTRY is not configured; using local server image ${SEEDSHIFT_SERVER_IMAGE}."
+      fi
     - >
       podman --remote run --rm --pull=never
       --network=host
@@ -347,14 +360,19 @@ deploy-app:
     - deploy-migrate
   resource_group: seedshift-radio-deploy
   script:
-    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-}}"
-    - sh scripts/ci/require-env.sh CI_REGISTRY CI_REGISTRY_USER CI_REGISTRY_PASSWORD SEEDSHIFT_IMAGE_REPOSITORY SEEDSHIFT_RADIO_DB_NAME SEEDSHIFT_RADIO_DB_USERNAME SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
+    - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}}}"
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_NAME SEEDSHIFT_RADIO_DB_USERNAME SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
     - export SEEDSHIFT_SERVER_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/server:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_WEB_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/web:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_DEPLOY_DIR="${SEEDSHIFT_DEPLOY_DIR:-$HOME/seedshift-radio-deploy}"
     - DEPLOY_DIR="$(sh scripts/ci/write-prod-env.sh)"
-    - podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
-    - podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" pull
+    - |
+      if [ -n "${CI_REGISTRY:-}" ]; then
+        podman --remote login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+        podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" pull
+      else
+        echo "CI_REGISTRY is not configured; skipping compose pull and using local images."
+      fi
     - podman --remote ps --all
     - podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" up -d
     - podman --remote compose --env-file "${DEPLOY_DIR}/.env" -f "${DEPLOY_DIR}/compose.yml" ps

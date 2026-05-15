@@ -14,3 +14,4 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 共有データルートは `SEEDSHIFT_MUSICGEN_DATA_ROOT` で上書きできます。既定値は `./data` です。
+GitLab CI の `deploy-musicgen` では container 内の `SEEDSHIFT_MUSICGEN_DATA_ROOT=/data` を使い、`MUSICGEN_DATA_VOLUME` を設定した場合だけ Podman volume または host path を `/data` へ mount します。

@@ -51,6 +51,7 @@ public interface MusicGenerationProvider {
 - `GET /health`
 
 `workers/musicgen` の現行実装は deterministic WAV を生成し、Server と Worker の非同期契約、cache-first、fallback のテストに使う。
+worker のデータルートは `SEEDSHIFT_MUSICGEN_DATA_ROOT` で指定し、pipeline の `deploy-musicgen` では `/data` を使う。`MUSICGEN_DATA_VOLUME` が GitLab CI/CD Variables に設定されている場合だけ Podman volume または host path を `/data` へ mount し、未設定時は container-local の一時領域として扱う。
 
 ### 4.2 `ACE_STEP`
 

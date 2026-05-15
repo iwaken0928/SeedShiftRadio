@@ -414,8 +414,8 @@ pipeline-docs-check:
   script:
     - test -f doc/16_パイプライン・コンテナデプロイ仕様書.md
     - test -f doc/17_パイプライン・コンテナデプロイ手順書.md
-    - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
-    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|CI_REGISTRY" doc/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
+    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|CI_REGISTRY|MUSICGEN_DATA_VOLUME" doc/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:
   extends: .test-job
@@ -440,6 +440,7 @@ deploy-musicgen:
     - export MUSICGEN_IMAGE_NAME="${MUSICGEN_IMAGE_NAME:-localhost/seedshift-radio/musicgen:${CI_COMMIT_SHORT_SHA}}"
     - export MUSICGEN_HOST_BIND="${MUSICGEN_HOST_BIND:-0.0.0.0}"
     - export MUSICGEN_HOST_PORT="${MUSICGEN_HOST_PORT:-28080}"
+    - export MUSICGEN_DATA_VOLUME="${MUSICGEN_DATA_VOLUME:-}"
     - podman --remote info
     - podman --remote build -t "${MUSICGEN_IMAGE_NAME}" -f workers/musicgen/Dockerfile.local .
     - podman --remote ps --all
@@ -449,7 +450,21 @@ deploy-musicgen:
         podman --remote stop "${MUSICGEN_CONTAINER_NAME}"
         podman --remote rm "${MUSICGEN_CONTAINER_NAME}"
       fi
-    - podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped -p "${MUSICGEN_HOST_BIND}:${MUSICGEN_HOST_PORT}:8000" -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data "${MUSICGEN_IMAGE_NAME}"
+    - |
+      if [ -n "${MUSICGEN_DATA_VOLUME}" ]; then
+        echo "Using configured MusicGen persistent data volume/path."
+        podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped \
+          -p "${MUSICGEN_HOST_BIND}:${MUSICGEN_HOST_PORT}:8000" \
+          -v "${MUSICGEN_DATA_VOLUME}:/data:Z" \
+          -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data \
+          "${MUSICGEN_IMAGE_NAME}"
+      else
+        echo "MUSICGEN_DATA_VOLUME is not configured; using container-local /data."
+        podman --remote run -d --name "${MUSICGEN_CONTAINER_NAME}" --restart unless-stopped \
+          -p "${MUSICGEN_HOST_BIND}:${MUSICGEN_HOST_PORT}:8000" \
+          -e SEEDSHIFT_MUSICGEN_DATA_ROOT=/data \
+          "${MUSICGEN_IMAGE_NAME}"
+      fi
     - podman --remote ps --all
     - podman --remote inspect "${MUSICGEN_CONTAINER_NAME}"
     - |

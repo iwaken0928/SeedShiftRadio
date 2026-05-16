@@ -20,6 +20,7 @@
 - Web: `Next.js App Router`, `React`, `TypeScript`, `TanStack Query`, `Zustand`, `Tailwind CSS`
 - Persistence: `PostgreSQL`, `Flyway`, file storage
 - AI / Worker: `Ollama`, `VOICEVOX`, `FastAPI` ベースの MusicGen worker
+- Infra / CI: `GitLab CI/CD`, `Podman`, `Podman Compose`
 - Test: `JUnit 5`, `Testcontainers`, `Vitest`, `Playwright`
 
 ## 参照優先ドキュメント
@@ -37,6 +38,11 @@
 - 将来の C# Native Client 契約: `doc/10_CSharpネイティブクライアント連携設計書.md`
 - 運用, 監視, セキュリティ, テスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
 - レター機能の状態遷移: `doc/12_レター機能設計書.md`
+- 局管理と番組編成制御: `doc/13_局管理・番組編成制御設計書.md`
+- レビュー対応と再試験: `doc/14_レビュー対応・再試験計画.md`
+- 実装差分と残タスク: `doc/15_設計差分棚卸しと段階実装計画.md`
+- パイプラインとコンテナデプロイ仕様: `doc/16_パイプライン・コンテナデプロイ仕様書.md`
+- パイプラインとコンテナデプロイ手順: `doc/17_パイプライン・コンテナデプロイ手順書.md`
 
 ## 変更時の更新ルール
 
@@ -47,6 +53,10 @@
 - LLM, TTS, 読み辞書, persona, speech directive の変更時は `doc/06_LLM台本生成設計書.md`, `doc/07_Provider連携設計書.md`, `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md` を見直す
 - MusicGen worker の API やジョブ制御を変える時は `doc/09_MusicGen連携設計書.md` を更新する
 - レター状態や放送採用フローの変更時は `doc/12_レター機能設計書.md` を更新する
+- 局管理、番組テンプレート、編成ルール、preview、queue 計画入力を変える時は `doc/13_局管理・番組編成制御設計書.md` を更新する
+- レビュー指摘の対応順や再試験計画を変える時は `doc/14_レビュー対応・再試験計画.md` を更新する
+- 残タスク、実装状況、設計差分を整理した時は `doc/15_設計差分棚卸しと段階実装計画.md` を更新する
+- CI/CD, container, compose, deploy, rollback, smoke test を変える時は `doc/16_パイプライン・コンテナデプロイ仕様書.md` と `doc/17_パイプライン・コンテナデプロイ手順書.md` を更新し、必要に応じて `doc/11_運用・監視・セキュリティ・テスト設計書.md` も見直す
 - 将来の `C# Native Client` と共有する契約を壊す変更は避け、必要時は `doc/10_CSharpネイティブクライアント連携設計書.md` を確認する
 
 ## 実装境界
@@ -55,6 +65,7 @@
 - `web` はラジオ UI, レター UI, 設定 UI, 監視 UI, audio playback を担当する
 - `workers/musicgen` は高遅延な音楽生成を非同期ジョブとして担当する
 - `infra/compose` はローカル起動と依存サービス定義を担当する
+- `infra/containers`, `.gitlab-ci.yml`, `scripts/ci` は CI/CD とデプロイ導線を担当する
 - `doc` は設計正本として扱う
 
 推奨構成がまだ未作成でも、基本的には以下を維持します。
@@ -87,6 +98,7 @@
 - `server`: 現行の `src/main/java`, `src/test/java` と将来の `/server` 実装を担当する
 - `web`: `/web` の実装を担当する
 - `worker`: `/workers` と provider 連携を担当する
+- `ops`: `.gitlab-ci.yml`, `infra/compose`, `infra/containers`, `scripts/ci`, `.codex`, `.agents` など運用・エージェント設定を担当する
 - `qa`: テスト、回帰確認、設計ずれの確認を担当する
 
 ファイル所有が重なる変更は一度に複数エージェントへ書かせず、主担当を決めて進めてください。
@@ -98,9 +110,11 @@
 `.agents/skills` にプロジェクト専用 skill を置いています。
 
 - `seedshift-radio-architecture`: 設計書の読み分け、責務境界、API first の確認用
+- `seedshift-radio-agent-maintenance`: `.codex`, `.agents`, `AGENTS.md`, ローカル skill の保守用
 - `seedshift-radio-backlog-implementation`: `doc/15` を起点にした残タスク実装と設計書更新用
 - `seedshift-radio-broadcast-quality`: 日本語台本、TTS、読み辞書、レター安全性、縮退品質の確認用
 - `seedshift-radio-letter-workflow`: レター投稿、採用、返信、放送反映の状態遷移確認用
+- `seedshift-radio-ops-deploy`: GitLab CI/CD, Podman Compose, deploy, rollback, smoke test の運用変更用
 - `seedshift-radio-playout-contracts`: 再生状態、キュー、SSE、Native Client 互換の契約確認用
 - `seedshift-radio-programming-control`: 局管理、番組テンプレート、編成ルール、queue 計画の確認用
 - `seedshift-radio-provider-runtime`: Provider 抽象、接続テスト、生成 asset、MusicGen worker 連携用

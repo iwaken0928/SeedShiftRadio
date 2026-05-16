@@ -7,6 +7,9 @@ wire_api = "responses"
 
 project_root_markers = [
   ".git",
+  "AGENTS.md",
+  ".codex/config.toml",
+  ".agents/skills",
   "pom.xml",
   "build.gradle",
   "settings.gradle",
@@ -47,6 +50,10 @@ config_file = "agents/web.toml"
 description = "Implement provider and worker changes under /workers or worker-specific integration layers without taking ownership of unrelated web or server files."
 config_file = "agents/worker.toml"
 
+[agents.ops]
+description = "Implement CI/CD, Podman Compose, container/deploy scripts, local orchestration, and Codex agent or skill maintenance without taking ownership of server, web, or worker feature code."
+config_file = "agents/ops.toml"
+
 [agents.qa]
 description = "Run verification, regression review, and contract checks. Report missing tests, document drift, and operational risks."
 config_file = "agents/qa.toml"
@@ -62,7 +69,9 @@ Use only one writing agent per file set:
 - server owns src/main/java, src/test/java, and future /server files
 - web owns /web
 - worker owns /workers and worker-specific integration files
+- ops owns .gitlab-ci.yml, infra/compose, infra/containers, scripts/ci, deployment docs, AGENTS.md, .codex, and .agents/skills
 Coordinate contract changes in the main thread when synchronized edits are needed across multiple areas.
+Do not pin model_reasoning_effort in project or agent configs; leave reasoning effort to the Codex UI, global settings, or launch-time choice.
 
 Keep these architectural boundaries:
 - Spring Boot server is the source of truth for radio state, queue state, playout, settings, and persistence
@@ -74,4 +83,5 @@ Favor degraded continuation over stopping playback.
 Preserve compatibility with the future C# native client when changing shared contracts.
 When behavior changes, update the corresponding document under /doc in the same task.
 Use the local project skills under .agents/skills when they match the task.
+For CI/CD, deploy, Podman Compose, local orchestration, or Codex agent/skill maintenance, use the ops role and the matching local skills.
 """

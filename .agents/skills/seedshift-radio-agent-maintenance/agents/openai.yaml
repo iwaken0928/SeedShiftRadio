@@ -1,0 +1,4 @@
+interface:
+  display_name: "SeedShiftRadio Agent Maintenance"
+  short_description: "Guide Codex agents, config, and local skills"
+  default_prompt: "Use $seedshift-radio-agent-maintenance to update SeedShiftRadio Codex config, agent roles, AGENTS.md, or local project skills."

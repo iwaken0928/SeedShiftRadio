@@ -32,8 +32,10 @@
           "healthPath": "/version",
           "timeoutMs": 5000,
           "capabilities": [
-            "TTS_GEN"
-          ]
+            "TTS_GEN",
+            "VOICEVOX"
+          ],
+          "adapter": "VOICEVOX"
         }
       }
     },

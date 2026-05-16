@@ -78,7 +78,21 @@ request mapping:
 | `VoiceProfile.providerOptions.responseFormat` | `response_format`。既定は `wav` |
 | `VoiceProfile.providerOptions.irodori` | `irodori` object。`num_steps`, CFG, chunking などの安全な allowlist のみ |
 
-初期実装では `response_format=wav` を標準にし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。`mp3` などは asset manifest / content type の拡張時に許可する。
+初期実装では `response_format=wav` を標準にし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。現行 `HttpTtsProvider` は `SpeechDirective.normalizedText`、`voiceHint=IRODORI_TTS:<voiceId>[:style]`、`providers.tts.providers.{key}.defaultModelProfileId` から `/v1/audio/speech` を呼び、provider job と audio asset を作成する。`VoiceProfile.speed`、`providerOptions`、参照音声同意の runtime 反映は `P0-02c` の拡張で閉じる。`mp3` などは asset manifest / content type の拡張時に許可する。
+
+### 5.2 VOICEVOX TTS adapter
+
+VOICEVOX は Irodori 失敗時にも使える安定 fallback として、Java Server から HTTP で呼び出す。
+
+request mapping:
+
+| SeedShiftRadio | VOICEVOX |
+|---|---|
+| `SpeechDirective.normalizedText` | `/audio_query?text=...` の `text` |
+| `voiceHint=VOICEVOX:<speakerId>[:style]` | `/audio_query` と `/synthesis` の `speaker` |
+| 既定 provider | `providers.tts.defaultProvider` / `fallbackProviders` の順に解決 |
+
+現行実装では `/audio_query` の JSON をそのまま `/synthesis` へ渡し、戻った WAV を `generated_asset` として保存する。audio asset metadata には `normalizedTextHash`, `providerKey`, `adapter`, `speakerKey`, `styleKey`, `voiceHint`, `pronunciationHintCount`, `pauseHintCount` のような短い値だけを残し、本文、prompt、letter body、raw provider response、秘密値は入れない。
 
 重要な制約:
 
@@ -92,7 +106,7 @@ fallback 方針:
 1. Irodori で `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_TIMEOUT`, `PROVIDER_UNREACHABLE`, `PROVIDER_BAD_RESPONSE` が発生した場合、同一台本で `providers.tts.fallbackProviders` の次候補へ切り替える
 2. Irodori の `NO_REFERENCE_VOICE`, `VOICE_CONSENT_REQUIRED`, `VOICE_REF_NOT_FOUND` は再試行せず、別 `VoiceProfile` または VOICEVOX fallback へ切り替える
 3. fallback で生成した audio asset は `provider_fingerprint` と `voiceHint` を明示し、Irodori cache と混同しない
-4. すべての TTS が失敗した場合は、ジングルまたは短いテキスト字幕のみの縮退へ落とす
+4. すべての TTS が失敗した場合は、`features.streaming.placeholderEnabled=true` なら placeholder WAV へ縮退し、無効なら provider error を返して上位の degraded 扱いにする
 
 ## 6. タイムアウト/リトライ
 

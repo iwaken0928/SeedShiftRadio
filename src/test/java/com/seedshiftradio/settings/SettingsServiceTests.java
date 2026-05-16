@@ -46,6 +46,7 @@ class SettingsServiceTests {
 
 		assertEquals(1, response.version());
 		assertEquals("127.0.0.1", response.server().bindHost());
+		assertEquals("VOICEVOX", response.providers().tts().providers().get("voicevox").adapter());
 		assertEquals(3, response.playout().targetReadyCount());
 		assertEquals(2, response.playout().minimumReadyCount());
 		assertEquals(90_000, response.playout().minReadyDurationMs());
@@ -306,6 +307,77 @@ class SettingsServiceTests {
 						current.features())));
 		assertEquals("VALIDATION_ERROR", ttsException.getCode());
 		assertEquals("providers.tts.voicevox.apiKeyRef", ttsException.getDetails().get("field"));
+	}
+
+	@Test
+	void updateSettingsValidatesTtsProviderAdapterSeparatelyFromMusicGen() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.ProviderEndpoint irodoriEndpoint = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:8088",
+				"/health",
+				180_000,
+				List.of("TTS_GEN", "IRODORI_TTS"),
+				"IRODORI_OPENAI_TTS",
+				"env:IRODORI_TTS_API_KEY",
+				"irodori-tts",
+				null);
+
+		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+				current.version(),
+				current.schemaVersion(),
+				current.server(),
+				current.paths(),
+				current.playout(),
+				current.cache(),
+				current.programming(),
+				new SettingsDocument.ProviderCatalog(
+						current.providers().llm(),
+						new SettingsDocument.ProviderGroup(
+								"irodori",
+								List.of("voicevox"),
+								Map.of(
+										"irodori", irodoriEndpoint,
+										"voicevox", current.providers().tts().providers().get("voicevox"))),
+						current.providers().musicGen()),
+				current.security(),
+				current.features()));
+
+		assertEquals("IRODORI_OPENAI_TTS", response.providers().tts().providers().get("irodori").adapter());
+		assertEquals("irodori-tts", response.providers().tts().providers().get("irodori").defaultModelProfileId());
+	}
+
+	@Test
+	void updateSettingsRejectsUnsupportedTtsProviderAdapter() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.ProviderEndpoint invalidEndpoint = new SettingsDocument.ProviderEndpoint(
+				"http://127.0.0.1:50021",
+				"/version",
+				5_000,
+				List.of("TTS_GEN"),
+				"ACE_STEP",
+				null,
+				null,
+				null);
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						current.playout(),
+						current.cache(),
+						current.programming(),
+						new SettingsDocument.ProviderCatalog(
+								current.providers().llm(),
+								new SettingsDocument.ProviderGroup("voicevox", List.of(), Map.of("voicevox", invalidEndpoint)),
+								current.providers().musicGen()),
+						current.security(),
+						current.features())));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+		assertEquals("providers.tts.voicevox.adapter", exception.getDetails().get("field"));
 	}
 
 	@Test

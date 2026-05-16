@@ -9,7 +9,7 @@ import com.seedshiftradio.radio.QueueItemEntity;
 import com.seedshiftradio.radio.SpeechDirectiveResponse;
 
 @Component
-public class PlaceholderTtsProvider implements TtsProvider {
+public class PlaceholderTtsProvider {
 
 	private final PlaceholderAudioFactory placeholderAudioFactory;
 
@@ -17,8 +17,7 @@ public class PlaceholderTtsProvider implements TtsProvider {
 		this.placeholderAudioFactory = placeholderAudioFactory;
 	}
 
-	@Override
-	public SynthesizedAudio synthesize(ProviderRegistry.ResolvedProvider provider, QueueItemEntity item, SpeechDirectiveResponse directive) {
+	public TtsProvider.SynthesizedAudio synthesize(ProviderRegistry.ResolvedProvider provider, QueueItemEntity item, SpeechDirectiveResponse directive) {
 		Map<String, Object> metadata = new LinkedHashMap<>();
 		metadata.put("queueItemId", item.getId());
 		metadata.put("segmentType", item.getSegmentType().name());
@@ -26,18 +25,13 @@ public class PlaceholderTtsProvider implements TtsProvider {
 		metadata.put("placeholder", true);
 		metadata.put("providerKey", provider.providerKey());
 		metadata.put("speechDirectiveId", directive.id());
-		metadata.put("textHash", sha256(directive.normalizedText()));
-		metadata.put("normalizedText", directive.normalizedText());
-		metadata.put("pronunciationHints", directive.pronunciationHints().stream()
-				.map(hint -> Map.of("surface", hint.surface(), "reading", hint.reading()))
-				.toList());
-		metadata.put("pauseHints", directive.pauseHints().stream()
-				.map(hint -> Map.of("index", hint.index(), "durationMs", hint.durationMs()))
-				.toList());
+		metadata.put("normalizedTextHash", sha256(directive.normalizedText()));
+		metadata.put("pronunciationHintCount", directive.pronunciationHints().size());
+		metadata.put("pauseHintCount", directive.pauseHints().size());
 		metadata.put("voiceHint", directive.voiceHint());
 		metadata.put("personaRef", directive.personaRef());
 		metadata.put("archiveEligible", false);
-		return new SynthesizedAudio(
+		return new TtsProvider.SynthesizedAudio(
 				placeholderAudioFactory.createSilentWav(item.getDurationMs()),
 				provider.providerKey() + ":placeholder",
 				metadata);

@@ -1129,11 +1129,11 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.11 `GET /api/assets/audio/{assetId}.wav`
 
-生成済み audio asset がある場合は `generated_asset.storage_path` を優先して `audio/wav` で返し、見つからない場合のみ `features.streaming.placeholderEnabled` に従って placeholder を返します。`queue_item.assetId` と `generated_asset` により、Server が file 正本と DB メタを追跡します。
+生成済み audio asset がある場合は `generated_asset.storage_path` を優先して `audio/wav` で返し、見つからない場合のみ `features.streaming.placeholderEnabled` に従って placeholder を返します。TALK / LETTER の server-side TTS は `providers.tts.defaultProvider` から `fallbackProviders` の順に VOICEVOX または Irodori OpenAI TTS を試行し、成功した WAV を `queue_item.assetId` / `assetUrl` と `generated_asset` に紐づけます。TTS audio metadata は本文を含まず、`normalizedTextHash`, `providerKey`, `adapter`, `voiceHint`, `speakerKey` / `voiceId`, `fallbackErrorCode` などの短い値に限定します。
 
 ### 6.12 Provider Health
 
-`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。Irodori-TTS では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported=false` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。VOICEVOX では `adapter`, `responseFormat`, `streamingSupported=false` を返します。Irodori-TTS では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `voiceRefStatus`, `streamingSupported=false`, `models` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
 
 ```json
 {

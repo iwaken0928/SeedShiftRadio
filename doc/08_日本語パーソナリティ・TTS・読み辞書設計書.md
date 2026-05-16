@@ -141,8 +141,8 @@ Web では主にデバッグ表示用、Native では実行用とする。
 
 採用方針:
 
-- `IRODORI_TTS` は server-side TTS の高品質 provider として採用候補に昇格する
-- `VOICEVOX` は軽量・安定 fallback として残す
+- `IRODORI_TTS` は server-side TTS の高品質 provider として採用候補に昇格し、現行 server adapter は Irodori-TTS-Server の OpenAI互換 `/v1/audio/speech` を呼び出す
+- `VOICEVOX` は軽量・安定 fallback として残し、現行 server adapter は `/audio_query` から `/synthesis` の順に WAV を生成する
 - 初期 adapter は `Irodori-TTS-Server` の OpenAI互換 API に限定し、Java Server から Irodori の Python CLI を直接実行しない
 - `voice_profile.speakerKey` は Irodori server の voice id、`styleKey` は station 側 style preset、`speed` は OpenAI互換 API の `speed` に対応させる
 - 局ごとに異なる Irodori voice id / reference voice / style preset を割り当て、深夜局は落ち着いた声、朝局は明るい声、ニュース寄り局は抑制した声、のように分離してよい
@@ -168,10 +168,10 @@ Web では主にデバッグ表示用、Native では実行用とする。
 
 ## 9. 生成物の扱い
 
-- `normalizedText` は DB に保持して再現可能にする
-- TTS の入力原文と実再生テキストが異なる場合は両方保持する
+- `normalizedText` は script asset metadata に保持して再現可能にする
+- TTS audio asset metadata は本文を保持せず、`normalizedTextHash`, `providerKey`, `adapter`, `voiceHint`, `speakerKey` / `voiceId`, hint count のような短い値だけにする
 - Voice Persona 変更時は TTS キャッシュを無効化する
-- `pronunciationHints`, `pauseHints`, `voiceHint` も replay 対応のため asset metadata に保持する
+- `pronunciationHints`, `pauseHints`, `voiceHint` も replay 対応のため script asset metadata に保持し、audio asset metadata では count と `voiceHint` に抑える
 - `LETTER` 由来の音声は既定で archive replay 候補にしない
 - `TALK` の replay 候補化は station `replayPolicy` と `safetyFlags` の両方を満たした場合のみ許可する
 

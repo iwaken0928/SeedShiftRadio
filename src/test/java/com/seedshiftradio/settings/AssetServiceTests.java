@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
@@ -25,9 +26,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.ProviderJobType;
+import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SegmentType;
+import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.radio.QueueItemEntity;
 import com.seedshiftradio.radio.ScriptGenerationService;
+import com.seedshiftradio.radio.ScriptDirectiveSnapshot;
 
 @ExtendWith(MockitoExtension.class)
 class AssetServiceTests {
@@ -192,6 +197,74 @@ class AssetServiceTests {
 		assertEquals("MUSIC_LOCAL_PLACEHOLDER", item.getContentOrigin());
 	}
 
+	@Test
+	void ensureQueueAudioAssetFallsBackToPlaceholderWhenTtsProviderFails() {
+		when(settingsStore.load()).thenReturn(settingsDocument());
+		ProviderRegistry.ResolvedProvider voicevoxProvider = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"voicevox",
+				"http://127.0.0.1:50021",
+				"/version",
+				1_000,
+				List.of("TTS_GEN", "VOICEVOX"),
+				false);
+		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(voicevoxProvider));
+		QueueItemEntity item = newQueueItemEntity();
+		item.setId("queue-tts-fallback");
+		item.setSessionId("session-tts");
+		item.setSegmentType(SegmentType.TALK);
+		item.setSlotRole(SlotRole.TOPIC);
+		item.setDurationMs(10_000);
+		item.setCorrelationId("corr-tts-fallback");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(new ScriptDirectiveSnapshot(
+				"本文です。",
+				"本文です。",
+				List.of(),
+				"calm",
+				"medium",
+				List.of(),
+				"persona-night-main",
+				"VOICEVOX:4:normal",
+				List.of()));
+		ProviderJobEntity failedJob = providerJob("provider-job-failed");
+		ProviderJobEntity placeholderJob = providerJob("provider-job-placeholder");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("voicevox"),
+				eq("queue-tts-fallback"),
+				eq("corr-tts-fallback"))).thenReturn(failedJob);
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("seedshift-placeholder"),
+				eq("queue-tts-fallback"),
+				eq("corr-tts-fallback"))).thenReturn(placeholderJob);
+		when(ttsProvider.synthesize(eq(voicevoxProvider), eq(item), any()))
+				.thenThrow(new TtsSynthesisException("PROVIDER_TIMEOUT", "timeout"));
+		byte[] wav = "placeholder-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		when(ttsProvider.synthesize(argThat(provider -> "seedshift-placeholder".equals(provider.providerKey())), eq(item), any()))
+				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "seedshift-placeholder:placeholder", Map.of("placeholder", true)));
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-tts-placeholder");
+		when(generatedAssetService.createAudioAsset(
+				eq(wav),
+				eq("seedshift-placeholder:placeholder"),
+				eq("queue-tts-fallback"),
+				eq("provider-job-placeholder"),
+				argThat(metadata -> Boolean.TRUE.equals(metadata.get("fallbackProviderUsed"))
+						&& "PROVIDER_TIMEOUT".equals(metadata.get("fallbackErrorCode")))))
+				.thenReturn(asset);
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-tts-placeholder", item.getAssetId());
+		assertEquals("/api/assets/audio/asset-tts-placeholder.wav", item.getAssetUrl());
+		verify(providerJobService).markFailed("provider-job-failed", "PROVIDER_TIMEOUT");
+		verify(providerJobService).markSucceeded("provider-job-placeholder");
+	}
+
 	private QueueItemEntity queueItem(String id, int durationMs) {
 		QueueItemEntity item = org.mockito.Mockito.mock(QueueItemEntity.class);
 		when(item.getId()).thenReturn(id);
@@ -207,6 +280,12 @@ class AssetServiceTests {
 		} catch (ReflectiveOperationException exception) {
 			throw new IllegalStateException("QueueItemEntity を生成できません", exception);
 		}
+	}
+
+	private ProviderJobEntity providerJob(String id) {
+		ProviderJobEntity entity = new ProviderJobEntity();
+		entity.setId(id);
+		return entity;
 	}
 
 	private SettingsDocument settingsDocument() {

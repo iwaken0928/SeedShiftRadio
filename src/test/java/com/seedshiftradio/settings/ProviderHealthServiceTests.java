@@ -95,6 +95,8 @@ class ProviderHealthServiceTests {
 
 		assertEquals("UP", response.get("llm").status());
 		assertEquals("DEGRADED", response.get("tts").status());
+		assertEquals("VOICEVOX", response.get("tts").metadata().get("adapter"));
+		assertEquals(false, response.get("tts").metadata().get("streamingSupported"));
 		assertEquals("DEGRADED", response.get("musicGen").status());
 		assertEquals("ace-step-fallback", response.get("musicGen").providerKey());
 		assertEquals(4, response.get("musicGen").metadata().get("queueSize"));

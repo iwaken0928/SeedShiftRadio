@@ -196,7 +196,15 @@ public record SettingsDocument(
 					new ProviderGroup(
 							"voicevox",
 							List.of(),
-							Map.of("voicevox", new ProviderEndpoint("http://127.0.0.1:50021", "/version", 5_000, List.of("TTS_GEN")))),
+							Map.of("voicevox", new ProviderEndpoint(
+									"http://127.0.0.1:50021",
+									"/version",
+									5_000,
+									List.of("TTS_GEN", "VOICEVOX"),
+									"VOICEVOX",
+									null,
+									null,
+									null))),
 					new ProviderGroup(
 							"ace-step",
 							List.of(),
@@ -267,7 +275,7 @@ public record SettingsDocument(
 					(healthPath == null || healthPath.isBlank()) ? "/health" : healthPath,
 					timeoutMs == null || timeoutMs < 100 ? 5_000 : timeoutMs,
 					capabilities == null ? List.of() : List.copyOf(capabilities),
-					(adapter == null || adapter.isBlank()) ? "MUSICGEN_WORKER" : adapter.toUpperCase(),
+					(adapter == null || adapter.isBlank()) ? null : adapter.toUpperCase(java.util.Locale.ROOT),
 					apiKeyRef == null || apiKeyRef.isBlank() ? null : apiKeyRef,
 					normalizedDefaultProfileId,
 					normalizedProfiles);

@@ -179,18 +179,21 @@ public class ProviderHealthService {
 	}
 
 	private Map<String, Object> enrichProviderMetadata(ProviderType providerType, ProviderRegistry.ResolvedProvider provider) {
+		if (providerType == ProviderType.TTS) {
+			return enrichTtsProviderMetadata(provider);
+		}
 		if (providerType != ProviderType.MUSIC) {
 			return Map.of();
 		}
 		Map<String, Object> metadata = new LinkedHashMap<>();
-		metadata.put("adapter", provider.adapter());
+		metadata.put("adapter", musicAdapter(provider));
 		if (provider.defaultModelProfileId() != null && !provider.defaultModelProfileId().isBlank()) {
 			metadata.put("defaultModelProfileId", provider.defaultModelProfileId());
 		}
 		if (provider.modelProfiles() != null && !provider.modelProfiles().isEmpty()) {
 			metadata.put("modelProfileIds", List.copyOf(provider.modelProfiles().keySet()));
 		}
-		if (!"ACE_STEP".equals(provider.adapter()) && !provider.capabilities().contains("ACE_STEP")) {
+		if (!"ACE_STEP".equals(musicAdapter(provider)) && !provider.capabilities().contains("ACE_STEP")) {
 			return metadata;
 		}
 		readAceStepStats(provider, metadata);
@@ -198,9 +201,52 @@ public class ProviderHealthService {
 		return metadata;
 	}
 
+	private Map<String, Object> enrichTtsProviderMetadata(ProviderRegistry.ResolvedProvider provider) {
+		Map<String, Object> metadata = new LinkedHashMap<>();
+		String adapter = ttsAdapter(provider);
+		metadata.put("adapter", adapter);
+		metadata.put("streamingSupported", false);
+		if ("VOICEVOX".equals(adapter)) {
+			metadata.put("responseFormat", "wav");
+			return metadata;
+		}
+		if (!"IRODORI_OPENAI_TTS".equals(adapter)) {
+			return metadata;
+		}
+		metadata.put("model", provider.defaultModelProfileId() == null || provider.defaultModelProfileId().isBlank()
+				? "irodori-tts"
+				: provider.defaultModelProfileId());
+		metadata.put("responseFormat", "wav");
+		metadata.put("chunkingEnabled", provider.capabilities().contains("LONG_TEXT_CHUNKING"));
+		metadata.put("voiceRefStatus", "VOICE_PROFILE_REQUIRED");
+		readIrodoriModels(provider, metadata);
+		return metadata;
+	}
+
+	private void readIrodoriModels(ProviderRegistry.ResolvedProvider provider, Map<String, Object> metadata) {
+		try {
+			JsonNode data = sendJsonProbe(provider, "/v1/models");
+			List<String> models = new ArrayList<>();
+			JsonNode modelNodes = data.path("data");
+			if (modelNodes.isArray()) {
+				for (JsonNode modelNode : modelNodes) {
+					String id = textOrNull(modelNode.path("id"));
+					if (id != null && !id.isBlank()) {
+						models.add(id);
+					}
+				}
+			}
+			if (!models.isEmpty()) {
+				metadata.put("models", List.copyOf(models));
+			}
+		} catch (RuntimeException exception) {
+			metadata.put("modelsStatus", "UNAVAILABLE");
+		}
+	}
+
 	private void readAceStepStats(ProviderRegistry.ResolvedProvider provider, Map<String, Object> metadata) {
 		try {
-			JsonNode data = sendAceStepProbe(provider, "/v1/stats").path("data");
+			JsonNode data = sendJsonProbe(provider, "/v1/stats").path("data");
 			JsonNode jobs = data.path("jobs");
 			putIfPresent(metadata, "queuedJobs", jobs.path("queued"));
 			putIfPresent(metadata, "runningJobs", jobs.path("running"));
@@ -213,7 +259,7 @@ public class ProviderHealthService {
 
 	private void readAceStepModels(ProviderRegistry.ResolvedProvider provider, Map<String, Object> metadata) {
 		try {
-			JsonNode data = sendAceStepProbe(provider, "/v1/models").path("data");
+			JsonNode data = sendJsonProbe(provider, "/v1/models").path("data");
 			String defaultModel = textOrNull(data.path("default_model"));
 			if (defaultModel != null) {
 				metadata.put("defaultModel", defaultModel);
@@ -236,7 +282,7 @@ public class ProviderHealthService {
 		}
 	}
 
-	private JsonNode sendAceStepProbe(ProviderRegistry.ResolvedProvider provider, String path) {
+	private JsonNode sendJsonProbe(ProviderRegistry.ResolvedProvider provider, String path) {
 		try {
 			HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(provider.baseUrl() + path))
 					.GET()
@@ -251,15 +297,32 @@ public class ProviderHealthService {
 					.build();
 			HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				throw new IllegalStateException("ACE-Step probe failed");
+				throw new IllegalStateException("provider probe failed");
 			}
 			return objectMapper.readTree(response.body());
 		} catch (IOException exception) {
-			throw new IllegalStateException("ACE-Step probe failed", exception);
+			throw new IllegalStateException("provider probe failed", exception);
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			throw new IllegalStateException("ACE-Step probe interrupted", exception);
+			throw new IllegalStateException("provider probe interrupted", exception);
 		}
+	}
+
+	private String musicAdapter(ProviderRegistry.ResolvedProvider provider) {
+		return provider.adapter() == null || provider.adapter().isBlank() ? "MUSICGEN_WORKER" : provider.adapter();
+	}
+
+	private String ttsAdapter(ProviderRegistry.ResolvedProvider provider) {
+		if ("VOICEVOX".equals(provider.adapter()) || "IRODORI_OPENAI_TTS".equals(provider.adapter())) {
+			return provider.adapter();
+		}
+		if (provider.capabilities().contains("IRODORI_TTS") || provider.capabilities().contains("OPENAI_AUDIO_SPEECH")) {
+			return "IRODORI_OPENAI_TTS";
+		}
+		if (provider.capabilities().contains("VOICEVOX") || provider.providerKey().toLowerCase(java.util.Locale.ROOT).contains("voicevox")) {
+			return "VOICEVOX";
+		}
+		return "UNKNOWN";
 	}
 
 	private String resolveSecret(String secretRef) {

@@ -16,6 +16,7 @@ public class SettingsService {
 
 	private static final Set<String> CACHE_REUSE_SCOPES = Set.of("DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIVE_ONLY");
 	private static final Set<String> MUSIC_PROVIDER_ADAPTERS = Set.of("MUSICGEN_WORKER", "ACE_STEP");
+	private static final Set<String> TTS_PROVIDER_ADAPTERS = Set.of("VOICEVOX", "IRODORI_OPENAI_TTS");
 	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("wav", "wav32");
 	private static final Set<String> LYRICS_TRANSLITERATION_MODES = Set.of("native", "kana", "romaji");
 	private static final List<String> SECRET_REF_PREFIXES = List.of("env:", "file:");
@@ -154,16 +155,22 @@ public class SettingsService {
 			if ("providers.musicGen".equals(field)) {
 				validateMusicProviderEndpoint(field + "." + entry.getKey(), endpoint);
 			}
+			if ("providers.tts".equals(field)) {
+				validateTtsProviderEndpoint(field + "." + entry.getKey(), endpoint);
+			}
 		}
 	}
 
 	private void validateMusicProviderEndpoint(String field, SettingsDocument.ProviderEndpoint endpoint) {
-		if (!MUSIC_PROVIDER_ADAPTERS.contains(endpoint.adapter())) {
+		String adapter = endpoint.adapter() == null || endpoint.adapter().isBlank()
+				? "MUSICGEN_WORKER"
+				: endpoint.adapter();
+		if (!MUSIC_PROVIDER_ADAPTERS.contains(adapter)) {
 			throw new ApiException(
 					HttpStatus.BAD_REQUEST,
 					"VALIDATION_ERROR",
 					field + ".adapter は MUSICGEN_WORKER または ACE_STEP のいずれかで指定してください。",
-					Map.of("field", field + ".adapter", "value", endpoint.adapter()));
+					Map.of("field", field + ".adapter", "value", adapter));
 		}
 		Map<String, SettingsDocument.MusicGenerationModelProfile> profiles = endpoint.modelProfiles() == null ? Map.of() : endpoint.modelProfiles();
 		if (endpoint.defaultModelProfileId() != null && !endpoint.defaultModelProfileId().isBlank() && !profiles.containsKey(endpoint.defaultModelProfileId())) {
@@ -175,6 +182,19 @@ public class SettingsService {
 		}
 		for (Map.Entry<String, SettingsDocument.MusicGenerationModelProfile> entry : profiles.entrySet()) {
 			validateMusicGenerationProfile(field + ".modelProfiles." + entry.getKey(), entry.getValue());
+		}
+	}
+
+	private void validateTtsProviderEndpoint(String field, SettingsDocument.ProviderEndpoint endpoint) {
+		if (endpoint.adapter() == null || endpoint.adapter().isBlank()) {
+			return;
+		}
+		if (!TTS_PROVIDER_ADAPTERS.contains(endpoint.adapter())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".adapter は VOICEVOX または IRODORI_OPENAI_TTS のいずれかで指定してください。",
+					Map.of("field", field + ".adapter", "value", endpoint.adapter()));
 		}
 	}
 

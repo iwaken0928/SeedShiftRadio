@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,25 +62,38 @@ public class AssetService {
 			ensureLocalMusicAsset(item);
 			return;
 		}
-		ProviderRegistry.ResolvedProvider provider = resolveTtsProvider();
-		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
-				resolveJobType(item),
-				resolveProviderType(item),
-				provider.providerKey(),
-				item.getId(),
-				item.getCorrelationId());
-		providerJobService.markRunning(providerJob.getId(), provider.providerKey(), "placeholder-" + item.getId());
 		SpeechDirectiveResponse directive = toSpeechDirective(item, scriptGenerationService.ensureScriptAsset(item));
-		TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item, directive);
-		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
-				synthesizedAudio.audioBytes(),
-				synthesizedAudio.providerFingerprint(),
-				item.getId(),
-				providerJob.getId(),
-				synthesizedAudio.metadata());
-		providerJobService.markSucceeded(providerJob.getId());
-		item.setAssetId(asset.getId());
-		item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+		TtsSynthesisException lastFailure = null;
+		for (ProviderRegistry.ResolvedProvider provider : resolveTtsProviders()) {
+			ProviderJobEntity providerJob = createTtsProviderJob(item, provider);
+			try {
+				providerJobService.markRunning(providerJob.getId(), provider.providerKey(), "tts-" + item.getId() + "-" + provider.providerKey());
+				TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item, directive);
+				GeneratedAssetEntity asset = createTtsAudioAsset(item, providerJob, synthesizedAudio, lastFailure);
+				providerJobService.markSucceeded(providerJob.getId());
+				item.setAssetId(asset.getId());
+				item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+				return;
+			} catch (TtsSynthesisException exception) {
+				lastFailure = exception;
+				providerJobService.markFailed(providerJob.getId(), exception.errorCode());
+			}
+		}
+		if (placeholderEnabled()) {
+			ProviderRegistry.ResolvedProvider placeholder = placeholderTtsProvider();
+			ProviderJobEntity providerJob = createTtsProviderJob(item, placeholder);
+			providerJobService.markRunning(providerJob.getId(), placeholder.providerKey(), "tts-" + item.getId() + "-placeholder");
+			TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(placeholder, item, directive);
+			GeneratedAssetEntity asset = createTtsAudioAsset(item, providerJob, synthesizedAudio, lastFailure);
+			providerJobService.markSucceeded(providerJob.getId());
+			item.setAssetId(asset.getId());
+			item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+			return;
+		}
+		if (lastFailure != null) {
+			throw lastFailure;
+		}
+		throw new TtsSynthesisException("PROVIDER_BAD_RESPONSE", "TTS provider が設定されていません。");
 	}
 
 	private void ensureLocalMusicAsset(QueueItemEntity item) {
@@ -156,11 +170,15 @@ public class AssetService {
 		};
 	}
 
-	private ProviderRegistry.ResolvedProvider resolveTtsProvider() {
+	private List<ProviderRegistry.ResolvedProvider> resolveTtsProviders() {
 		List<ProviderRegistry.ResolvedProvider> providers = providerRegistry.resolveChain(ProviderType.TTS);
 		if (!providers.isEmpty()) {
-			return providers.getFirst();
+			return providers;
 		}
+		return List.of(placeholderTtsProvider());
+	}
+
+	private ProviderRegistry.ResolvedProvider placeholderTtsProvider() {
 		return new ProviderRegistry.ResolvedProvider(
 				ProviderType.TTS,
 				"tts",
@@ -170,6 +188,41 @@ public class AssetService {
 				5_000,
 				List.of("TTS_GEN"),
 				true);
+	}
+
+	private ProviderJobEntity createTtsProviderJob(QueueItemEntity item, ProviderRegistry.ResolvedProvider provider) {
+		return providerJobService.createQueuedJob(
+				resolveJobType(item),
+				resolveProviderType(item),
+				provider.providerKey(),
+				item.getId(),
+				item.getCorrelationId());
+	}
+
+	private GeneratedAssetEntity createTtsAudioAsset(
+			QueueItemEntity item,
+			ProviderJobEntity providerJob,
+			TtsProvider.SynthesizedAudio synthesizedAudio,
+			TtsSynthesisException previousFailure) {
+		return generatedAssetService.createAudioAsset(
+				synthesizedAudio.audioBytes(),
+				synthesizedAudio.providerFingerprint(),
+				item.getId(),
+				providerJob.getId(),
+				ttsMetadata(synthesizedAudio.metadata(), previousFailure));
+	}
+
+	private Map<String, Object> ttsMetadata(Map<String, Object> metadata, TtsSynthesisException previousFailure) {
+		Map<String, Object> merged = new LinkedHashMap<>(metadata == null ? Map.of() : metadata);
+		if (previousFailure != null) {
+			merged.put("fallbackProviderUsed", true);
+			merged.put("fallbackErrorCode", previousFailure.errorCode());
+		}
+		return merged;
+	}
+
+	private boolean placeholderEnabled() {
+		return Boolean.TRUE.equals(settingsStore.load().features().streaming().placeholderEnabled());
 	}
 
 	private Optional<MusicFailureFallback> resolveLocalMusicFallback(QueueItemEntity item, String errorCode) {

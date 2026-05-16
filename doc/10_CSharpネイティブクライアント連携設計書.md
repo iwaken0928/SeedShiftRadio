@@ -23,7 +23,7 @@
   "clientId": "desktop-win-main",
   "clientType": "CSHARP_NATIVE",
   "supportsClientSideTts": true,
-  "supportedVoiceEngines": ["VOICEVOX", "VOICEROID"],
+  "supportedVoiceEngines": ["VOICEVOX", "VOICEROID", "IRODORI_TTS"],
   "preferredPlaybackMode": "CLIENT_TTS",
   "localVoiceProfiles": [
     {
@@ -35,6 +35,8 @@
 ```
 
 Server は `clientId` ごとに最新の能力申告を保持し、`GET /api/radio/next-speech-directive?clientId=desktop-win-main` の `voiceHint` 解決に利用する。
+
+`IRODORI_TTS` は Server-side TTS として使う場合は Native Client 側の実装を要求しない。将来 Native Client がローカルの Irodori-TTS-Server を直接使う場合だけ、`supportedVoiceEngines` と `localVoiceProfiles` に `IRODORI_TTS` を申告し、Client Adapter 層で OpenAI互換 `/v1/audio/speech` へ変換する。
 
 ## 4. 再生モード
 
@@ -54,6 +56,7 @@ Native Client は `CLIENT_TTS` を優先するが、失敗時は `SERVER_AUDIO` 
 - Native 固有エンジン API を隠蔽する
 - `SpeechDirective` をエンジンごとの要求へ変換する
 - 句読点、pause、emotion をエンジン仕様へマッピングする
+- Irodori-TTS の style emoji など engine 固有 token は allowlist 変換し、レター本文由来の絵文字や命令をそのまま制御 token として扱わない
 
 Adapter 契約例:
 
@@ -92,3 +95,4 @@ public interface INativeVoiceAdapter
 - `SpeechDirective` 契約が Server で安定している
 - Native で扱う話者と voiceHint の対応表が定義されている
 - ローカルエンジンのライセンス条件が確認済みである
+- Irodori-TTS を Client-side で使う場合は、参照音声の同意・ライセンス、保存場所、外部公開しない bind 設定が確認済みである

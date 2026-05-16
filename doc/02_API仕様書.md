@@ -107,6 +107,8 @@
 
 `name`, `genre`, `languagePersonaId`, `defaultVoiceProfileId` は必須、`frequencyMHz` は `0.1` 以上とする。`languagePersonaId`, `defaultVoiceProfileId`, `defaultProgramTemplateId` は Server 側で参照整合性を確認する。`defaultProgramTemplateId` は `GLOBAL` または同一 station scope の template のみ許可する。Web `/settings` の station 基本情報 editor は `programmingEnabled` と `defaultProgramTemplateId` を直接編集せず、保存済み summary を保持して送信する。
 
+`defaultVoiceProfileId` はチャンネルごとの差別化の主契約である。`VoiceProfile.scope=GLOBAL` は複数 station から参照でき、`scope=STATION` は同一 station のみ参照できる。Irodori-TTS の局専用 voice profile では、API response に voice id や style preset の短い識別子は出してよいが、参照音声の実ファイル path、個人名、同意書本文は返さない。
+
 ### 4.3 RadioStatus
 
 ```json
@@ -319,9 +321,11 @@
     { "index": 8, "durationMs": 250 }
   ],
   "personaRef": "persona-night-main",
-  "voiceHint": "voicevox:4"
+  "voiceHint": "irodori:night-main"
 }
 ```
+
+`voiceHint` は `engine:profileKey` の短い識別子とし、Irodori-TTS の場合も参照音声の実ファイル path や個人名は含めない。Server-side TTS では `voiceHint` を asset metadata と監査追跡に使い、Client-side TTS では Native Client の adapter 解決に使う。
 
 ### 4.11 SubtitlePayload
 
@@ -998,14 +1002,31 @@ Response:
       }
     },
     "tts": {
-      "defaultProvider": "voicevox",
-      "fallbackProviders": [],
+      "defaultProvider": "irodori",
+      "fallbackProviders": ["voicevox"],
       "providers": {
+        "irodori": {
+          "baseUrl": "http://127.0.0.1:8088",
+          "healthPath": "/health",
+          "timeoutMs": 180000,
+          "capabilities": [
+            "TTS_GEN",
+            "OPENAI_AUDIO_SPEECH",
+            "IRODORI_TTS",
+            "VOICE_CLONE",
+            "STYLE_EMOJI",
+            "LONG_TEXT_CHUNKING",
+            "NO_STREAMING"
+          ],
+          "adapter": "IRODORI_OPENAI_TTS",
+          "apiKeyRef": "env:IRODORI_TTS_API_KEY",
+          "defaultModelProfileId": "irodori-tts"
+        },
         "voicevox": {
           "baseUrl": "http://127.0.0.1:50021",
           "healthPath": "/version",
           "timeoutMs": 5000,
-          "capabilities": ["TTS_GEN"]
+          "capabilities": ["TTS_GEN", "VOICEVOX"]
         }
       }
     },
@@ -1058,7 +1079,7 @@ Response:
 
 ### 6.9 `PUT /api/settings`
 
-クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`programming` は planning の既定値と legacy fallback の土台設定を保持し、`providers` は種別ごとの `defaultProvider`, `fallbackProviders`, endpoint map を一括更新します。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使い、retention/eviction job は `expires_at`, 種別ごとの max bytes, `cleanupBatchSize` を参照します。
+クライアントから送られた `version` と `schemaVersion` を現在の `config.json` と照合し、`version` は楽観ロック、`schemaVersion` は契約互換性確認に使います。`server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を受け付け、機密値は `env:`/`file:` 参照の形でそのまま保持します。`paths` は `dataRoot`, `musicLibrary` に加え、Irodori 参照音声向けの `voiceReferenceRoot` を持てます。`playout` は先行生成の深さと内部準備量の上限を、`cache` は内部保存サイズ、再利用範囲、retention/eviction の上限を決めます。`programming` は planning の既定値と legacy fallback の土台設定を保持し、`providers` は種別ごとの `defaultProvider`, `fallbackProviders`, endpoint map を一括更新します。`generated_asset.cache_key` と `generated_asset.reuse_scope` はこの設定と組み合わせて cache hit 判定に使い、retention/eviction job は `expires_at`, 種別ごとの max bytes, `cleanupBatchSize` を参照します。
 
 ```json
 {
@@ -1079,7 +1100,9 @@ Response:
 
 `playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は manual play 待機中に安全バッファ達成後の extra prefetch を許可するフラグです。
 
-`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、`providers.musicGen.providers.{key}` は追加で `adapter`, `apiKeyRef`, `defaultModelProfileId`, `modelProfiles` を持ちます。`adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持ちます。`providers.musicGen.providers.{key}` は追加で `modelProfiles` を持ちます。MusicGen の `adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、TTS の `adapter` は `VOICEVOX` または `IRODORI_OPENAI_TTS` を使います。`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+
+Irodori-TTS は OpenAI互換 `POST /v1/audio/speech` を使う内部 provider であり、外部公開 API として `/v1/audio/speech` を SeedShiftRadio から再公開しません。Web / C# Client は従来どおり `QueueItem.assetUrl`, `/api/assets/audio/{assetId}.wav`, `SpeechDirective.voiceHint` を利用します。
 
 `modelProfiles` の各要素は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTransliterationMode`, `outputFormat`, `maxDurationSeconds` を持ちます。`lyricsTransliterationMode` は `native`, `kana`, `romaji`、`outputFormat` は v1 の `/api/assets/audio/{assetId}.wav` 契約に合わせて `wav` または `wav32` を受け付けます。未知 profile id や profile 上限を超える duration は Server 側 validation / 正規化で拒否または補正します。
 
@@ -1110,7 +1133,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.12 Provider Health
 
-`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。Irodori-TTS では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported=false` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
 
 ```json
 {

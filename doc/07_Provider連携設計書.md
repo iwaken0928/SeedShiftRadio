@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本書は `LLM`, `TTS`, `Music Generation Provider` を統一原則で差し替え可能にするための抽象化と接続方式を定義する。Music generation は `MUSICGEN_WORKER` と `ACE_STEP` を provider 種別として扱う。
+本書は `LLM`, `TTS`, `Music Generation Provider` を統一原則で差し替え可能にするための抽象化と接続方式を定義する。Music generation は `MUSICGEN_WORKER` と `ACE_STEP` を provider 種別として扱う。TTS は `VOICEVOX` に加え、Irodori-TTS-Server の OpenAI Text-to-Speech API 互換 endpoint を `IRODORI_OPENAI_TTS` adapter として扱えるようにする。
 
 ## 2. 共通方針
 
@@ -38,7 +38,7 @@ public interface MusicGenerationProvider {
 | 項目 | 方針 |
 |---|---|
 | 既定 Provider | `config.json` で指定 |
-| station / program template 固有上書き | 可能 |
+| station / program template 固有上書き | 可能。TTS では station の `defaultVoiceProfileId` と `VoiceProfile.providerKey` を優先し、局ごとに Irodori / VOICEVOX / style preset を変えられる |
 | fallback Provider | 種別ごとに 1 件以上設定可能 |
 | 接続テスト | `/api/settings/test-connections` から実行 |
 - 設定更新 | `/api/settings` の `version`/`schemaVersion` で楽観ロックし、`features` で placeholder 制御を入れる |
@@ -48,18 +48,58 @@ public interface MusicGenerationProvider {
 | 種別 | 方式 | 備考 |
 |---|---|---|
 | LLM | HTTP | `Ollama` や OpenAI 互換 API を想定 |
-| TTS | HTTP | `VOICEVOX` を第一候補 |
+| TTS | HTTP | `VOICEVOX` を安定候補、`Irodori-TTS-Server` を高品質 server-side TTS 候補 |
 | Music Generation | HTTP 非同期 | `ACE_STEP` REST API と互換用 `FastAPI Worker` を第一候補 |
 | 例外 | CLI | モデル都合で HTTP 化が難しい時のみ許容 |
 
 CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセス制御しない。
+
+### 5.1 Irodori OpenAI TTS adapter
+
+Irodori-TTS は Java Server から Python CLI を直接起動せず、`Aratako/Irodori-TTS-Server` を別プロセスまたは別 container として起動し、HTTP で呼び出す。
+
+対象:
+
+- model: `Aratako/Irodori-TTS-500M-v3`
+- server: `Irodori-TTS-Server`
+- adapter: `IRODORI_OPENAI_TTS`
+- health: `GET /health`
+- model list: `GET /v1/models`
+- synthesis: `POST /v1/audio/speech`
+
+request mapping:
+
+| SeedShiftRadio | Irodori-TTS-Server |
+|---|---|
+| `TtsRequest.normalizedText` | `input` |
+| `ResolvedProvider.modelName` または既定値 | `model`, 通常は `irodori-tts` |
+| `VoiceProfile.speakerKey` | `voice`。Irodori server の `voices/` または `voices.json` の voice id |
+| `VoiceProfile.speed` | `speed` |
+| `VoiceProfile.providerOptions.responseFormat` | `response_format`。既定は `wav` |
+| `VoiceProfile.providerOptions.irodori` | `irodori` object。`num_steps`, CFG, chunking などの安全な allowlist のみ |
+
+初期実装では `response_format=wav` を標準にし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。`mp3` などは asset manifest / content type の拡張時に許可する。
+
+重要な制約:
+
+- streaming synthesis は使えない。OpenAI SDK 側に streaming response 風の API があっても、Irodori server 内部では完成音声を生成して返す
+- 既定の最大同時 synthesis は 1 件で、混雑や model load timeout は 503 として返りうる
+- `voice: "none"` や無参照発話は可能だが、ラジオパーソナリティ用途では声質の再現性が落ちるため、承認済み reference voice を持つ `VoiceProfile` を優先する
+- VoiceDesign v3 は未公開のため、caption-conditioned voice design は v2 VoiceDesign checkpoint を別 provider profile として将来追加する
+
+fallback 方針:
+
+1. Irodori で `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_TIMEOUT`, `PROVIDER_UNREACHABLE`, `PROVIDER_BAD_RESPONSE` が発生した場合、同一台本で `providers.tts.fallbackProviders` の次候補へ切り替える
+2. Irodori の `NO_REFERENCE_VOICE`, `VOICE_CONSENT_REQUIRED`, `VOICE_REF_NOT_FOUND` は再試行せず、別 `VoiceProfile` または VOICEVOX fallback へ切り替える
+3. fallback で生成した audio asset は `provider_fingerprint` と `voiceHint` を明示し、Irodori cache と混同しない
+4. すべての TTS が失敗した場合は、ジングルまたは短いテキスト字幕のみの縮退へ落とす
 
 ## 6. タイムアウト/リトライ
 
 | Provider | Timeout | Retry |
 |---|---|---|
 | LLM | 20 秒 | 1 回 |
-| TTS | 15 秒 | 1 回 |
+| TTS | 15 秒。Irodori は初回 model load / CPU fallback を考慮し provider ごとに 60 から 300 秒へ延長可能 | 1 回。Irodori の 503 / queue timeout は同一 provider 再試行より fallback provider を優先 |
 | Music Generation | submit/poll は provider timeout、完了待ちは 180 秒 | 即時再試行なし。fallback provider またはジョブ再投入のみ |
 
 再試行時は `correlationId` を継承する。
@@ -74,6 +114,8 @@ CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセ
 | `PROVIDER_REJECTED` | 入力拒否 |
 | `PROVIDER_RESOURCE_EXHAUSTED` | GPU/メモリ不足、queue 混雑、HTTP 429/503 |
 | `PROVIDER_AUTH_FAILED` | API key 不正、秘密値参照解決失敗 |
+| `VOICE_REF_NOT_FOUND` | 参照音声 voice id または file が provider 側に存在しない |
+| `VOICE_CONSENT_REQUIRED` | 参照音声の同意・利用条件が未確認 |
 
 ## 8. 設定注入
 
@@ -85,6 +127,7 @@ CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセ
 - credential ref / `apiKeyRef`
 - cache policy
 - preGenerationMode
+- TTS adapter (`VOICEVOX`, `IRODORI_OPENAI_TTS` など)
 
 機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。
 
@@ -117,12 +160,56 @@ ACE-Step profile は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTr
 
 ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。監視 UI は生成本文ではなく、provider key、adapter、profile id、分類済み失敗理由だけを表示する。
 
+### 8.4 TTS provider profile
+
+`providers.tts.providers.{providerKey}` は通常 endpoint に加え、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持つ。TTS 固有の細かい request option は provider endpoint ではなく `VoiceProfile.providerOptions` に寄せ、station/persona ごとの差し替えをしやすくする。
+
+Irodori の設定例:
+
+```json
+{
+  "providers": {
+    "tts": {
+      "defaultProvider": "irodori",
+      "fallbackProviders": ["voicevox"],
+      "providers": {
+        "irodori": {
+          "baseUrl": "http://127.0.0.1:8088",
+          "healthPath": "/health",
+          "timeoutMs": 180000,
+          "capabilities": [
+            "TTS_GEN",
+            "OPENAI_AUDIO_SPEECH",
+            "IRODORI_TTS",
+            "VOICE_CLONE",
+            "STYLE_EMOJI",
+            "LONG_TEXT_CHUNKING",
+            "NO_STREAMING"
+          ],
+          "adapter": "IRODORI_OPENAI_TTS",
+          "apiKeyRef": "env:IRODORI_TTS_API_KEY",
+          "defaultModelProfileId": "irodori-tts"
+        },
+        "voicevox": {
+          "baseUrl": "http://127.0.0.1:50021",
+          "healthPath": "/version",
+          "timeoutMs": 5000,
+          "capabilities": ["TTS_GEN", "VOICEVOX"]
+        }
+      }
+    }
+  }
+}
+```
+
+`apiKeyRef` は Irodori-TTS-Server の optional bearer token を使う場合だけ設定する。無認証 localhost 運用では空でもよいが、外部 bind は禁止に近い扱いとし、必要な場合は firewall と token を必須にする。
+
 ## 9. 推奨 OSS と使い分け
 
 | 領域 | 第一候補 | 代替 |
 |---|---|---|
 | LLM | Spring AI + Ollama | OpenAI 互換 API, llama.cpp サービス |
-| TTS | VOICEVOX | AivisSpeech, Style-Bert-VITS2 |
+| TTS | VOICEVOX / Irodori-TTS-Server | AivisSpeech, Style-Bert-VITS2 |
 | Music Generation | ACE-Step 1.5 REST API + FastAPI Worker | AudioCraft / MusicGen 系 |
 | API文書 | springdoc-openapi | 手書き OpenAPI |
 | 非同期ジョブ | JobRunr | Quartz |
@@ -137,6 +224,7 @@ Provider ごとに以下を持つ。
 - `message`
 - `capabilities`
 - `metadata`: ACE-Step では adapter、profile id、queue stats、model 一覧など。prompt / lyrics / 秘密値は含めない
+- `metadata`: Irodori では adapter、model id、response format、chunking enabled、concurrency limit、queue timeout、voiceRef status など。参照音声の実ファイル path、個人名、本文、秘密値は含めない
 
 `metadata` と `message` は診断用の短い状態値に限定する。Web は provider 契約違反の payload が混ざった場合も、secret / prompt / lyrics / letter body / radioName / raw response らしい key や値を redaction し、worker status detail は許可済み metadata key の短い値だけを表示する。
 
@@ -150,6 +238,7 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 - Provider ごとの contract test を用意する
 - mock provider を標準実装として持つ
 - ACE-Step fake HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現する
+- Irodori fake HTTP server で `/health`, `/v1/models`, `/v1/audio/speech` の成功、503 queue timeout、401 auth failed、voice not found、bad audio bytes を再現する
 - タイムアウト、異常応答、空応答、部分成功を再現できるようにする
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に出ないことを確認する
 

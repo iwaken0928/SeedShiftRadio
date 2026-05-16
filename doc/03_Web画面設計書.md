@@ -17,7 +17,7 @@
 |---|---|---|
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
-| `/settings` | 設定画面 | Provider 設定、局管理、番組管理、先行生成・再放送・キャッシュ設定、接続テスト |
+| `/settings` | 設定画面 | Provider 設定、局管理、Voice Profile 管理、番組管理、先行生成・再放送・キャッシュ設定、接続テスト |
 | `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
 
 ## 4. レイアウト方針
@@ -88,6 +88,7 @@
 
 - LLM
 - TTS
+- Voice Profiles
 - MusicGen
 - Stations
 - Program Templates
@@ -121,17 +122,21 @@
 - Import は即時保存せず draft に読み込み、内容確認後に `Save Settings` で既存の settings validation を通す
 - Export 前にも `apiKeyRef` と `adminTokenRef` が `env:` / `file:` 参照であることを検証し、raw secret らしい draft は JSON download しない
 - `Connection Test` の provider health 表示は metadata と message を Web 表示層で redaction し、prompt / lyrics / letter body / radioName / secret / raw response をそのまま描画しない
+- `Voice Profiles` では `scope`, `stationId`, `engineType`, `providerKey`, `speakerKey`, `styleKey`, `speed`, `pitch`, `playbackMode` を表示し、局ごとに別の声を選べるようにする。Irodori-TTS の場合は承認済み `referenceVoiceRef` / `consentPolicyRef` の有無と style preset だけを表示する。参照音声の実ファイル path、個人名、音声本文、raw provider option は表示しない
+- Irodori-TTS の参照音声を扱う UI は初期では管理者が配置した `voices/` の id 選択までに留め、任意 upload は同意・ライセンス台帳と file validation が実装されるまで追加しない
 - 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
 
 ### 7.3 初期実装範囲
 
 - 第一段の `/settings` は `server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を 1 画面で一括編集する
 - `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を編集できるようにする
+- TTS provider は `VOICEVOX` と `IRODORI_OPENAI_TTS` の default/fallback 切替を扱えるようにする。Irodori の `apiKeyRef` は `env:` / `file:` 参照のみ表示・編集し、bearer token の実値は扱わない
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
 - 管理トークンがない場合は導線を非表示にし、直接開いた時は管理画面であることを案内する
 - `Import / Export` は Web 側で JSON download / file import として実装し、専用 API は増やさず既存の `GET /api/settings` と `PUT /api/settings` を使う
 - Import 時は `schemaVersion` の一致を確認し、`version` は現在の保存済み設定へ合わせる。`apiKeyRef` と `adminTokenRef` は `env:` / `file:` 参照だけ受け付ける
 - `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
+- `Voice Profiles` の作成/編集 UI は後続実装対象とする。Irodori 取り込みの第一段では seed / DB migration と既存 station の `defaultVoiceProfileId` 差し替えで、チャンネルごとに別 voice id / style preset を割り当てられる状態を優先する
 
 ## 8. 監視画面
 
@@ -149,6 +154,7 @@
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
 - worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
+- Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する
 - `providerHealth.message`, `baseUrl`, `provider_job.externalRef`, audit `summary` は分類済みの短い表示に限り、秘密値や本文らしい key-value / credential URL は Web 側でも `[redacted]` に置き換える
 
 ## 9. 状態管理

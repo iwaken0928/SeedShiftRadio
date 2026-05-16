@@ -470,6 +470,13 @@
 - スタイル制御や独自音声づくりの自由度が高い
 - 反面、運用難度とモデル管理難度は上がる
 
+#### D. Irodori-TTS系
+- 日本語 TTS 向けのローカル生成AIで、参照音声による声質固定と style / emotion 制御を活用しやすい
+- `Irodori-TTS-Server` を使うと OpenAI Text-to-Speech API 互換の HTTP server として扱えるため、Java Server からの Provider 連携に載せやすい
+- ラジオパーソナリティの声質・雰囲気づくりでは有力だが、streaming synthesis は未実装で完成音声を返す方式のため、先行生成と cache を前提にする
+- 参照音声は本人または権利者の明示同意があるものに限定し、声優・著名人・実在個人の無断模倣や誤認を招く利用は禁止する
+- 漢字読みは読み辞書・かな化で補正し、VOICEVOX などの安定 fallback を残す
+
 ### 8.5.4 将来のC#クライアント連携方針
 
 - C#クライアントは Server API に対して自クライアントの Capability を送信できるようにする
@@ -496,7 +503,8 @@
 
 ### 8.5.5 MVPでの推奨方針
 
-- **MVPの第一候補TTS** は VOICEVOX系
+- **MVPの安定候補TTS** は VOICEVOX系
+- **高品質なラジオパーソナリティ候補** として Irodori-TTS-Server を server-side TTS Provider に追加する
 - **将来拡張候補** として AivisSpeech / Style-Bert-VITS2 系を許容
 - 初期は「声の自然さ」よりも **安定再生・読み制御・導入容易性** を優先する
 - 日本語パーソナリティは、最低でも以下の設定を持つ
@@ -749,7 +757,7 @@
 - LLM 1実装
 - TTS 1実装
 - MusicGen 1実装（ACE-Step系を想定）
-- 日本語TTS 1実装（VOICEVOX系を第一候補）
+- 日本語TTS 1実装（VOICEVOX系を安定候補とし、Irodori-TTS-Server を高品質候補として追加）
 - 日本語パーソナリティ設定（口調・語尾・読み辞書の最小セット）
 - SpeechDirective 返却を考慮した内部設計（MVPではWebクライアント未使用でも設計には含める）
 - 短尺セグメント + 先読みバッファ

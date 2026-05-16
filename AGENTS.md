@@ -84,18 +84,27 @@
 
 - `planner`: 関連ドキュメントを読み、影響範囲と実行順を整理する
 - `architect`: API first と責務境界の整合を確認する
-- `server`: `/server` の実装を担当する
+- `server`: 現行の `src/main/java`, `src/test/java` と将来の `/server` 実装を担当する
 - `web`: `/web` の実装を担当する
 - `worker`: `/workers` と provider 連携を担当する
 - `qa`: テスト、回帰確認、設計ずれの確認を担当する
 
 ファイル所有が重なる変更は一度に複数エージェントへ書かせず、主担当を決めて進めてください。
 
+`model_reasoning_effort` は `.codex/config.toml` や `.codex/agents/*.toml` で原則固定せず、Codex UI、グローバル設定、起動時の選択に任せます。タスクごとに必要なインテリジェンスを選べる状態を優先してください。
+
 ## ローカル skill
 
 `.agents/skills` にプロジェクト専用 skill を置いています。
 
 - `seedshift-radio-architecture`: 設計書の読み分け、責務境界、API first の確認用
+- `seedshift-radio-backlog-implementation`: `doc/15` を起点にした残タスク実装と設計書更新用
 - `seedshift-radio-broadcast-quality`: 日本語台本、TTS、読み辞書、レター安全性、縮退品質の確認用
+- `seedshift-radio-letter-workflow`: レター投稿、採用、返信、放送反映の状態遷移確認用
+- `seedshift-radio-playout-contracts`: 再生状態、キュー、SSE、Native Client 互換の契約確認用
+- `seedshift-radio-programming-control`: 局管理、番組テンプレート、編成ルール、queue 計画の確認用
+- `seedshift-radio-provider-runtime`: Provider 抽象、接続テスト、生成 asset、MusicGen worker 連携用
+- `seedshift-radio-qa-guardrails`: テスト計画、回帰確認、監視、セキュリティ確認用
+- `seedshift-radio-web-ui`: Next.js 画面、SSE 購読、プレイヤー UX、client state 確認用
 
 タスクが合う場合は、これらの skill を前提知識として先に参照してください。

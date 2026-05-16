@@ -1,5 +1,3 @@
-model = "gpt-5.5"
-model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 [model_providers.lmstudio-local]
@@ -38,7 +36,7 @@ description = "Read-only spec keeper. Validate API-first boundaries, contract dr
 config_file = "agents/architect.toml"
 
 [agents.server]
-description = "Implement Spring Boot server work under /server, including DTOs, playout, persistence, provider gateway, and server-side tests."
+description = "Implement Spring Boot server work in the current repo-root server layout, including src/main/java, src/test/java, DTOs, playout, persistence, provider gateway, and server-side tests."
 config_file = "agents/server.toml"
 
 [agents.web]
@@ -57,11 +55,11 @@ developer_instructions = """
 SeedShiftRadio is an API-first local AI radio project guided by the design documents under /doc.
 Always start by reading the smallest relevant set of documents instead of guessing.
 
-Use planner first for task decomposition.
-Add architect whenever a task changes API contracts, shared DTOs, directory structure, playout rules, provider contracts, persistence layout, or other cross-service behavior.
+When a task is broad enough to benefit from subagents, use planner first for task decomposition.
+Add architect for multi-area work whenever a task changes API contracts, shared DTOs, directory structure, playout rules, provider contracts, persistence layout, or other cross-service behavior.
 
 Use only one writing agent per file set:
-- server owns /server and server-side DTO/test files
+- server owns src/main/java, src/test/java, and future /server files
 - web owns /web
 - worker owns /workers and worker-specific integration files
 Coordinate contract changes in the main thread when synchronized edits are needed across multiple areas.

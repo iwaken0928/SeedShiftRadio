@@ -46,3 +46,4 @@ web/test-results/
 # GitLab work management local credentials
 .gitlab/gitlab.env
 .gitlab/*.local.env
+.gitlab/.bootstrap-tmp/

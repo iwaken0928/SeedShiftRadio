@@ -89,21 +89,18 @@
 - レター本文は信頼せず、prompt injection 前提で扱う
 - `radioName`, letter body, prompt 本文, API key, 管理トークンを標準ログへそのまま出さない
 
-## エージェント運用
+## 作業管理とエージェント運用
 
-`.codex/config.toml` では以下の役割を定義しています。
+作業状態、担当主体、優先度、完了確認は GitLab Project Issue / Label / Issue Board を正本とし、`.gitlab/WORK_MANAGEMENT.md` に従います。
+`doc/` は製品仕様と実装順の正本であり、Issue は作業範囲、完了条件、検証結果、残課題を追跡する単位です。
 
-- `planner`: 関連ドキュメントを読み、影響範囲と実行順を整理する
-- `architect`: API first と責務境界の整合を確認する
-- `server`: 現行の `src/main/java`, `src/test/java` と将来の `/server` 実装を担当する
-- `web`: `/web` の実装を担当する
-- `worker`: `/workers` と provider 連携を担当する
-- `ops`: `.gitlab-ci.yml`, `infra/compose`, `infra/containers`, `scripts/ci`, `.codex`, `.agents` など運用・エージェント設定を担当する
-- `qa`: テスト、回帰確認、設計ずれの確認を担当する
+Codex は原則としてメインエージェントが Issue の確認、実装統合、最終検証、GitLab の完了更新まで担当します。
+専門領域の手順は固定サブエージェントではなく `.agents/skills` の project skill を使います。
+サブエージェントは、ユーザーまたは Issue が委任を明示し、重ならないファイル集合へ安全に分割できる場合だけ使用します。
+サブエージェントを使っても GitLab 上に別の担当・状態体系は作らず、統合、最終テスト、commit、Issue 更新はメインエージェントへ戻します。
+範囲外の課題は変更へ混ぜず、既存 Issue を確認してから追加 Issue として追跡します。
 
-ファイル所有が重なる変更は一度に複数エージェントへ書かせず、主担当を決めて進めてください。
-
-`model_reasoning_effort` は `.codex/config.toml` や `.codex/agents/*.toml` で原則固定せず、Codex UI、グローバル設定、起動時の選択に任せます。タスクごとに必要なインテリジェンスを選べる状態を優先してください。
+`model_reasoning_effort` は `.codex/config.toml` で原則固定せず、Codex UI、グローバル設定、起動時の選択に任せます。タスクごとに必要なインテリジェンスを選べる状態を優先してください。
 
 ## ローカル skill
 

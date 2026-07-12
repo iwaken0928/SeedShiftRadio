@@ -20,57 +20,17 @@ project_root_markers = [
   "doc/00_実装ドキュメント一覧.md",
 ]
 
-[features]
-multi_agent = true
-
 [sandbox_workspace_write]
 network_access = true
-
-[agents]
-max_threads = 6
-max_depth = 1
-
-[agents.planner]
-description = "Read-only planner. Read the smallest relevant design documents, identify impacted areas, and propose the execution order before implementation."
-config_file = "agents/planner.toml"
-
-[agents.architect]
-description = "Read-only spec keeper. Validate API-first boundaries, contract drift, and cross-module impact across the server, web UI, and AI workers."
-config_file = "agents/architect.toml"
-
-[agents.server]
-description = "Implement Spring Boot server work in the current repo-root server layout, including src/main/java, src/test/java, DTOs, playout, persistence, provider gateway, and server-side tests."
-config_file = "agents/server.toml"
-
-[agents.web]
-description = "Implement Next.js and React work under /web, including radio playback UI, letters, settings, monitor views, and client state handling."
-config_file = "agents/web.toml"
-
-[agents.worker]
-description = "Implement provider and worker changes under /workers or worker-specific integration layers without taking ownership of unrelated web or server files."
-config_file = "agents/worker.toml"
-
-[agents.ops]
-description = "Implement CI/CD, Podman Compose, container/deploy scripts, local orchestration, and Codex agent or skill maintenance without taking ownership of server, web, or worker feature code."
-config_file = "agents/ops.toml"
-
-[agents.qa]
-description = "Run verification, regression review, and contract checks. Report missing tests, document drift, and operational risks."
-config_file = "agents/qa.toml"
 
 developer_instructions = """
 SeedShiftRadio is an API-first local AI radio project guided by the design documents under /doc.
 Always start by reading the smallest relevant set of documents instead of guessing.
 
-When a task is broad enough to benefit from subagents, use planner first for task decomposition.
-Add architect for multi-area work whenever a task changes API contracts, shared DTOs, directory structure, playout rules, provider contracts, persistence layout, or other cross-service behavior.
-
-Use only one writing agent per file set:
-- server owns src/main/java, src/test/java, and future /server files
-- web owns /web
-- worker owns /workers and worker-specific integration files
-- ops owns .gitlab-ci.yml, infra/compose, infra/containers, scripts/ci, deployment docs, AGENTS.md, .codex, and .agents/skills
-Coordinate contract changes in the main thread when synchronized edits are needed across multiple areas.
+Use GitLab Project Issues, scoped labels, and the Issue Board as the source of truth for work status and ownership. Follow .gitlab/WORK_MANAGEMENT.md.
+Use the current Issue to bound the work, and record out-of-scope findings as existing or new Issues instead of expanding the change silently.
+Keep planning, integration, final verification, and GitLab completion updates in the main agent.
+Use a subagent only when the user or Issue explicitly requests delegation and the work can be split into bounded, non-overlapping file sets. Do not create a second ownership system inside Codex.
 Do not pin model_reasoning_effort in project or agent configs; leave reasoning effort to the Codex UI, global settings, or launch-time choice.
 
 Keep these architectural boundaries:
@@ -83,5 +43,5 @@ Favor degraded continuation over stopping playback.
 Preserve compatibility with the future C# native client when changing shared contracts.
 When behavior changes, update the corresponding document under /doc in the same task.
 Use the local project skills under .agents/skills when they match the task.
-For CI/CD, deploy, Podman Compose, local orchestration, or Codex agent/skill maintenance, use the ops role and the matching local skills.
+For CI/CD, deploy, Podman Compose, local orchestration, or Codex agent/skill maintenance, use the matching local skills.
 """

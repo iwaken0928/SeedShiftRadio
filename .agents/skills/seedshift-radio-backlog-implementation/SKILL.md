@@ -10,7 +10,7 @@ description: Use when working on SeedShiftRadio backlog-driven implementation fr
 - 「未実装機能を特定して実装して」
 - 「設計書と実装管理資料から次にやる項目を選んで」
 - 「広い再調査は避けて、関連設計だけ見て進めて」
-- 「必要ならサブエージェントに割り振って」
+- 「GitLab Issue を起点に残タスクを実装して」
 
 ## 最初に見るドキュメント
 
@@ -28,23 +28,20 @@ description: Use when working on SeedShiftRadio backlog-driven implementation fr
 
 ## ワークフロー
 
-1. `doc/15` から残タスクを 1 つか 2 つ選ぶ。広い棚卸しをやり直さない
+1. GitLab の対象 Issue を確認する。Issue が未指定なら `doc/15` から残タスクを 1 つか 2 つ選び、open Issue との重複を確認する
 2. 選んだ項目に必要な設計書だけ読む。無関係な章まで広げない
 3. 変更境界を `server`, `web`, `worker`, `doc` に分け、主担当を決める
 4. まずコードを通し、次に設計書差分を同じ変更で閉じる
 5. 検証は変更規模に合わせて `typecheck`, unit/service test, Playwright, `git diff --check` を選ぶ
 6. 完了時は「何を選んだか」「何を直したか」「何を確認したか」「残りは何か」を短くまとめる
 
-## サブエージェントの割り振り
+## GitLab 連携
 
-- `planner`: `doc/15` と関連設計から着手候補を絞る
-- `architect`: API first と責務境界の確認が必要な時だけ使う
-- `server`: `src/main/java`, `src/test/java` の実装とテスト
-- `web`: `web` 配下の UI, API client, Playwright, Vitest
-- `worker`: `workers/musicgen` や provider 側
-- `qa`: テスト観点、設計差分、残リスク整理
-
-ファイル所有が重なる変更は複数 agent に同時編集させない。
+- 作業状態、担当主体、優先度は `.gitlab/WORK_MANAGEMENT.md` に従う
+- 着手時は対象 Issue を `status::作業中`、完了時は検証結果を記録して `status::確認待ち` にする
+- commit message には対象 Issue の `refs #<issue_no>` を含める
+- 範囲外の課題は変更へ混ぜず、既存 Issue を確認してから追加 Issue で追跡する
+- サブエージェントはユーザーまたは Issue が明示し、重ならないファイル集合へ分割できる場合だけ使う
 
 ## ガードレール
 

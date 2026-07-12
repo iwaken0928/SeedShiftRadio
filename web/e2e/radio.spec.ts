@@ -101,7 +101,7 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
   await page.route(apiRegExp("/api/assets/audio/.*"), async (route) => {
     await route.fulfill({
       status: 200,
-      body: "stub-audio",
+      body: Buffer.from("UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA==", "base64"),
       contentType: "audio/wav",
     });
   });

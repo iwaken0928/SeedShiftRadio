@@ -6,7 +6,7 @@
 
 ## 2. 採用方針
 
-- フレームワークは `Next.js App Router + TypeScript` とする
+- フレームワークは `Next.js App Router + TypeScript` とし、現行 security baseline は Next.js `15.5.20` 以上とする
 - 初期描画は SSR を使い、再生状態や字幕は Client Component で更新する
 - サーバー状態取得は `TanStack Query`、画面内の瞬間的なUI状態は `Zustand` を使う
 - 音声再生は `HTMLAudioElement` を基本とし、必要時のみ `howler.js` を導入する
@@ -137,6 +137,7 @@
 - Import 時は `schemaVersion` の一致を確認し、`version` は現在の保存済み設定へ合わせる。`apiKeyRef` と `adminTokenRef` は `env:` / `file:` 参照だけ受け付ける
 - `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
 - `Voice Profiles` の作成/編集 UI は後続実装対象とする。Irodori 取り込みの第一段では seed / DB migration と既存 station の `defaultVoiceProfileId` 差し替えで、チャンネルごとに別 voice id / style preset を割り当てられる状態を優先する
+- `/letters` の管理 inbox、`/settings`、`/monitor` は公開 UI と分離し、production では server-side session を確立した利用者だけが表示・操作できるようにする。`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` は E2E と閉じた開発環境だけの暫定導線であり、公開 build へ埋め込まない。移行は GitLab `P0-11` で追跡する
 
 ## 8. 監視画面
 
@@ -154,7 +155,7 @@
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
 - worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
-- Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する
+- Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する。upstream の chunk-level SSE 対応と現行 SeedShiftRadio adapter の有効化状態は分けて表示する
 - `providerHealth.message`, `baseUrl`, `provider_job.externalRef`, audit `summary` は分類済みの短い表示に限り、秘密値や本文らしい key-value / credential URL は Web 側でも `[redacted]` に置き換える
 
 ## 9. 状態管理

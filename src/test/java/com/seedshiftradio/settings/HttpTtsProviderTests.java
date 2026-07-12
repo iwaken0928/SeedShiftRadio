@@ -133,6 +133,32 @@ class HttpTtsProviderTests {
 		assertFalse(audio.metadata().containsValue("こんにちは。"));
 	}
 
+	@Test
+	void placeholderProviderWinsOverVoiceHintAdapter() {
+		HttpTtsProvider provider = provider();
+
+		TtsProvider.SynthesizedAudio audio = provider.synthesize(
+				new ProviderRegistry.ResolvedProvider(
+						ProviderType.TTS,
+						"tts",
+						"seedshift-placeholder",
+						"http://127.0.0.1:1",
+						"/health",
+						100,
+						List.of("TTS_GEN"),
+						false),
+				queueItem(),
+				directive("VOICEVOX:4:normal"));
+
+		assertEquals(true, audio.metadata().get("placeholder"));
+		assertEquals("seedshift-placeholder", audio.metadata().get("providerKey"));
+		assertEquals("VOICEVOX:4:normal", audio.metadata().get("voiceHint"));
+		assertEquals('R', audio.audioBytes()[0]);
+		assertEquals('I', audio.audioBytes()[1]);
+		assertEquals('F', audio.audioBytes()[2]);
+		assertEquals('F', audio.audioBytes()[3]);
+	}
+
 	private HttpTtsProvider provider() {
 		return new HttpTtsProvider(new PlaceholderTtsProvider(new PlaceholderAudioFactory()), objectMapper);
 	}

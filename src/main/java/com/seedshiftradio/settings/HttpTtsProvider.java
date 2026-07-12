@@ -163,6 +163,9 @@ public class HttpTtsProvider implements TtsProvider {
 		if (ADAPTER_IRODORI.equals(configured) || ADAPTER_VOICEVOX.equals(configured)) {
 			return configured;
 		}
+		if (PLACEHOLDER_PROVIDER_KEY.equals(provider.providerKey())) {
+			return "PLACEHOLDER";
+		}
 		VoiceHint voiceHint = VoiceHint.parse(directive.voiceHint());
 		if (isIrodoriEngine(voiceHint.engine())
 				|| provider.capabilities().contains("IRODORI_TTS")
@@ -173,9 +176,6 @@ public class HttpTtsProvider implements TtsProvider {
 				|| provider.capabilities().contains("VOICEVOX")
 				|| provider.providerKey().toLowerCase(Locale.ROOT).contains("voicevox")) {
 			return ADAPTER_VOICEVOX;
-		}
-		if (PLACEHOLDER_PROVIDER_KEY.equals(provider.providerKey())) {
-			return "PLACEHOLDER";
 		}
 		return "PLACEHOLDER";
 	}

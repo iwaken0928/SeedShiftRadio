@@ -162,7 +162,7 @@
 
 #### 4.7.3 推奨採用案（具体）
 
-- **Server Framework**: Spring Boot 3.5系を第一候補
+- **Server Framework**: Spring Boot 4.x。現行実装は `4.0.4` で、公式 stable `4.1.0` への追随可否を GitLab `P2-06` で判断する
 - **Web API**: Spring MVC（REST）
 - **Realtime**: まず SSE、必要箇所のみ WebSocket
 - **AI連携**: Spring AI は LLM抽象化で活用し、TTS / MusicGen は独自Provider I/Fで統合
@@ -171,10 +171,10 @@
 
 #### 4.7.4 各採用理由
 
-##### Server: Spring Boot 3.5系
+##### Server: Spring Boot 4.x
 - Java製の stand-alone / production-grade アプリを作りやすく、組み込みWebサーバー、外部設定、ヘルスチェック、メトリクス等が揃う
 - Spring MVC / WebSocket / Security / Data など関連資産が厚い
-- 4.0系も利用可能だが、初回構築では追従コストを抑えるため、まずは3.5系を基準にする
+- 現行実装は Spring Boot `4.0.4` を基準とし、`4.1.0` 追随は互換試験と保守方針を GitLab `P2-06` で確定してから行う
 
 ##### AI連携: Spring AI + 独自Provider
 - LLM接続は Spring AI の portable API を活かせる
@@ -194,7 +194,7 @@
 #### 4.7.5 実装開始時の標準スタック案
 
 - Java 21
-- Spring Boot 3.5.x
+- Spring Boot 4.0.4。4.1.x への更新は互換試験と追随方針を確定してから行う
 - Spring MVC
 - Spring WebSocket（必要時）
 - Spring Actuator
@@ -473,7 +473,7 @@
 #### D. Irodori-TTS系
 - 日本語 TTS 向けのローカル生成AIで、参照音声による声質固定と style / emotion 制御を活用しやすい
 - `Irodori-TTS-Server` を使うと OpenAI Text-to-Speech API 互換の HTTP server として扱えるため、Java Server からの Provider 連携に載せやすい
-- ラジオパーソナリティの声質・雰囲気づくりでは有力だが、streaming synthesis は未実装で完成音声を返す方式のため、先行生成と cache を前提にする
+- ラジオパーソナリティの声質・雰囲気づくりでは有力である。Irodori-TTS-Server は `stream_format=sse` による chunk-level SSE を提供するが、現行 SeedShiftRadio adapter は完成 WAV の先行生成だけを使う
 - 参照音声は本人または権利者の明示同意があるものに限定し、声優・著名人・実在個人の無断模倣や誤認を招く利用は禁止する
 - 漢字読みは読み辞書・かな化で補正し、VOICEVOX などの安定 fallback を残す
 
@@ -805,8 +805,8 @@
 1. Web UIをSSR寄りで行くか、SPA寄りで行くか
 2. クライアント再生方式を「セグメントURL逐次再生」で始めるか、「疑似ストリーミング」で始めるか
 3. MusicGen連携を HTTP API / CLI / ワーカープロセス のどれで統一するか
-4. DBを SQLite で進めるか、PostgreSQL 等に寄せるか
-5. 認証をMVPに含めるか
+4. Web 管理 UI の認証を、browser bundle へ管理トークンを含めない方式でどう実装するか
+5. Spring Boot 4.1.x へ追随する時期と互換試験範囲をどう定めるか
 6. 生成済み音楽の著作権・利用ルールをアプリ内でどこまで案内するか
 
 ---

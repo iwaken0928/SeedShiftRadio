@@ -15,9 +15,10 @@
 ## 3. 認証/認可方針
 
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
-- 設定更新、局管理、番組編成管理、監視 API は `X-Admin-Token` による最小保護を推奨する
-- `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `POST /api/letters/public/history`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/playback-events`, `GET /api/health` は一般操作 API として扱う
+- 設定更新、局管理、番組編成管理、レター管理、履歴参照、監視 API は `X-Admin-Token` を要求する
+- `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `POST /api/letters/public/history`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/play`, `POST /api/radio/stop`, `POST /api/radio/playback-events`, `POST /api/clients/capabilities`, `GET /api/assets/audio/{assetId}.wav`, `GET /api/stream/events`, `GET /api/health` は一般操作 API として扱う
 - `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `GET /api/letters/{id}`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/play-history`, `GET /api/play-history/{id}`, `GET /api/monitor/summary`, `GET /api/monitor/assets/consistency` は `X-Admin-Token` 前提とする
+- Web 管理 UI は管理トークンを `NEXT_PUBLIC_*` へ埋め込まない。現行開発導線の browser token は production 未対応であり、server-side session と proxy injection への移行を GitLab `P0-11` で追跡する
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
 ## 4. 主要DTO
@@ -589,7 +590,7 @@ Response:
 }
 ```
 
-### 6.3.4 `GET /play-history`
+### 6.3.5 `GET /play-history`
 
 管理者向けの放送履歴一覧 API とする。`X-Admin-Token` が必要。
 
@@ -627,7 +628,7 @@ Response:
 ]
 ```
 
-### 6.3.5 `GET /play-history/{id}`
+### 6.3.6 `GET /play-history/{id}`
 
 管理者向けの放送履歴詳細 API とする。`X-Admin-Token` が必要。
 
@@ -1016,7 +1017,7 @@ Response:
             "VOICE_CLONE",
             "STYLE_EMOJI",
             "LONG_TEXT_CHUNKING",
-            "NO_STREAMING"
+            "CHUNK_SSE_AVAILABLE"
           ],
           "adapter": "IRODORI_OPENAI_TTS",
           "apiKeyRef": "env:IRODORI_TTS_API_KEY",
@@ -1133,7 +1134,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.12 Provider Health
 
-`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。VOICEVOX では `adapter`, `responseFormat`, `streamingSupported=false` を返します。Irodori-TTS では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `voiceRefStatus`, `streamingSupported=false`, `models` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。VOICEVOX では `adapter`, `responseFormat`, `streamingSupported=false` を返します。Irodori-TTS-Server 自体は `stream_format=sse` を提供しますが、現行 SeedShiftRadio adapter は完成 WAV だけを扱うため `streamingSupported=false` を返します。`capabilities` の `CHUNK_SSE_AVAILABLE` は upstream 能力、`streamingSupported` は現行 adapter の有効化状態を表します。Irodori-TTS の metadata には `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `voiceRefStatus`, `models` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
 
 ```json
 {

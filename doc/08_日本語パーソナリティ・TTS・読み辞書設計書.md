@@ -108,6 +108,8 @@ Web では主にデバッグ表示用、Native では実行用とする。
 
 調査日: 2026-05-16
 
+再確認日: 2026-07-12
+
 参照した一次情報:
 
 - `Aratako/Irodori-TTS-500M-v3`: https://huggingface.co/Aratako/Irodori-TTS-500M-v3
@@ -129,10 +131,11 @@ Web では主にデバッグ表示用、Native では実行用とする。
 - v3 base では自動 duration prediction が入り、従来より `seconds` の手動指定に依存しにくい
 - Irodori-TTS-Server は `POST /v1/audio/speech` を提供し、OpenAI 互換 TTS adapter として接続しやすい
 - 長文 chunking と `wav`, `mp3`, `flac`, `opus`, `aac`, `pcm` の response format を扱える
+- `stream_format=sse` により、文ごとの `audio_chunk` と終端 `done` を返す chunk-level SSE を扱える
 
 制約と注意点:
 
-- streaming synthesis は未実装で、1 request は完成音声を返す方式である。ライブ発話の逐次 streaming ではなく、先行生成と cache 前提で使う
+- OpenAI SDK の通常の streaming response は完成音声の転送だが、Irodori-TTS-Server は別途 `stream_format=sse` による chunk-level SSE を提供する。現行 SeedShiftRadio adapter はこの mode を使わず、完成 WAV の先行生成と cache を維持する
 - 既定では同時 synthesis 1 件の queue 運用であり、モデル読み込み中や slot 待ち timeout では HTTP 503 になりうる
 - NVIDIA GPU が実用上推奨される。CPU でも動く可能性はあるが、ラジオ再生の安定運用では `ttsAheadCount` と cache hit を厚めにする
 - 漢字読み精度は同規模 TTS と比べて弱い旨が model card に明記されているため、複雑な漢字や固有名詞は読み辞書・かな化で補正する
@@ -144,6 +147,7 @@ Web では主にデバッグ表示用、Native では実行用とする。
 - `IRODORI_TTS` は server-side TTS の高品質 provider として採用候補に昇格し、現行 server adapter は Irodori-TTS-Server の OpenAI互換 `/v1/audio/speech` を呼び出す
 - `VOICEVOX` は軽量・安定 fallback として残し、現行 server adapter は `/audio_query` から `/synthesis` の順に WAV を生成する
 - 初期 adapter は `Irodori-TTS-Server` の OpenAI互換 API に限定し、Java Server から Irodori の Python CLI を直接実行しない
+- chunk-level SSE を採用する場合も Web へ Provider 固有 event を直接流さず、Server の `QueueItem` と asset 契約へ正規化する
 - `voice_profile.speakerKey` は Irodori server の voice id、`styleKey` は station 側 style preset、`speed` は OpenAI互換 API の `speed` に対応させる
 - 局ごとに異なる Irodori voice id / reference voice / style preset を割り当て、深夜局は落ち着いた声、朝局は明るい声、ニュース寄り局は抑制した声、のように分離してよい
 - `pitch` / `volume` は Irodori-TTS-Server の互換 API では直接効かない可能性があるため、初期は保持のみとし、必要時に post-process または engine option へ拡張する

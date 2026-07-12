@@ -68,7 +68,18 @@ $issues = @(
     @{ id = 'P0-05a'; title = 'Irodori 読み・style safety test を追加する'; area = 'area::server'; purpose = 'かな補正、style allowlist、letter由来token遮断をgolden testで固定する。'; scope = 'JapaneseScriptNormalizer、PronunciationDictionaryService、PersonaStyleResolver、JapaneseQualityGuard'; docs = 'doc/06、doc/08、doc/12、doc/14、doc/15' },
     @{ id = 'P0-06'; title = 'MusicGen worker に実モデル backend を追加する'; area = 'area::worker'; purpose = 'deterministic backend以外でWAVを生成し、実際に聴けるMVPへ進める。'; scope = 'workers/musicgen、worker backend、生成asset'; docs = 'doc/07、doc/09、doc/11、doc/15' },
     @{ id = 'P0-09'; title = 'ACE-Step 運用設定を compose・settings・docs へ接続する'; area = 'area::ops'; purpose = 'ServerからACE-StepまたはMusicGen workerへ疎通できる運用経路を整える。'; scope = 'infra/compose、settings、worker接続、運用手順'; docs = 'doc/07、doc/09、doc/11、doc/16、doc/17' },
-    @{ id = 'P2-06'; title = 'Spring Boot 4.0.4 の採用理由と追随方針を明記する'; area = 'area::architecture'; purpose = 'Spring Boot versionの採用根拠と更新判断を設計・運用資料へ残す。'; scope = '依存version方針、更新手順、互換性確認'; docs = 'doc/01、doc/11、doc/15' }
+    @{ id = 'P2-06'; title = 'Spring Boot 4.1.0 追随可否と更新方針を確定する'; area = 'area::architecture'; kind = 'kind::docs'; purpose = '現行4.0.4から公式stable 4.1.0へ追随するかを判断し、採用根拠と更新手順を設計・運用資料へ残す。'; scope = '依存version方針、更新手順、互換性確認'; docs = 'doc/00、doc/01、doc/11、doc/15'; status = 'status::着手可能' },
+    @{ id = 'P0-10'; title = 'TTS placeholder fallback の adapter 再選択を修正する'; area = 'area::server'; kind = 'kind::bug'; purpose = '外部TTSが接続不能でもplaceholder fallbackを再選択し、queue warmupと縮退再生を継続する。'; scope = 'HttpTtsProvider、HttpTtsProviderTests、RadioApiTests'; docs = 'doc/05、doc/07、doc/11、doc/14、doc/15'; status = 'status::作業中' },
+    @{ id = 'P0-11'; title = 'Web 管理 API 認証を browser 非露出の session 方式へ移行する'; area = 'area::architecture'; kind = 'kind::bug'; purpose = 'NEXT_PUBLIC管理トークンを廃止し、productionの設定・監視・レター管理画面を秘密値非露出で利用可能にする。'; scope = 'web admin login/session、api-proxy、Server認証、compose、smoke、E2E'; docs = 'doc/02、doc/03、doc/11、doc/16、doc/17'; status = 'status::着手可能' },
+    @{ id = 'P0-12'; title = 'Next.js 15.5.20 へ更新して production advisory を解消する'; area = 'area::web'; kind = 'kind::maintenance'; purpose = 'Next.js 15.5.14に残るServer Components DoS、proxy bypass、SSRF等のproduction advisoryを同一minorの修正版で解消する。'; scope = 'web/package.json、web/package-lock.json、typecheck、Vitest、Playwright、npm audit'; docs = 'doc/03、doc/11、doc/14、doc/15'; status = 'status::作業中' },
+    @{ id = 'P1-17'; title = 'VoiceProfile 管理 UI を追加する'; area = 'area::web'; purpose = '局別VoiceProfileを作成・編集し、Irodori voice、style、同意参照を安全に割り当てられるようにする。'; scope = 'web/settings、VoiceProfile API、redaction、E2E'; docs = 'doc/02、doc/03、doc/04、doc/08'; status = 'status::未着手'; depends = 'P0-02b、P0-02c' },
+    @{ id = 'P1-18'; title = 'OpenAPI 契約差分と認証マトリクスを CI で検査する'; area = 'area::architecture'; kind = 'kind::maintenance'; purpose = 'Controller、OpenAPI、doc/02のendpoint・DTO・認証区分のずれを自動検出する。'; scope = 'springdoc schema、contract snapshot、docs check、CI'; docs = 'doc/02、doc/10、doc/11、doc/14'; status = 'status::着手可能' },
+    @{ id = 'P1-19'; title = '監査イベントを永続化して再起動後も追跡可能にする'; area = 'area::server'; purpose = 'SSE履歴だけに依存する監査summaryを永続化し、設定・局切替・Provider縮退を追跡可能にする。'; scope = 'audit event migration、service、monitor API、retention、redaction'; docs = 'doc/04、doc/11、doc/15'; status = 'status::着手可能' },
+    @{ id = 'P1-20'; title = 'config.json schema migration と backup・restore を実装する'; area = 'area::server'; kind = 'kind::maintenance'; purpose = 'schemaVersion変更時の安全な移行、backup、restore、失敗時rollbackを実装する。'; scope = 'RadioSettingsStore、SettingsService、config backup、migration test、runbook'; docs = 'doc/04、doc/11、doc/17'; status = 'status::着手可能' },
+    @{ id = 'P1-21'; title = '読み辞書を永続化して管理 UI から編集可能にする'; area = 'area::server'; purpose = 'hard-coded共通辞書をglobal・station・persona層へ拡張し、読み補正を運用可能にする。'; scope = 'pronunciation dictionary DB/API、resolver優先順位、settings UI、test'; docs = 'doc/02、doc/03、doc/04、doc/08'; status = 'status::着手可能' },
+    @{ id = 'P1-22'; title = 'stale provider job の回収と再試行方針を実装する'; area = 'area::server'; kind = 'kind::maintenance'; purpose = 'process停止やtimeoutでRUNNINGに残ったprovider_jobを検出し、失敗確定または安全な再投入へ収束させる。'; scope = 'ProviderJobService、cleanup job、retry policy、monitor metrics'; docs = 'doc/07、doc/09、doc/11'; status = 'status::未着手'; depends = 'P0-05' },
+    @{ id = 'P2-11'; title = '生成物を追跡対象から除外しローカル起動ガイドを正本化する'; area = 'area::ops'; kind = 'kind::maintenance'; purpose = 'pycacheとtsbuildinfoをGit管理から外し、ignored HELP.mdをPodman前提のtracked guideにする。'; scope = '.gitignore、HELP.md、web/tsconfig.tsbuildinfo、workers/musicgen/**/__pycache__'; docs = 'doc/00、doc/11、doc/15'; status = 'status::作業中' },
+    @{ id = 'P2-12'; title = 'C# Native Client 共有契約 test harness を追加する'; area = 'area::architecture'; purpose = 'REST、SSE、SpeechDirective、playback-eventsの互換性をNative Client実装前に固定する。'; scope = 'OpenAPI/SSE fixture、DTO contract test、reconnect scenario'; docs = 'doc/02、doc/05、doc/10、doc/11'; status = 'status::未着手'; depends = 'P1-18' }
 )
 
 try {
@@ -105,12 +116,21 @@ try {
     # opened / closed の両方を取得したい場合は state を省略する。
     $existingIssues = @(Invoke-GitLabApi GET 'issues?per_page=100')
     foreach ($issue in $issues) {
-        if ($existingIssues.title -match "^\[$([regex]::Escape($issue.id))\]") {
-            Write-Host "SKIP issue $($issue.id)"
+        $expectedTitle = "[$($issue.id)] $($issue.title)"
+        $existingIssue = $existingIssues | Where-Object title -match "^\[$([regex]::Escape($issue.id))\]" | Select-Object -First 1
+        if ($existingIssue) {
+            if ($issue.id -eq 'P2-06' -and $existingIssue.title -ne $expectedTitle) {
+                $updated = Invoke-GitLabApi PUT "issues/$($existingIssue.iid)" @{ title = $expectedTitle }
+                Write-Host "UPDATE issue #$($updated.iid) $($issue.id)"
+            } else {
+                Write-Host "SKIP issue $($issue.id)"
+            }
             continue
         }
         $priority = $issue.id.Split('-')[0]
-        $kind = if ($issue.id -eq 'P2-06') { 'kind::docs' } else { 'kind::feature' }
+        $kind = if ($issue.ContainsKey('kind')) { $issue.kind } else { 'kind::feature' }
+        $status = if ($issue.ContainsKey('status')) { $issue.status } else { 'status::着手可能' }
+        $depends = if ($issue.ContainsKey('depends')) { $issue.depends } else { 'なし' }
         $description = @"
 ## 目的
 
@@ -123,6 +143,10 @@ $($issue.scope)
 ## 参照資料
 
 $($issue.docs)
+
+## 依存 Issue
+
+$depends
 
 ## 作業内容
 
@@ -148,13 +172,13 @@ $($issue.docs)
 
 - 現在チェックアウト中のbranchで作業する
 - branch作成・checkoutは、ユーザーまたはIssueで明示された場合のみ行う
-- commit messageに `refs #<issue_no>` を含める
+- commit message に refs #<issue_no> を含める
 - 人間の確認後にIssueをcloseする
 "@
         $created = Invoke-GitLabApi POST 'issues' @{
-            title = "[$($issue.id)] $($issue.title)"
+            title = $expectedTitle
             description = $description
-            labels = "$kind,$($issue.area),priority::$priority,status::着手可能,agent::codex"
+            labels = "$kind,$($issue.area),priority::$priority,$status,agent::codex"
         }
         Write-Host "CREATE issue #$($created.iid) $($issue.id)"
         $existingIssues += $created

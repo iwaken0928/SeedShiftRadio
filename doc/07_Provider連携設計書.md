@@ -96,7 +96,8 @@ request mapping:
 
 重要な制約:
 
-- streaming synthesis は使えない。OpenAI SDK 側に streaming response 風の API があっても、Irodori server 内部では完成音声を生成して返す
+- Irodori-TTS-Server は `stream_format=sse` で chunk-level SSE を提供する。OpenAI SDK の通常の streaming response は完成音声を逐次転送するだけなので、両者を区別する
+- 現行 SeedShiftRadio adapter は `stream_format=sse` を使わず、完成 WAV を Server 管理 asset として保存する。chunk-level SSE の採用可否は GitLab `P0-02b` で判断する
 - 既定の最大同時 synthesis は 1 件で、混雑や model load timeout は 503 として返りうる
 - `voice: "none"` や無参照発話は可能だが、ラジオパーソナリティ用途では声質の再現性が落ちるため、承認済み reference voice を持つ `VoiceProfile` を優先する
 - VoiceDesign v3 は未公開のため、caption-conditioned voice design は v2 VoiceDesign checkpoint を別 provider profile として将来追加する
@@ -198,7 +199,7 @@ Irodori の設定例:
             "VOICE_CLONE",
             "STYLE_EMOJI",
             "LONG_TEXT_CHUNKING",
-            "NO_STREAMING"
+            "CHUNK_SSE_AVAILABLE"
           ],
           "adapter": "IRODORI_OPENAI_TTS",
           "apiKeyRef": "env:IRODORI_TTS_API_KEY",
@@ -238,7 +239,7 @@ Provider ごとに以下を持つ。
 - `message`
 - `capabilities`
 - `metadata`: ACE-Step では adapter、profile id、queue stats、model 一覧など。prompt / lyrics / 秘密値は含めない
-- `metadata`: Irodori では adapter、model id、response format、chunking enabled、concurrency limit、queue timeout、voiceRef status など。参照音声の実ファイル path、個人名、本文、秘密値は含めない
+- `metadata`: Irodori では adapter、model id、response format、chunking enabled、concurrency limit、queue timeout、voiceRef status、upstream chunk SSE 能力、現行 adapter の streaming 有効状態など。参照音声の実ファイル path、個人名、本文、秘密値は含めない
 
 `metadata` と `message` は診断用の短い状態値に限定する。Web は provider 契約違反の payload が混ざった場合も、secret / prompt / lyrics / letter body / radioName / raw response らしい key や値を redaction し、worker status detail は許可済み metadata key の短い値だけを表示する。
 

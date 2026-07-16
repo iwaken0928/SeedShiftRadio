@@ -138,6 +138,22 @@ server-unit:
       "${PODMAN_TEST_JAVA_IMAGE}"
       sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew test'
 
+api-contract:
+  extends: .test-job
+  stage: test
+  script:
+    - podman --remote pull "${PODMAN_TEST_JAVA_IMAGE}"
+    - >
+      podman --remote run --rm --pull=never
+      --userns=keep-id
+      --security-opt=label=disable
+      -e HOME=/tmp/home
+      -e GRADLE_USER_HOME=/workspace/.gradle
+      -v "${CI_PROJECT_DIR}:/workspace"
+      -w /workspace
+      "${PODMAN_TEST_JAVA_IMAGE}"
+      sh -lc 'mkdir -p "$HOME" && chmod +x ./gradlew && ./gradlew apiContractTest'
+
 server-docker:
   extends: .test-job
   stage: test
@@ -416,6 +432,7 @@ pipeline-docs-check:
     - test -f doc/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
     - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|CI_REGISTRY|MUSICGEN_DATA_VOLUME" doc/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "api-contract|apiContractTest|openapi.sha256" doc/02_API仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/16_パイプライン・コンテナデプロイ仕様書.md doc/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:
   extends: .test-job

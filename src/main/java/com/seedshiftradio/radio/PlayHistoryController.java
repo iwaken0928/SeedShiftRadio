@@ -9,12 +9,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.seedshiftradio.common.config.OpenApiConfig;
 import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.domain.PlayHistoryResultStatus;
 import com.seedshiftradio.radio.PlayHistoryDtos.PlayHistoryResponse;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 @RestController
 @RequestMapping("/api/play-history")
+@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 public class PlayHistoryController {
 
 	private final PlayHistoryQueryService playHistoryQueryService;

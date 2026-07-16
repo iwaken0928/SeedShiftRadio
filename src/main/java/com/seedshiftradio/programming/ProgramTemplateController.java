@@ -11,12 +11,16 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.seedshiftradio.common.config.OpenApiConfig;
 import com.seedshiftradio.common.security.AdminApiGuard;
+
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 
 import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api/program-templates")
+@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 public class ProgramTemplateController {
 
 	private final AdminApiGuard adminApiGuard;

@@ -53,6 +53,7 @@ dependencies {
 	runtimeOnly 'org.flywaydb:flyway-database-postgresql'
 	runtimeOnly 'org.postgresql:postgresql'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
@@ -61,8 +62,23 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform {
-		excludeTags 'docker'
+		excludeTags 'docker', 'api-contract'
 	}
+}
+
+tasks.register('apiContractTest', Test) {
+	group = 'verification'
+	description = 'Checks the OpenAPI snapshot, authentication matrix, and API design document.'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'api-contract'
+	}
+	shouldRunAfter tasks.test
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('apiContractTest')
 }
 
 tasks.register('dockerTest', Test) {

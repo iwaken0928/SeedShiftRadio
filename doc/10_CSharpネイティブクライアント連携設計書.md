@@ -93,6 +93,7 @@ public interface INativeVoiceAdapter
 ## 9. 実装開始条件
 
 - `SpeechDirective` 契約が Server で安定している
+- `/api/openapi` の SHA-256 snapshot、Spring MVC handler、`doc/02` の認証マトリクスを比較する `apiContractTest` が成功している
 - Native で扱う話者と voiceHint の対応表が定義されている
 - ローカルエンジンのライセンス条件が確認済みである
 - Irodori-TTS を Client-side で使う場合は、参照音声の同意・ライセンス、保存場所、外部公開しない bind 設定が確認済みである

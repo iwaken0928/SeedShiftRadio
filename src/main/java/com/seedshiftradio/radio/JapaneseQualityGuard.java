@@ -2,11 +2,19 @@ package com.seedshiftradio.radio;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
 @Service
 public class JapaneseQualityGuard {
+
+	private static final Pattern TTS_CONTROL_TOKEN = Pattern.compile(
+			"(?i)</?(?:speak|prosody|break|emphasis|voice|style|emotion|tempo)[^>]*>"
+					+ "|[\\[\\{]\\s*(?:style|emotion|speaker|voice|tempo|speed|pause|スタイル|感情|話速|声)\\s*[:=][^\\]\\}]*[\\]\\}]"
+					+ "|\\b(?:style|emotion|speaker|voice|tempo|speed|pause)\\s*[:=]\\s*[A-Za-z0-9_.-]+"
+					+ "|(?:スタイル|感情|話速|声)\\s*[:=]\\s*[\\p{L}\\p{N}_.-]+");
+	private static final Pattern EMOJI_CONTROL_CHARACTERS = Pattern.compile("[\\p{So}\\p{Sk}\\p{Cf}\\x{FE0F}\\p{Cn}]");
 
 	public QualityResult inspect(String normalizedText, ScriptGenerationContext context) {
 		List<String> safetyFlags = new ArrayList<>();
@@ -19,6 +27,13 @@ public class JapaneseQualityGuard {
 		if (context != null && context.letter() != null) {
 			safetyFlags.add("LETTER_SOURCE");
 		}
+		String withoutControlTokens = removeTtsControlTokens(guarded);
+		if (!withoutControlTokens.equals(guarded)) {
+			guarded = withoutControlTokens;
+			safetyFlags.add(context != null && context.letter() != null
+					? "LETTER_CONTROL_TOKEN_REMOVED"
+					: "TTS_CONTROL_TOKEN_REMOVED");
+		}
 		String masked = maskPersonalInformation(guarded);
 		if (!masked.equals(guarded)) {
 			guarded = masked;
@@ -29,6 +44,11 @@ public class JapaneseQualityGuard {
 			safetyFlags.add("TRUNCATED");
 		}
 		return new QualityResult(guarded.replaceAll("\\s+", " ").trim(), List.copyOf(safetyFlags));
+	}
+
+	private String removeTtsControlTokens(String value) {
+		String withoutTextTokens = TTS_CONTROL_TOKEN.matcher(value).replaceAll(" ");
+		return EMOJI_CONTROL_CHARACTERS.matcher(withoutTextTokens).replaceAll(" ");
 	}
 
 	private String maskPersonalInformation(String value) {

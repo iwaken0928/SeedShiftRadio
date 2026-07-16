@@ -16,10 +16,50 @@
 
 - MVP の一般操作 API は同一 LAN / localhost 利用を前提に無認証を許容する
 - 設定更新、局管理、番組編成管理、レター管理、履歴参照、監視 API は `X-Admin-Token` を要求する
-- `GET /api/stations`, `GET /api/stations/{id}`, `POST /api/letters`, `POST /api/letters/public/history`, `GET /api/radio/*`, `POST /api/radio/tune`, `POST /api/radio/play`, `POST /api/radio/stop`, `POST /api/radio/playback-events`, `POST /api/clients/capabilities`, `GET /api/assets/audio/{assetId}.wav`, `GET /api/stream/events`, `GET /api/health` は一般操作 API として扱う
-- `POST|PUT /api/stations*`, `GET|POST|PUT /api/program-templates*`, `GET|PUT /api/stations/{id}/programming`, `POST /api/stations/{id}/programming/preview`, `GET /api/letters`, `GET /api/letters/{id}`, `POST /api/letters/{id}/status`, `POST /api/letters/{id}/reply`, `GET /api/play-history`, `GET /api/play-history/{id}`, `GET /api/monitor/summary`, `GET /api/monitor/assets/consistency` は `X-Admin-Token` 前提とする
+- 認証区分は次の表、`src/test/resources/contracts/api-auth-matrix.json`、生成 OpenAPI の `security` を一致させる
+- `PUBLIC` は `X-Admin-Token` 不要、`ADMIN` は `X-Admin-Token` 必須を表す
 - Web 管理 UI は管理トークンを `NEXT_PUBLIC_*` へ埋め込まない。現行開発導線の browser token は production 未対応であり、server-side session と proxy injection への移行を GitLab `P0-11` で追跡する
 - 将来 `Spring Security` を導入しても DTO を崩さない
+
+| Method | Path | Access |
+|---|---|---|
+| `GET` | `/api/assets/audio/{assetId}.wav` | `PUBLIC` |
+| `POST` | `/api/clients/capabilities` | `PUBLIC` |
+| `GET` | `/api/health` | `PUBLIC` |
+| `GET` | `/api/letters` | `ADMIN` |
+| `POST` | `/api/letters` | `PUBLIC` |
+| `GET` | `/api/letters/{id}` | `ADMIN` |
+| `POST` | `/api/letters/{id}/reply` | `ADMIN` |
+| `POST` | `/api/letters/{id}/status` | `ADMIN` |
+| `POST` | `/api/letters/public/history` | `PUBLIC` |
+| `GET` | `/api/monitor/assets/consistency` | `ADMIN` |
+| `GET` | `/api/monitor/summary` | `ADMIN` |
+| `GET` | `/api/play-history` | `ADMIN` |
+| `GET` | `/api/play-history/{id}` | `ADMIN` |
+| `GET` | `/api/program-templates` | `ADMIN` |
+| `POST` | `/api/program-templates` | `ADMIN` |
+| `GET` | `/api/program-templates/{id}` | `ADMIN` |
+| `PUT` | `/api/program-templates/{id}` | `ADMIN` |
+| `GET` | `/api/radio/next-segment` | `PUBLIC` |
+| `GET` | `/api/radio/next-speech-directive` | `PUBLIC` |
+| `POST` | `/api/radio/play` | `PUBLIC` |
+| `POST` | `/api/radio/playback-events` | `PUBLIC` |
+| `GET` | `/api/radio/program` | `PUBLIC` |
+| `GET` | `/api/radio/queue` | `PUBLIC` |
+| `GET` | `/api/radio/status` | `PUBLIC` |
+| `POST` | `/api/radio/stop` | `PUBLIC` |
+| `POST` | `/api/radio/tune` | `PUBLIC` |
+| `GET` | `/api/settings` | `ADMIN` |
+| `PUT` | `/api/settings` | `ADMIN` |
+| `POST` | `/api/settings/test-connections` | `ADMIN` |
+| `GET` | `/api/stations` | `PUBLIC` |
+| `POST` | `/api/stations` | `ADMIN` |
+| `GET` | `/api/stations/{id}` | `PUBLIC` |
+| `PUT` | `/api/stations/{id}` | `ADMIN` |
+| `GET` | `/api/stations/{id}/programming` | `ADMIN` |
+| `PUT` | `/api/stations/{id}/programming` | `ADMIN` |
+| `POST` | `/api/stations/{id}/programming/preview` | `ADMIN` |
+| `GET` | `/api/stream/events` | `PUBLIC` |
 
 ## 4. 主要DTO
 
@@ -1322,6 +1362,11 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 
 ## 10. OpenAPI生成方針
 
-- `/v3/api-docs` を開発時のみ有効化する
+- OpenAPI JSON は `springdoc-openapi` が `/api/openapi` に生成する
+- 管理 API は `components.securitySchemes.adminToken` と operation 単位の `security` で `X-Admin-Token` 必須を表す
 - DTO は Server / Client 両方で再利用しやすいよう JSON naming を固定する
+- `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
+- 現在の OpenAPI snapshot SHA-256 は `8333bf786572b86bf5709b6274e83b23df67fea4852fb1d1fbfe3206bcdfd012` とする
+- 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
+- GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

@@ -12,10 +12,12 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.seedshiftradio.common.config.OpenApiConfig;
 import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.programming.ProgrammingAdminService;
 import com.seedshiftradio.programming.ProgrammingDtos;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 @Validated
@@ -47,6 +49,7 @@ public class StationController {
 	}
 
 	@PostMapping("/stations")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public StationDtos.StationResponse createStation(
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
 			@Valid @RequestBody StationDtos.StationUpsertRequest request) {
@@ -55,6 +58,7 @@ public class StationController {
 	}
 
 	@PutMapping("/stations/{id}")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public StationDtos.StationResponse updateStation(
 			@PathVariable("id") String stationId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
@@ -64,6 +68,7 @@ public class StationController {
 	}
 
 	@GetMapping("/stations/{id}/programming")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public ProgrammingDtos.ProgrammingPolicyResponse getProgramming(
 			@PathVariable("id") String stationId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
@@ -72,6 +77,7 @@ public class StationController {
 	}
 
 	@PutMapping("/stations/{id}/programming")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public ProgrammingDtos.ProgrammingPolicyResponse updateProgramming(
 			@PathVariable("id") String stationId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
@@ -81,6 +87,7 @@ public class StationController {
 	}
 
 	@PostMapping("/stations/{id}/programming/preview")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public ProgrammingDtos.ProgrammingPreviewResponse previewProgramming(
 			@PathVariable("id") String stationId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,

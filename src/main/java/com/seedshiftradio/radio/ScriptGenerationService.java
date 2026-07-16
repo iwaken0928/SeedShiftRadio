@@ -29,6 +29,7 @@ public class ScriptGenerationService {
 	private final JapaneseScriptNormalizer normalizer;
 	private final SentenceSplitter sentenceSplitter;
 	private final PronunciationDictionaryService pronunciationDictionaryService;
+	private final PersonaStyleResolver personaStyleResolver;
 	private final JapaneseQualityGuard qualityGuard;
 	private final ClientCapabilitiesService clientCapabilitiesService;
 	private final PlayoutSessionRepository playoutSessionRepository;
@@ -42,6 +43,7 @@ public class ScriptGenerationService {
 			JapaneseScriptNormalizer normalizer,
 			SentenceSplitter sentenceSplitter,
 			PronunciationDictionaryService pronunciationDictionaryService,
+			PersonaStyleResolver personaStyleResolver,
 			JapaneseQualityGuard qualityGuard,
 			ClientCapabilitiesService clientCapabilitiesService,
 			PlayoutSessionRepository playoutSessionRepository,
@@ -53,6 +55,7 @@ public class ScriptGenerationService {
 		this.normalizer = normalizer;
 		this.sentenceSplitter = sentenceSplitter;
 		this.pronunciationDictionaryService = pronunciationDictionaryService;
+		this.personaStyleResolver = personaStyleResolver;
 		this.qualityGuard = qualityGuard;
 		this.clientCapabilitiesService = clientCapabilitiesService;
 		this.playoutSessionRepository = playoutSessionRepository;
@@ -128,15 +131,27 @@ public class ScriptGenerationService {
 		String normalized = normalizer.normalize(script.text());
 		normalized = sentenceSplitter.splitLongSentences(normalized);
 		JapaneseQualityGuard.QualityResult quality = qualityGuard.inspect(normalized, context);
+		List<PronunciationHint> pronunciationHints = pronunciationDictionaryService.resolveHints(quality.text());
+		String correctedText = pronunciationDictionaryService.applyReadings(quality.text(), pronunciationHints);
+		String emotion = resolveEmotion(context);
+		String tempo = resolveTempo(context);
+		String finalText = context.voiceProfile() == null
+				? correctedText
+				: personaStyleResolver.applyStyle(
+						correctedText,
+						context.voiceProfile().getEngineType(),
+						emotion,
+						tempo,
+						context.voiceProfile().getStyleKey());
 		List<String> safetyFlags = java.util.stream.Stream.concat(script.safetyFlags().stream(), quality.safetyFlags().stream())
 				.distinct()
 				.toList();
 		return new ScriptDirectiveSnapshot(
 				script.text(),
-				quality.text(),
-				pronunciationDictionaryService.resolveHints(quality.text()),
-				resolveEmotion(context),
-				resolveTempo(context),
+				finalText,
+				pronunciationHints,
+				emotion,
+				tempo,
 				resolvePauseHints(context.item()),
 				context.personality() != null
 						? context.personality().getId()
@@ -242,9 +257,13 @@ public class ScriptGenerationService {
 			return null;
 		}
 		String base = context.voiceProfile().getEngineType() + ":" + context.voiceProfile().getSpeakerKey();
-		return context.voiceProfile().getStyleKey() == null || context.voiceProfile().getStyleKey().isBlank()
+		String styleKey = context.voiceProfile().getStyleKey();
+		if ("IRODORI_TTS".equalsIgnoreCase(context.voiceProfile().getEngineType())) {
+			styleKey = personaStyleResolver.resolveStyleKey(styleKey);
+		}
+		return styleKey == null || styleKey.isBlank()
 				? base
-				: base + ":" + context.voiceProfile().getStyleKey();
+				: base + ":" + styleKey;
 	}
 
 	private String sha256(String value) {

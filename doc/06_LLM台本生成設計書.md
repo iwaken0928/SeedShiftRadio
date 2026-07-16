@@ -18,9 +18,11 @@
 2. `ContextAssembler` は必要に応じて `ProgramTemplate` と `ProgramSlot` の制約も集約する
 3. `PromptComposer` が system / developer / task prompt を組み立てる
 4. LLM が JSON 形式で候補台本を返す
-5. `JapaneseScriptNormalizer` が話し言葉へ整形する
-6. `JapaneseQualityGuard` が禁止表現、長文、読みづらさを検査する
-7. 問題があれば修正プロンプトで 1 から 2 回だけ再生成する
+5. `JapaneseScriptNormalizer` が URL、記号、LLM / レター由来の絵文字を除去して話し言葉へ整形する
+6. `SentenceSplitter` が長い文を分割する
+7. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、`style` / `emotion` / `tempo` token を除去する
+8. `PronunciationDictionaryService` が `pronunciationHints` を確定し、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
+9. `PersonaStyleResolver` が Irodori 用の許可済み style だけを最終テキストへ挿入する
 
 ## 4. 入力
 
@@ -139,6 +141,8 @@
 | factual overclaim | 不要な断定口調を抑制する |
 | voice fit | persona と合わない語尾や話速を修正する |
 | tts style safety | Irodori などの style control token がレター本文由来で混入していないか確認する |
+
+`JapaneseQualityGuard` が TTS control token を除去した場合、レター由来では `LETTER_CONTROL_TOKEN_REMOVED`、その他では `TTS_CONTROL_TOKEN_REMOVED` を `safetyFlags` へ追加する。レター由来を示す `LETTER_SOURCE` は併記する。
 
 ## 10. 将来拡張
 

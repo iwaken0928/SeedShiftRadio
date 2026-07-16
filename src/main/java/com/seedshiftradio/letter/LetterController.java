@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.seedshiftradio.common.config.OpenApiConfig;
 import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.letter.LetterDtos.LetterCreateRequest;
@@ -22,6 +23,7 @@ import com.seedshiftradio.letter.LetterDtos.LetterReplyResponse;
 import com.seedshiftradio.letter.LetterDtos.LetterStatusUpdateRequest;
 import com.seedshiftradio.letter.LetterDtos.LetterSummaryResponse;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 @Validated
@@ -38,6 +40,7 @@ public class LetterController {
 	}
 
 	@GetMapping
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public List<LetterSummaryResponse> list(
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
 			@RequestParam(required = false) String stationId,
@@ -54,6 +57,7 @@ public class LetterController {
 	}
 
 	@GetMapping("/{id}")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public LetterDetailResponse get(
 			@PathVariable("id") String letterId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
@@ -62,6 +66,7 @@ public class LetterController {
 	}
 
 	@PostMapping("/{id}/status")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public LetterSummaryResponse updateStatus(
 			@PathVariable("id") String letterId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
@@ -71,6 +76,7 @@ public class LetterController {
 	}
 
 	@PostMapping("/{id}/reply")
+	@SecurityRequirement(name = OpenApiConfig.ADMIN_SECURITY_SCHEME)
 	public LetterReplyResponse addReply(
 			@PathVariable("id") String letterId,
 			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,

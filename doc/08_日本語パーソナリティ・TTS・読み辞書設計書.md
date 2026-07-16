@@ -49,12 +49,13 @@
 
 ## 4. 正規化パイプライン
 
-1. `JapaneseScriptNormalizer` が記号、URL、絵文字を整理する
-2. `PronunciationDictionaryService` が読み変換を行う
-3. `SentenceSplitter` が長文を短文化する
-4. `PersonaStyleResolver` が語尾やテンポを補正する
-5. `TtsVoiceRouter` が適切な Voice Persona を選ぶ
-6. `JapaneseQualityGuard` が最終検査する
+1. `JapaneseScriptNormalizer` が記号、URL、絵文字本体、variation selector、ZWJ、skin-tone modifier を整理する
+2. `SentenceSplitter` が長文を短文化する
+3. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、文字列の TTS control token を除去する
+4. `PronunciationDictionaryService` が `pronunciationHints` を保持しつつ、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
+5. `PersonaStyleResolver` が `IRODORI_TTS` の場合だけ許可済み style emoji を文頭へ挿入する
+
+ASCII の surface は英数字境界で照合し、`AI` を `AIVIS` の一部として誤置換しない。
 
 ## 5. 読み辞書
 
@@ -153,11 +154,14 @@ Web では主にデバッグ表示用、Native では実行用とする。
 - `pitch` / `volume` は Irodori-TTS-Server の互換 API では直接効かない可能性があるため、初期は保持のみとし、必要時に post-process または engine option へ拡張する
 - `referenceVoiceRef` は `dataRoot` 配下の承認済み参照音声、または Irodori server 側 `voices.json` の id を指す。標準ログ、SSE、API response へ参照音声の実パスや個人名を出さない
 - emoji style は LLM が自由に出すのではなく、`PersonaStyleResolver` が `emotion` / `tempo` / `styleKey` から許可済み emoji preset へ変換する
+- `styleKey` の allowlist は `soft` / `gentle` / `calm`=`😌`、`bright` / `cheerful` / `happy` / `lively` / `energetic`=`😄`、`fast`=`⏩`、`slow`=`🐢`、`narration`=`🎙️` とする
+- 明示された `styleKey` が allowlist 外の場合は fail-closed とし、style emoji と `voiceHint` の style 部を付けない。`styleKey` 未指定時だけ構造化済み `emotion`、次に `tempo` から解決する
 
 ### 7.2 Irodori 用の発話整形ルール
 
 - `normalizedText` は Irodori へ渡す最終文字列とし、漢字読みが不安定な語は `pronunciationHints` に基づきかな・カナへ置換する
-- style emoji は文頭または文節単位に限定し、レター本文由来の絵文字をそのまま style control として扱わない
+- style emoji は文頭に限定し、レター本文や LLM 出力由来の絵文字をそのまま style control として扱わない
+- レター由来の絵文字、SSML、`style` / `emotion` / `tempo` 等を除去した場合は `LETTER_SOURCE` と `LETTER_CONTROL_TOKEN_REMOVED`、その他では `TTS_CONTROL_TOKEN_REMOVED` を `safetyFlags` へ保持する
 - 一文は 60 文字程度を上限に保ち、長文は句点・読点・話題境界で分割する
 - `LETTER` 由来の本文は引用ではなく要約を読み上げ、攻撃的表現・個人情報・URL は通常 TTS と同じ正規化ルールで伏せる
 - 参照音声や voice id が失効、未承認、ライセンス不明の場合は Irodori を使わず fallback VoiceProfile へ切り替える

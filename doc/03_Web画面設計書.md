@@ -3,6 +3,7 @@
 ## 1. 目的
 
 本書は MVP の Web UI を設計する。ラジオ画面を主役としつつ、レター、設定、監視の導線を整理する。
+視覚的アイデンティティ、色、typography、spacing、shape、component state の正規仕様はリポジトリ直下の [DESIGN.md](../DESIGN.md) を参照し、本書は画面構成と挙動の正本として扱う。
 
 ## 2. 採用方針
 
@@ -22,9 +23,11 @@
 
 ## 4. レイアウト方針
 
-- PC では 3 カラム構成を標準とする
-- モバイルでは 1 カラム化し、`NowPlaying` と主要操作を最上部へ固定する
+- PC では 12 カラム grid を基準とし、主要領域と補助領域の 7:5 または 8:4、同格情報の 3 等分を画面の情報量に応じて使い分ける
+- モバイルでは 1 カラム化し、`NowPlaying` と主要操作を最上部へ置く。header は brand/navigation と live status の 2 段を基本に圧縮し、主要操作を最初の viewport から追い出さない
 - ラジオ画面は「操作」「現在」「次」を常に同時把握できる配置を優先する
+- 公開画面は余白を広く 1 カード 1 目的、設定・監視画面は editor / health / preview / danger zone を分離した高密度 layout とする
+- 主要な navigation、button、input の操作領域は高さ 44px 以上とし、横スクロールは JSON、ログ、表の明示的な scroll container に限定する
 
 ## 5. ラジオ画面
 
@@ -179,6 +182,8 @@
 - 主要ボタンにショートカットを付与する
 - 字幕はスクリーンリーダー向けに `aria-live="polite"` を利用する
 - 色だけで状態を表現せず、ラベルとアイコンも併用する
+- 現在ページの navigation には `aria-current="page"` を付け、focus-visible を背景上で識別できる 2px 以上の ring で示す
+- `prefers-reduced-motion: reduce` では移動 animation と反復 pulse を停止し、monitor の定期更新でカード全体を再 animation しない
 
 ## 12. 実装メモ
 

@@ -4,7 +4,7 @@
 
 ## 1. 前提
 
-- Java 21
+- JDK 21 以上。ローカルでは JDK 25 などの新しい JDK も利用でき、コンパイル対象は Java 21 (`--release 21`) に固定する
 - Node.js 22 系と npm
 - Python 3.12
 - Podman と Podman Compose

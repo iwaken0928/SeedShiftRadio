@@ -99,14 +99,61 @@ public class StationAdminService {
 		if (!personalityRepository.existsById(personaId)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "指定の人格が存在しません。", java.util.Map.of("languagePersonaId", personaId));
 		}
-		if (!voiceProfileRepository.existsById(voiceProfileId)) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "指定の音声プロファイルが存在しません。", java.util.Map.of("defaultVoiceProfileId", voiceProfileId));
-		}
+		VoiceProfileEntity voiceProfile = voiceProfileRepository.findById(voiceProfileId)
+				.orElseThrow(() -> invalidVoiceProfile(voiceProfileId, "指定の音声プロファイルが存在しません。"));
+		validateVoiceProfile(voiceProfile, voiceProfileId, stationId);
 		if (templateId != null) {
 			ProgramTemplateEntity template = programTemplateRepository.findById(templateId)
 					.orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TEMPLATE", "指定の番組テンプレートが存在しません。", java.util.Map.of("defaultProgramTemplateId", templateId)));
 			validateTemplateScope(template, stationId);
 		}
+	}
+
+	private void validateVoiceProfile(VoiceProfileEntity voiceProfile, String voiceProfileId, String stationId) {
+		String scope = voiceProfile.getScope();
+		boolean global = "GLOBAL".equalsIgnoreCase(scope) && voiceProfile.getStationId() == null;
+		boolean stationScoped = "STATION".equalsIgnoreCase(scope)
+				&& voiceProfile.getStationId() != null
+				&& voiceProfile.getStationId().equals(stationId);
+		if (!global && !stationScoped) {
+			throw invalidVoiceProfile(voiceProfileId, "指定の音声プロファイルはこの局では利用できません。");
+		}
+
+		String referenceVoiceRef = voiceProfile.getReferenceVoiceRef();
+		if (referenceVoiceRef == null) {
+			return;
+		}
+		if (referenceVoiceRef.isBlank()
+				|| voiceProfile.getConsentPolicyRef() == null
+				|| voiceProfile.getConsentPolicyRef().isBlank()
+				|| !isSafeReferenceVoiceRef(referenceVoiceRef)) {
+			throw invalidVoiceProfile(voiceProfileId, "指定の音声プロファイルの参照音声を利用できません。");
+		}
+	}
+
+	private boolean isSafeReferenceVoiceRef(String referenceVoiceRef) {
+		String normalized = referenceVoiceRef.trim();
+		if (!normalized.equals(referenceVoiceRef)
+				|| normalized.startsWith("/")
+				|| normalized.startsWith("\\")
+				|| normalized.matches("^[A-Za-z]:[\\\\/].*")
+				|| normalized.matches("^[A-Za-z][A-Za-z0-9+.-]*:.*")) {
+			return false;
+		}
+		for (String segment : normalized.split("[\\\\/]")) {
+			if ("..".equals(segment)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private ApiException invalidVoiceProfile(String voiceProfileId, String message) {
+		return new ApiException(
+				HttpStatus.BAD_REQUEST,
+				"VALIDATION_ERROR",
+				message,
+				java.util.Map.of("voiceProfileId", voiceProfileId));
 	}
 
 	private void validateTemplateScope(ProgramTemplateEntity template, String stationId) {

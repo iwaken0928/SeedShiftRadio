@@ -34,18 +34,24 @@
 |---|---|
 | `engineType` | `VOICEVOX`, `AIVIS`, `SBV2`, `IRODORI_TTS` など |
 | `scope` | `GLOBAL` / `STATION`。局専用の声か共通利用できる声か |
-| `stationId` | `scope=STATION` の場合の所属局 |
+| `stationId` | `scope=STATION` の場合の所属局。`GLOBAL` では `null` |
 | `providerKey` | 利用する TTS provider key。未指定時は engineType から既定 provider を解決する |
 | `speakerKey` | 話者ID |
 | `styleKey` | スタイルID |
 | `speed` | 話速 |
 | `pitch` | ピッチ |
 | `volume` | 音量 |
-| `providerOptions` | engine 固有の安全な追加設定。Irodori では style preset, emoji style, response format, chunking 方針など |
-| `referenceVoiceRef` | 参照音声を使う engine 用の voice id または dataRoot 相対参照。Irodori では `voices/` 上の voice id を基本にする |
-| `consentPolicyRef` | 参照音声・声質利用の同意、ライセンス、禁止事項への参照 |
+| `providerOptions` | engine 固有の安全な追加設定。Irodori では style preset, emoji style, response format, chunking 方針などの allowlist |
+| `referenceVoiceRef` | 参照音声を使う engine 用の provider voice id または安全な相対参照。Irodori では `voices/` 上の voice id を基本にする |
+| `consentPolicyRef` | 参照音声・声質利用の同意、ライセンス、禁止事項への参照。`referenceVoiceRef` 指定時は必須 |
 | `supportsClientSideTts` | Native 用可否 |
 | `clientAdapterKey` | 将来の VOICEROID 系接続キー |
+
+`VoiceProfileEntity.scope` が `GLOBAL` の場合は `stationId=null`、`STATION` の場合は所属 `stationId` を必須とする。station へ割り当てられるのは `GLOBAL` または同じ station の profile だけであり、他局の `STATION` profile は拒否する。
+
+`referenceVoiceRef` は Provider が管理する voice id、または許可済み data root から解決する安全な相対参照に限定する。絶対 path、URL、`..` による親 directory traversal は拒否する。参照音声を指定する場合は `consentPolicyRef` を必須とし、失効、未承認、ライセンス不明の参照は利用しない。`providerOptions`、`referenceVoiceRef`、`consentPolicyRef` の TTS runtime 反映は `P0-02b` の後続実装とする。
+
+参照音声の実 path、参照元の個人名、同意文書の機微情報は API response、SSE、標準ログへ出さない。
 
 ## 4. 正規化パイプライン
 
@@ -149,10 +155,10 @@ Web では主にデバッグ表示用、Native では実行用とする。
 - `VOICEVOX` は軽量・安定 fallback として残し、現行 server adapter は `/audio_query` から `/synthesis` の順に WAV を生成する
 - 初期 adapter は `Irodori-TTS-Server` の OpenAI互換 API に限定し、Java Server から Irodori の Python CLI を直接実行しない
 - chunk-level SSE を採用する場合も Web へ Provider 固有 event を直接流さず、Server の `QueueItem` と asset 契約へ正規化する
-- `voice_profile.speakerKey` は Irodori server の voice id、`styleKey` は station 側 style preset、`speed` は OpenAI互換 API の `speed` に対応させる
+- `VoiceProfileEntity.speakerKey` は Irodori server の voice id、`styleKey` は station 側 style preset、`speed` は OpenAI互換 API の `speed` に対応させる
 - 局ごとに異なる Irodori voice id / reference voice / style preset を割り当て、深夜局は落ち着いた声、朝局は明るい声、ニュース寄り局は抑制した声、のように分離してよい
 - `pitch` / `volume` は Irodori-TTS-Server の互換 API では直接効かない可能性があるため、初期は保持のみとし、必要時に post-process または engine option へ拡張する
-- `referenceVoiceRef` は `dataRoot` 配下の承認済み参照音声、または Irodori server 側 `voices.json` の id を指す。標準ログ、SSE、API response へ参照音声の実パスや個人名を出さない
+- `referenceVoiceRef` は安全な相対参照で示す承認済み参照音声、または Irodori server 側 `voices.json` の voice id を指す。絶対 path、URL、親 directory traversal を受け付けず、`consentPolicyRef` のない参照は利用しない。標準ログ、SSE、API response へ参照音声の実 path や個人名を出さない
 - emoji style は LLM が自由に出すのではなく、`PersonaStyleResolver` が `emotion` / `tempo` / `styleKey` から許可済み emoji preset へ変換する
 - `styleKey` の allowlist は `soft` / `gentle` / `calm`=`😌`、`bright` / `cheerful` / `happy` / `lively` / `energetic`=`😄`、`fast`=`⏩`、`slow`=`🐢`、`narration`=`🎙️` とする
 - 明示された `styleKey` が allowlist 外の場合は fail-closed とし、style emoji と `voiceHint` の style 部を付けない。`styleKey` 未指定時だけ構造化済み `emotion`、次に `tempo` から解決する

@@ -47,7 +47,7 @@ Provider 実行失敗は adapter 固有の例外文字列を上位へ流さず�
 | 項目 | 方針 |
 |---|---|
 | 既定 Provider | `config.json` で指定 |
-| station / program template 固有上書き | 可能。TTS では station の `defaultVoiceProfileId` と `VoiceProfile.providerKey` を優先し、局ごとに Irodori / VOICEVOX / style preset を変えられる |
+| station / program template 固有上書き | 可能。TTS では station の `defaultVoiceProfileId` と `VoiceProfileEntity.providerKey` を優先し、局ごとに Irodori / VOICEVOX / style preset を変えられる。割当可能なのは `GLOBAL` または同じ station の `STATION` profile だけ |
 | fallback Provider | 種別ごとに 1 件以上設定可能 |
 | 接続テスト | `/api/settings/test-connections` から実行 |
 - 設定更新 | `/api/settings` の `version`/`schemaVersion` で楽観ロックし、`features` で placeholder 制御を入れる |
@@ -82,12 +82,16 @@ request mapping:
 |---|---|
 | `TtsRequest.normalizedText` | `input` |
 | `ResolvedProvider.modelName` または既定値 | `model`, 通常は `irodori-tts` |
-| `VoiceProfile.speakerKey` | `voice`。Irodori server の `voices/` または `voices.json` の voice id |
-| `VoiceProfile.speed` | `speed` |
-| `VoiceProfile.providerOptions.responseFormat` | `response_format`。既定は `wav` |
-| `VoiceProfile.providerOptions.irodori` | `irodori` object。`num_steps`, CFG, chunking などの安全な allowlist のみ |
+| `VoiceProfileEntity.speakerKey` | `voice`。Irodori server の `voices/` または `voices.json` の voice id |
+| `VoiceProfileEntity.speed` | `speed` |
+| `VoiceProfileEntity.providerOptions` の `responseFormat` | `response_format`。既定は `wav` |
+| `VoiceProfileEntity.providerOptions` の `irodori` | `irodori` object。`num_steps`, CFG, chunking などの安全な allowlist のみ |
 
-初期実装では `response_format=wav` を標準にし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。現行 `HttpTtsProvider` は `SpeechDirective.normalizedText`、`voiceHint=IRODORI_TTS:<voiceId>[:style]`、`providers.tts.providers.{key}.defaultModelProfileId` から `/v1/audio/speech` を呼び、provider job と audio asset を作成する。`VoiceProfile.speed`、`providerOptions`、参照音声同意の runtime 反映は `P0-02c` の拡張で閉じる。`mp3` などは asset manifest / content type の拡張時に許可する。
+初期実装では `response_format=wav` を標準にし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。現行 `HttpTtsProvider` は `SpeechDirective.normalizedText`、`voiceHint=IRODORI_TTS:<voiceId>[:style]`、`providers.tts.providers.{key}.defaultModelProfileId` から `/v1/audio/speech` を呼び、provider job と audio asset を作成する。`VoiceProfileEntity.speed`、`providerOptions`、参照音声同意の runtime 反映は `P0-02b` の後続実装で閉じる。`mp3` などは asset manifest / content type の拡張時に許可する。
+
+`VoiceProfileEntity.scope` は `GLOBAL` / `STATION` に限定する。`GLOBAL` では `stationId=null`、`STATION` では `stationId` を必須とし、station の `defaultVoiceProfileId` へ他局の profile を割り当てる要求は拒否する。
+
+`VoiceProfileEntity.referenceVoiceRef` は Provider 側 voice id または安全な相対参照だけを受け付ける。絶対 path、URL、`..` による親 directory traversal は拒否し、参照を指定する場合は `consentPolicyRef` を必須とする。`providerOptions` は Provider ごとの安全な allowlist に限定し、参照音声の実 path、個人名、秘密値を含めない。これらは API response、SSE、標準ログにも露出させない。
 
 ### 5.2 VOICEVOX TTS adapter
 
@@ -195,7 +199,7 @@ ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/m
 
 ### 8.4 TTS provider profile
 
-`providers.tts.providers.{providerKey}` は通常 endpoint に加え、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持つ。TTS 固有の細かい request option は provider endpoint ではなく `VoiceProfile.providerOptions` に寄せ、station/persona ごとの差し替えをしやすくする。
+`providers.tts.providers.{providerKey}` は通常 endpoint に加え、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持つ。TTS 固有の細かい request option は provider endpoint ではなく `VoiceProfileEntity.providerOptions` に寄せ、station/persona ごとの差し替えをしやすくする。永続化済み option の TTS runtime 反映は `P0-02b` の後続実装とする。
 
 Irodori の設定例:
 

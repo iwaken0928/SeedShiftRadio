@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SegmentType;
@@ -20,6 +21,7 @@ import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobService;
 import com.seedshiftradio.settings.ProviderRegistry;
+import com.seedshiftradio.settings.ProviderRuntimeException;
 
 @Service
 public class ScriptGenerationService {
@@ -120,8 +122,11 @@ public class ScriptGenerationService {
 					metadata(item, context, snapshot, providerKey, providerJob.getId()));
 			providerJobService.markSucceeded(providerJob.getId());
 			return snapshot;
+		} catch (ProviderRuntimeException exception) {
+			providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
+			throw exception;
 		} catch (RuntimeException exception) {
-			providerJobService.markFailed(providerJob.getId(), "SCRIPT_GENERATION_FAILED");
+			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
 			throw exception;
 		}
 	}

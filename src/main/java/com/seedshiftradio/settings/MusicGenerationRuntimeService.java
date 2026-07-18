@@ -13,6 +13,7 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SlotRole;
@@ -100,10 +101,10 @@ public class MusicGenerationRuntimeService {
 					submittedJob.jobId(),
 					"LIVE_GEN");
 		} catch (MusicGenWorkerException exception) {
-			providerJobService.markFailed(providerJob.getId(), exception.errorCode());
+			providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
 			throw exception;
 		} catch (RuntimeException exception) {
-			providerJobService.markFailed(providerJob.getId(), "PROVIDER_BAD_RESPONSE");
+			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
 			throw exception;
 		}
 	}

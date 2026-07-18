@@ -2,12 +2,14 @@ package com.seedshiftradio.settings;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Constructor;
@@ -22,10 +24,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SegmentType;
@@ -261,8 +266,122 @@ class AssetServiceTests {
 
 		assertEquals("asset-tts-placeholder", item.getAssetId());
 		assertEquals("/api/assets/audio/asset-tts-placeholder.wav", item.getAssetUrl());
-		verify(providerJobService).markFailed("provider-job-failed", "PROVIDER_TIMEOUT");
+		verify(providerJobService).markFailed("provider-job-failed", ProviderErrorCode.PROVIDER_TIMEOUT);
 		verify(providerJobService).markSucceeded("provider-job-placeholder");
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = ProviderErrorCode.class, names = {
+			"PROVIDER_REJECTED",
+			"PROVIDER_AUTH_FAILED",
+			"PROVIDER_INTERRUPTED"
+	})
+	void ensureQueueAudioAssetSkipsExternalFallbackAndUsesPlaceholderForNonRecoverableTtsFailure(ProviderErrorCode errorCode) {
+		when(settingsStore.load()).thenReturn(settingsDocument());
+		ProviderRegistry.ResolvedProvider primary = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"primary",
+				"http://127.0.0.1:50021",
+				"/health",
+				1_000,
+				List.of("TTS_GEN"),
+				false);
+		ProviderRegistry.ResolvedProvider fallback = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"fallback",
+				"http://127.0.0.1:50022",
+				"/health",
+				1_000,
+				List.of("TTS_GEN"),
+				true);
+		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(primary, fallback));
+		QueueItemEntity item = ttsQueueItem("queue-tts-rejected");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
+		ProviderJobEntity failedJob = providerJob("provider-job-rejected");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("primary"),
+				eq(item.getId()),
+				eq(item.getCorrelationId()))).thenReturn(failedJob);
+		ProviderJobEntity placeholderJob = providerJob("provider-job-non-recoverable-placeholder");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("seedshift-placeholder"),
+				eq(item.getId()),
+				eq(item.getCorrelationId()))).thenReturn(placeholderJob);
+		TtsSynthesisException expected = new TtsSynthesisException(errorCode, "non-recoverable");
+		when(ttsProvider.synthesize(eq(primary), eq(item), any())).thenThrow(expected);
+		byte[] wav = "safe-local-placeholder".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		when(ttsProvider.synthesize(argThat(provider -> "seedshift-placeholder".equals(provider.providerKey())), eq(item), any()))
+				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "seedshift-placeholder:placeholder", Map.of("placeholder", true)));
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-non-recoverable-placeholder");
+		when(generatedAssetService.createAudioAsset(
+				eq(wav),
+				eq("seedshift-placeholder:placeholder"),
+				eq(item.getId()),
+				eq(placeholderJob.getId()),
+				argThat(metadata -> Boolean.TRUE.equals(metadata.get("fallbackProviderUsed"))
+						&& errorCode.name().equals(metadata.get("fallbackErrorCode")))))
+				.thenReturn(asset);
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-non-recoverable-placeholder", item.getAssetId());
+		verify(providerJobService).markFailed("provider-job-rejected", errorCode);
+		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any());
+		verify(providerJobService, never()).createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("fallback"),
+				eq(item.getId()),
+				eq(item.getCorrelationId()));
+		verify(providerJobService).markSucceeded("provider-job-non-recoverable-placeholder");
+	}
+
+	@Test
+	void ensureQueueAudioAssetRethrowsNonRecoverableFailureWhenPlaceholderIsDisabled() {
+		when(settingsStore.load()).thenReturn(settingsDocument(false));
+		ProviderRegistry.ResolvedProvider primary = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"primary",
+				"http://127.0.0.1:50021",
+				"/health",
+				1_000,
+				List.of("TTS_GEN"),
+				false);
+		ProviderRegistry.ResolvedProvider fallback = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"fallback",
+				"http://127.0.0.1:50022",
+				"/health",
+				1_000,
+				List.of("TTS_GEN"),
+				true);
+		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(primary, fallback));
+		QueueItemEntity item = ttsQueueItem("queue-tts-placeholder-disabled");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("primary"),
+				eq(item.getId()),
+				eq(item.getCorrelationId()))).thenReturn(providerJob("provider-job-placeholder-disabled"));
+		TtsSynthesisException expected = new TtsSynthesisException(ProviderErrorCode.PROVIDER_REJECTED, "rejected");
+		when(ttsProvider.synthesize(eq(primary), eq(item), any())).thenThrow(expected);
+
+		TtsSynthesisException actual = assertThrows(
+				TtsSynthesisException.class,
+				() -> assetService.ensureQueueAudioAsset(item));
+
+		assertEquals(expected, actual);
+		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any());
 	}
 
 	private QueueItemEntity queueItem(String id, int durationMs) {
@@ -282,6 +401,30 @@ class AssetServiceTests {
 		}
 	}
 
+	private QueueItemEntity ttsQueueItem(String id) {
+		QueueItemEntity item = newQueueItemEntity();
+		item.setId(id);
+		item.setSessionId("session-tts");
+		item.setSegmentType(SegmentType.TALK);
+		item.setSlotRole(SlotRole.TOPIC);
+		item.setDurationMs(10_000);
+		item.setCorrelationId("corr-" + id);
+		return item;
+	}
+
+	private ScriptDirectiveSnapshot scriptSnapshot() {
+		return new ScriptDirectiveSnapshot(
+				"本文です。",
+				"本文です。",
+				List.of(),
+				"calm",
+				"medium",
+				List.of(),
+				"persona-night-main",
+				"VOICEVOX:4:normal",
+				List.of());
+	}
+
 	private ProviderJobEntity providerJob(String id) {
 		ProviderJobEntity entity = new ProviderJobEntity();
 		entity.setId(id);
@@ -289,6 +432,10 @@ class AssetServiceTests {
 	}
 
 	private SettingsDocument settingsDocument() {
+		return settingsDocument(true);
+	}
+
+	private SettingsDocument settingsDocument(boolean placeholderEnabled) {
 		return new SettingsDocument(
 				1,
 				"2026-04",
@@ -300,7 +447,7 @@ class AssetServiceTests {
 				SettingsDocument.ProgrammingSettings.defaults(),
 				SettingsDocument.ProviderCatalog.defaults(),
 				SettingsDocument.SecuritySettings.defaults(),
-				SettingsDocument.FeatureSettings.defaults())
+				new SettingsDocument.FeatureSettings(new SettingsDocument.StreamingFeatureSettings(placeholderEnabled)))
 				.normalize();
 	}
 }

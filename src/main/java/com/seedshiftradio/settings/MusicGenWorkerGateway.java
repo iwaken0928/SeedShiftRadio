@@ -23,6 +23,8 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderType;
 
 @Service
@@ -408,18 +410,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 	}
 
 	private MusicGenWorkerException httpFailure(String operation, int statusCode) {
-		String errorCode;
-		if (statusCode == 401 || statusCode == 403) {
-			errorCode = "PROVIDER_AUTH_FAILED";
-		} else if (statusCode == 408 || statusCode == 504) {
-			errorCode = "PROVIDER_TIMEOUT";
-		} else if (statusCode == 429 || statusCode == 503) {
-			errorCode = "PROVIDER_RESOURCE_EXHAUSTED";
-		} else if (statusCode >= 400 && statusCode < 500) {
-			errorCode = "PROVIDER_REJECTED";
-		} else {
-			errorCode = "PROVIDER_BAD_RESPONSE";
-		}
+		ProviderErrorCode errorCode = ProviderErrorClassifier.fromHttpStatus(statusCode);
 		return new MusicGenWorkerException(errorCode, "音楽生成 provider " + operation + " が HTTP " + statusCode + " を返しました。");
 	}
 
@@ -458,10 +449,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 	}
 
 	private boolean isFallbackCandidate(MusicGenWorkerException exception) {
-		return switch (exception.errorCode()) {
-			case "PROVIDER_UNREACHABLE", "PROVIDER_TIMEOUT", "PROVIDER_BAD_RESPONSE", "PROVIDER_RESOURCE_EXHAUSTED" -> true;
-			default -> false;
-		};
+		return ProviderErrorClassifier.fallbackAllowed(ProviderType.MUSIC, exception.providerErrorCode());
 	}
 
 	private Integer intOrNull(JsonNode node) {

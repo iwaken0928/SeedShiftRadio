@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.radio.QueueItemEntity;
 import com.seedshiftradio.radio.SpeechDirectiveResponse;
 
@@ -185,7 +186,7 @@ public class HttpTtsProvider implements TtsProvider {
 				? directive.text()
 				: directive.normalizedText();
 		if (text == null || text.isBlank()) {
-			throw new TtsSynthesisException("PROVIDER_REJECTED", "TTS 入力テキストが空です。");
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_REJECTED, "TTS 入力テキストが空です。");
 		}
 		return text;
 	}
@@ -194,12 +195,12 @@ public class HttpTtsProvider implements TtsProvider {
 		try {
 			return httpClient(request).send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 		} catch (HttpTimeoutException exception) {
-			throw new TtsSynthesisException("PROVIDER_TIMEOUT", adapter + " TTS provider がタイムアウトしました。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_TIMEOUT, adapter + " TTS provider がタイムアウトしました。", exception);
 		} catch (IOException exception) {
-			throw new TtsSynthesisException("PROVIDER_UNREACHABLE", adapter + " TTS provider へ接続できません。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_UNREACHABLE, adapter + " TTS provider へ接続できません。", exception);
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			throw new TtsSynthesisException("PROVIDER_INTERRUPTED", adapter + " TTS provider 呼び出しが中断されました。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_INTERRUPTED, adapter + " TTS provider 呼び出しが中断されました。", exception);
 		}
 	}
 
@@ -207,12 +208,12 @@ public class HttpTtsProvider implements TtsProvider {
 		try {
 			return httpClient(request).send(request, HttpResponse.BodyHandlers.ofByteArray());
 		} catch (HttpTimeoutException exception) {
-			throw new TtsSynthesisException("PROVIDER_TIMEOUT", adapter + " TTS provider がタイムアウトしました。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_TIMEOUT, adapter + " TTS provider がタイムアウトしました。", exception);
 		} catch (IOException exception) {
-			throw new TtsSynthesisException("PROVIDER_UNREACHABLE", adapter + " TTS provider へ接続できません。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_UNREACHABLE, adapter + " TTS provider へ接続できません。", exception);
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			throw new TtsSynthesisException("PROVIDER_INTERRUPTED", adapter + " TTS provider 呼び出しが中断されました。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_INTERRUPTED, adapter + " TTS provider 呼び出しが中断されました。", exception);
 		}
 	}
 
@@ -226,24 +227,19 @@ public class HttpTtsProvider implements TtsProvider {
 		return new TtsSynthesisException(classify(statusCode, body), adapter + " TTS provider が HTTP " + statusCode + " を返しました。");
 	}
 
-	private String classify(int statusCode, String body) {
+	private ProviderErrorCode classify(int statusCode, String body) {
+		ProviderErrorCode httpErrorCode = ProviderErrorClassifier.fromHttpStatus(statusCode);
+		if (httpErrorCode != ProviderErrorCode.PROVIDER_REJECTED) {
+			return httpErrorCode;
+		}
 		String normalizedBody = body == null ? "" : body.toLowerCase(Locale.ROOT);
 		if (normalizedBody.contains("consent")) {
-			return "VOICE_CONSENT_REQUIRED";
+			return ProviderErrorCode.VOICE_CONSENT_REQUIRED;
 		}
 		if (normalizedBody.contains("voice") && (normalizedBody.contains("not found") || normalizedBody.contains("missing"))) {
-			return "VOICE_REF_NOT_FOUND";
+			return ProviderErrorCode.VOICE_REF_NOT_FOUND;
 		}
-		if (statusCode == 408 || statusCode == 504) {
-			return "PROVIDER_TIMEOUT";
-		}
-		if (statusCode == 429 || statusCode == 503) {
-			return "PROVIDER_RESOURCE_EXHAUSTED";
-		}
-		if (statusCode >= 400 && statusCode < 500) {
-			return "PROVIDER_REJECTED";
-		}
-		return "PROVIDER_BAD_RESPONSE";
+		return httpErrorCode;
 	}
 
 	private void ensureWavAudio(byte[] audio) {
@@ -256,7 +252,7 @@ public class HttpTtsProvider implements TtsProvider {
 				|| audio[9] != 'A'
 				|| audio[10] != 'V'
 				|| audio[11] != 'E') {
-			throw new TtsSynthesisException("PROVIDER_BAD_RESPONSE", "TTS provider が WAV 以外の応答を返しました。");
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_BAD_RESPONSE, "TTS provider が WAV 以外の応答を返しました。");
 		}
 	}
 
@@ -264,7 +260,7 @@ public class HttpTtsProvider implements TtsProvider {
 		try {
 			return objectMapper.writeValueAsBytes(body);
 		} catch (JsonProcessingException exception) {
-			throw new TtsSynthesisException("PROVIDER_BAD_RESPONSE", "TTS request の JSON 化に失敗しました。", exception);
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_BAD_RESPONSE, "TTS request の JSON 化に失敗しました。", exception);
 		}
 	}
 

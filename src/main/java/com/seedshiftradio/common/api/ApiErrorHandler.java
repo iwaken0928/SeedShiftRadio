@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.seedshiftradio.common.correlation.CorrelationIdFilter;
+import com.seedshiftradio.settings.ProviderRuntimeException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -39,6 +40,16 @@ public class ApiErrorHandler {
 		}
 		details.put("fieldErrors", fieldErrors);
 		return buildResponse(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "入力値を確認してください。", details, request);
+	}
+
+	@ExceptionHandler(ProviderRuntimeException.class)
+	ResponseEntity<ErrorResponse> handleProviderRuntimeException(ProviderRuntimeException exception, HttpServletRequest request) {
+		return buildResponse(
+				HttpStatus.SERVICE_UNAVAILABLE,
+				"PROVIDER_UNAVAILABLE",
+				"Provider を利用できません。",
+				Map.of("providerErrorCode", exception.errorCode()),
+				request);
 	}
 
 	@ExceptionHandler(Exception.class)

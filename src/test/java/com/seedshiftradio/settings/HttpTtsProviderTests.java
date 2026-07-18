@@ -3,6 +3,7 @@ package com.seedshiftradio.settings;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
@@ -131,6 +133,38 @@ class HttpTtsProviderTests {
 		assertEquals("voice-night", audio.metadata().get("voiceId"));
 		assertFalse(audio.metadata().containsKey("normalizedText"));
 		assertFalse(audio.metadata().containsValue("こんにちは。"));
+	}
+
+	@Test
+	void synthesizeClassifiesIrodoriAuthenticationFailureBeforeResponseBodyHints() throws Exception {
+		httpServer = startServer(Map.of(
+				"/v1/audio/speech", exchange -> write(
+						exchange,
+						401,
+						"application/json",
+						"{\"error\":\"consent required\"}".getBytes(StandardCharsets.UTF_8))));
+		HttpTtsProvider provider = provider();
+
+		TtsSynthesisException exception = assertThrows(
+				TtsSynthesisException.class,
+				() -> provider.synthesize(
+						new ProviderRegistry.ResolvedProvider(
+								ProviderType.TTS,
+								"tts",
+								"irodori",
+								baseUrl(),
+								"/health",
+								1_000,
+								List.of("TTS_GEN", "IRODORI_TTS"),
+								"IRODORI_OPENAI_TTS",
+								null,
+								"irodori-tts",
+								Map.of(),
+								false),
+						queueItem(),
+						directive("IRODORI_TTS:voice-night:soft")));
+
+		assertEquals(ProviderErrorCode.PROVIDER_AUTH_FAILED, exception.providerErrorCode());
 	}
 
 	@Test

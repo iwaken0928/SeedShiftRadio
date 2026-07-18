@@ -1200,7 +1200,9 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 `MusicGenerationRequest` は `purpose`, `mode`, `prompt`, `lyrics`, `lyricsLanguage`, `durationSeconds`, `bpm`, `keyScale`, `timeSignature`, `seed`, `modelProfileId`, `outputFormat` を持ちます。`lyricsLanguage=ja` は ACE-Step で `vocal_language=ja` に写像され、既定 profile は `ace-ja-fast` です。
 
-`MusicGenerationJob` 相当の状態は `provider_job` と監視 DTO へ集約し、`queued/running/succeeded/failed/canceled/degraded`, `providerTaskId`, `assetId`, `model`, `lmModel`, `seed`, `duration`, `failureReason` を短い metadata として扱います。prompt / lyrics / letter body / radioName / API key は API response、SSE、標準ログへ生で出しません。
+`MusicGenerationJob` 相当の状態は `provider_job` と監視 DTO へ集約し、`queued/running/succeeded/failed/canceled`, `providerTaskId`, `assetId`, `model`, `lmModel`, `seed`, `duration`, `errorCode` を短い metadata として扱います。prompt / lyrics / letter body / radioName / API key は API response、SSE、標準ログへ生で出しません。
+
+`provider_job.status` は `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` に限定し、`DEGRADED` は Provider health と playout state だけで表します。Provider 失敗時の `errorCode` は共通の `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_REJECTED`, `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED`、または TTS 固有の `VOICE_REF_NOT_FOUND`, `VOICE_CONSENT_REQUIRED` とします。外部 Provider または Worker の未知 code は `PROVIDER_BAD_RESPONSE` へ正規化します。
 
 ### 6.14 MonitorSummary
 
@@ -1347,6 +1349,8 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 | `PROVIDER_UNAVAILABLE` | 503 | Provider 利用不可 |
 | `ADMIN_AUTH_REQUIRED` | 401 | 管理操作の認証不足 |
 | `INTERNAL_ERROR` | 500 | サーバー内部エラー |
+
+`PROVIDER_UNAVAILABLE` の `details` は `providerErrorCode` だけを返します。`providerErrorCode` は共通 Provider error code または TTS 固有 error code のいずれかとし、Provider 応答本文、endpoint、秘密値、prompt、lyrics、letter body、radioName は含めません。未知の外部 code は `PROVIDER_BAD_RESPONSE` へ正規化してから返します。
 
 ## 9. API設計ルール
 

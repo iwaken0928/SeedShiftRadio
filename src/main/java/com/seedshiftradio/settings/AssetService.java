@@ -76,7 +76,10 @@ public class AssetService {
 				return;
 			} catch (TtsSynthesisException exception) {
 				lastFailure = exception;
-				providerJobService.markFailed(providerJob.getId(), exception.errorCode());
+				providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
+				if (!ProviderErrorClassifier.fallbackAllowed(ProviderType.TTS, exception.providerErrorCode())) {
+					break;
+				}
 			}
 		}
 		if (placeholderEnabled()) {

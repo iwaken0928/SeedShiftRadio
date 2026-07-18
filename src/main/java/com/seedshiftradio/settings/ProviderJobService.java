@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
@@ -76,10 +77,15 @@ public class ProviderJobService {
 
 	@Transactional
 	public ProviderJobEntity markFailed(String providerJobId, String errorCode) {
+		return markFailed(providerJobId, ProviderErrorClassifier.normalizeExternalCode(errorCode));
+	}
+
+	@Transactional
+	public ProviderJobEntity markFailed(String providerJobId, ProviderErrorCode errorCode) {
 		ProviderJobEntity entity = providerJobRepository.findById(providerJobId).orElseThrow();
 		entity.setStatus(ProviderJobStatus.FAILED);
 		entity.setEndedAt(Instant.now());
-		entity.setErrorCode(errorCode);
+		entity.setErrorCode((errorCode == null ? ProviderErrorCode.PROVIDER_BAD_RESPONSE : errorCode).name());
 		ProviderJobEntity saved = providerJobRepository.save(entity);
 		publishAuditEvent("provider.job.failed", saved);
 		return saved;

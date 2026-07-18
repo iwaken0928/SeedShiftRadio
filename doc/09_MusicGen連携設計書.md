@@ -38,7 +38,7 @@ public interface MusicGenerationProvider {
 | `modelProfileId` | `ace-ja-fast` などの profile id |
 | `outputFormat` | v1 の radio playback では `/api/assets/audio/{assetId}.wav` と `audio/wav` に合わせて `wav`, `wav32` のみ |
 
-`MusicJobStatus` は `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` を Server 内部状態として返す。`provider_job` では `queued/running/succeeded/failed/canceled/degraded` 相当へ集約し、`external_ref` に `providerTaskId`、`generated_asset` に `assetId`, `providerFingerprint`, `metadata.model`, `metadata.lmModel`, `metadata.seed`, `metadata.duration`, `metadata.promptHash`, `metadata.lyricsHash` を残す。prompt / lyrics 本文は保存メタ、SSE、標準ログへ含めない。
+`MusicJobStatus` は `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` を Server 内部状態として返す。`provider_job` も `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` へ集約し、`DEGRADED` は追加しない。Provider chain は最終 Provider と論理ジョブの最終結果を一つの `provider_job` に残し、縮退中であることは Provider health と playout state で表す。`external_ref` に `providerTaskId`、`generated_asset` に `assetId`, `providerFingerprint`, `metadata.model`, `metadata.lmModel`, `metadata.seed`, `metadata.duration`, `metadata.promptHash`, `metadata.lyricsHash` を残す。prompt / lyrics 本文は保存メタ、SSE、標準ログへ含めない。
 
 ## 4. Provider 種別
 
@@ -62,7 +62,7 @@ ACE-Step 1.5 は次の REST API を使う。
 - `/v1/audio?path=...`: 成功 result 内の file URL を Server が download し、asset pipeline に登録する
 - `GET /health`, `GET /v1/models`, `GET /v1/stats`: settings / monitor から接続状態、model 一覧、queue size、平均処理時間を確認する
 
-HTTP `401/403` は `PROVIDER_AUTH_FAILED`、`429/503` は `PROVIDER_RESOURCE_EXHAUSTED`、timeout は `PROVIDER_TIMEOUT`、その他 5xx / JSON 不正は `PROVIDER_BAD_RESPONSE` に分類する。分類は縮退判断に使い、Provider 応答本文を標準ログへそのまま残さない。
+HTTP `401/403` は `PROVIDER_AUTH_FAILED`、`408/504` と通信 timeout は `PROVIDER_TIMEOUT`、`429/503` は `PROVIDER_RESOURCE_EXHAUSTED`、その他 4xx と安全性ポリシーによる拒否は `PROVIDER_REJECTED`、接続不能は `PROVIDER_UNREACHABLE`、その他 5xx / JSON 不正 / 空応答 / 未知状態は `PROVIDER_BAD_RESPONSE` に分類する。Server 側の中断は `PROVIDER_INTERRUPTED` とする。外部 Provider または Worker が未知の error code を返した場合も `PROVIDER_BAD_RESPONSE` へ正規化する。分類は縮退判断に使い、Provider 応答本文を標準ログへそのまま残さない。
 
 ## 5. ACE-Step model profiles
 
@@ -114,6 +114,10 @@ cache key は少なくとも以下を正規化して含める。
 歌もの生成は queue の即時補充をブロックしない。再生予定時刻までに `SUCCEEDED` でなければ上記順で縮退し、`provider_job` と SSE `provider.job.failed` に分類済み理由だけを残す。
 現行 runtime では `GenerateMusicJob` の async failure 時、対象 `MUSIC_AI` item をそのまま使って `paths.musicLibrary` 配下の `.wav` を優先的に `MUSIC_LOCAL` `READY` へ差し替え、候補が無い場合は placeholder 音声付き `JINGLE` `READY` に降ろす。どちらも `queue_item.assetId` と `content_origin` を更新して無音停止を避ける。
 
+Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` に限定する。
+`PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では同じ prompt / lyrics を別 Provider へ自動送信しない。
+この場合も安全な cache、archive、local asset、placeholder による playout fallback は継続し、session は原因 error code を `degraded_reason` に保持した `DEGRADED` とする。
+
 ## 9. 監視項目
 
 - Provider health: `UP / DEGRADED / DOWN`
@@ -130,6 +134,8 @@ cache key は少なくとも以下を正規化して含める。
 - ACE-Step request mapping で `lyricsLanguage=ja` が `vocal_language=ja` になり、`thinking=true` と profile model が送られること
 - `/query_result` の result JSON string / array / object を parse し、audio URL、seed、model、metas、失敗状態を取り出せること
 - `429`, timeout, provider down で `DEGRADED` へ進み、playout が止まらないこと
+- Worker が返す既知 error code は共通分類を維持し、未知 error code は `PROVIDER_BAD_RESPONSE` へ正規化すること
+- `PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では Provider chain の fallback を行わず、同じ prompt / lyrics を再送しないこと
 - config validation で未知 profile、不正 duration、秘密値直書き、`wav` / `wav32` 以外の outputFormat を検出すること
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に生で出ないこと
 - fake ACE-Step HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現すること

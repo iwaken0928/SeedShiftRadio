@@ -33,6 +33,15 @@ public interface MusicGenerationProvider {
 
 上位サービスは `ProviderRegistry` から具象を解決する。
 
+Provider 実行失敗は adapter 固有の例外文字列を上位へ流さず、次の共通 error code へ正規化する。
+
+- 共通: `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_REJECTED`, `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED`
+- TTS 固有: `VOICE_REF_NOT_FOUND`, `VOICE_CONSENT_REQUIRED`
+
+外部 Provider または Worker が未知の error code を返した場合は `PROVIDER_BAD_RESPONSE` へ正規化する。
+`provider_job` は論理生成ジョブの結果を `FAILED` または `SUCCEEDED` として記録し、fallback 中であることを表す `DEGRADED` は `provider_job.status` に追加しない。
+現行 runtime は TTS の Provider 試行を個別 `provider_job` として同じ `correlationId` で追跡し、Music Generation の Provider chain は最終 Provider と論理ジョブの最終結果を一つの `provider_job` に残す。
+
 ## 4. Provider 解決
 
 | 項目 | 方針 |
@@ -105,7 +114,7 @@ request mapping:
 fallback 方針:
 
 1. Irodori で `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_TIMEOUT`, `PROVIDER_UNREACHABLE`, `PROVIDER_BAD_RESPONSE` が発生した場合、同一台本で `providers.tts.fallbackProviders` の次候補へ切り替える
-2. Irodori の `NO_REFERENCE_VOICE`, `VOICE_CONSENT_REQUIRED`, `VOICE_REF_NOT_FOUND` は再試行せず、別 `VoiceProfile` または VOICEVOX fallback へ切り替える
+2. Irodori の `VOICE_CONSENT_REQUIRED`, `VOICE_REF_NOT_FOUND` は同一 Provider で再試行せず、別 `VoiceProfile` または VOICEVOX fallback へ切り替える
 3. fallback で生成した audio asset は `provider_fingerprint` と `voiceHint` を明示し、Irodori cache と混同しない
 4. すべての TTS が失敗した場合は、`features.streaming.placeholderEnabled=true` なら placeholder WAV へ縮退し、無効なら provider error を返して上位の degraded 扱いにする
 
@@ -119,6 +128,10 @@ fallback 方針:
 
 再試行時は `correlationId` を継承する。
 
+Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` と、TTS 固有の `VOICE_REF_NOT_FOUND`, `VOICE_CONSENT_REQUIRED` に限定する。
+`PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では同じ要求を別 Provider へ自動送信しない。
+ただし Provider chain の fallback を行わない場合でも、上位の playout は安全な cache、archive、local asset、placeholder による縮退継続を選べる。
+
 ## 7. エラー分類
 
 | Code | 意味 |
@@ -129,8 +142,13 @@ fallback 方針:
 | `PROVIDER_REJECTED` | 入力拒否 |
 | `PROVIDER_RESOURCE_EXHAUSTED` | GPU/メモリ不足、queue 混雑、HTTP 429/503 |
 | `PROVIDER_AUTH_FAILED` | API key 不正、秘密値参照解決失敗 |
+| `PROVIDER_INTERRUPTED` | Server 側の中断、キャンセル、thread interrupt |
 | `VOICE_REF_NOT_FOUND` | 参照音声 voice id または file が provider 側に存在しない |
 | `VOICE_CONSENT_REQUIRED` | 参照音声の同意・利用条件が未確認 |
+
+安全性ポリシーによる拒否は `PROVIDER_REJECTED` に分類し、専用の safety error code は増やさない。
+一般の HTTP 4xx も `PROVIDER_REJECTED` とするが、HTTP 401/403 は `PROVIDER_AUTH_FAILED`、408/504 は `PROVIDER_TIMEOUT`、429/503 は `PROVIDER_RESOURCE_EXHAUSTED` を優先する。
+接続不能は `PROVIDER_UNREACHABLE`、JSON・音声・状態値の形式不正、空応答、未知の外部 error code は `PROVIDER_BAD_RESPONSE` とする。
 
 ## 8. 設定注入
 
@@ -244,7 +262,9 @@ Provider ごとに以下を持つ。
 `metadata` と `message` は診断用の短い状態値に限定する。Web は provider 契約違反の payload が混ざった場合も、secret / prompt / lyrics / letter body / radioName / raw response らしい key や値を redaction し、worker status detail は許可済み metadata key の短い値だけを表示する。
 
 上記 Payload は `/api/monitor/summary` と `/api/health` で `providerHealth` map として返す。key は `llm`, `tts`, `musicGen`、value は各 Provider 種別の `ProviderHealthPayload` とし、SSE `provider.health.changed` イベントでも同じ map 構造を送る。
-`status` は `UP` で正常、`DEGRADED` で代替 Provider へ切り替え中、`DOWN` で fallback に突入するシグナルとして解釈される。SSE の `Last-Event-ID` で再接続すると最新状態を受け取れる。
+`status` は `UP` で既定 Provider が正常、`DEGRADED` で既定 Provider は失敗したが fallback Provider が利用可能、`DOWN` で Provider chain 内に利用可能な Provider がない状態とする。
+Provider health が `DOWN` でも cache、local asset、placeholder により放送を継続できる間、playout は `ERROR` ではなく `DEGRADED` を維持する。
+`/api/health`, `/api/monitor/summary`, SSE `provider.health.changed` は同じ意味の status を返す。SSE の `Last-Event-ID` で再接続すると最新状態を受け取れる。
 
 Health は `/api/health` と `/api/monitor/summary` に集約する。
 

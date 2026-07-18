@@ -1,20 +1,22 @@
 package com.seedshiftradio.settings;
 
-public class MusicGenWorkerException extends RuntimeException {
+import com.seedshiftradio.domain.ProviderErrorCode;
 
-	private final String errorCode;
+public class MusicGenWorkerException extends ProviderRuntimeException {
 
 	public MusicGenWorkerException(String errorCode, String message) {
-		super(message);
-		this.errorCode = errorCode;
+		super(errorCode, message);
 	}
 
 	public MusicGenWorkerException(String errorCode, String message, Throwable cause) {
-		super(message, cause);
-		this.errorCode = errorCode;
+		super(errorCode, message, cause);
 	}
 
-	public String errorCode() {
-		return errorCode;
+	public MusicGenWorkerException(ProviderErrorCode errorCode, String message) {
+		super(errorCode, message);
+	}
+
+	public MusicGenWorkerException(ProviderErrorCode errorCode, String message, Throwable cause) {
+		super(errorCode, message, cause);
 	}
 }

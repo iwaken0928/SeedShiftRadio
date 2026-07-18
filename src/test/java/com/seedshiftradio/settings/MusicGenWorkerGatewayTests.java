@@ -412,6 +412,43 @@ class MusicGenWorkerGatewayTests {
 		}
 	}
 
+	@Test
+	void awaitCompletionNormalizesUnknownWorkerErrorCode() throws IOException {
+		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/music/jobs/job-unknown", exchange -> {
+			byte[] body = """
+					{
+					  "jobId": "job-unknown",
+					  "status": "FAILED",
+					  "errorCode": "WORKER_PRIVATE_ERROR",
+					  "message": "worker detail"
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.start();
+		try {
+			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+			MusicGenWorkerGateway.ResolvedMusicProvider provider = new MusicGenWorkerGateway.ResolvedMusicProvider(
+					"worker",
+					baseUrl,
+					2_000,
+					List.of("MUSIC_GEN"));
+
+			MusicGenWorkerException exception = assertThrows(
+					MusicGenWorkerException.class,
+					() -> gateway.awaitCompletion(provider, "job-unknown"));
+
+			assertEquals("PROVIDER_BAD_RESPONSE", exception.errorCode());
+		} finally {
+			server.stop(0);
+		}
+	}
+
 	private MusicGenWorkerGateway.ResolvedMusicProvider aceProvider(String baseUrl) {
 		return new MusicGenWorkerGateway.ResolvedMusicProvider(
 				"ace-step",

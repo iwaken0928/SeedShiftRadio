@@ -32,7 +32,6 @@ variables:
   SEEDSHIFT_LOCAL_IMAGE_REPOSITORY: "localhost/seedshift-radio"
   SEEDSHIFT_RADIO_DB_NAME: "seedshift_radio"
   SEEDSHIFT_RADIO_DB_USERNAME: "seedshift"
-  NEXT_PUBLIC_API_BASE_URL: "/api-proxy"
   SERVER_INTERNAL_API_BASE_URL: "http://127.0.0.1:8080"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
 
@@ -274,6 +273,8 @@ compose-prod-validate:
     - export SEEDSHIFT_RADIO_DB_USERNAME=seedshift
     - export SEEDSHIFT_RADIO_DB_PASSWORD=validate-password
     - export SEEDSHIFT_ADMIN_TOKEN=validate-token
+    - export SEEDSHIFT_WEB_ADMIN_PASSWORD=validate-password
+    - export SEEDSHIFT_WEB_SESSION_SECRET=validate-session-secret-at-least-32-bytes
     - podman --remote compose -f infra/compose/compose.prod.yml config >/dev/null
 
 server-container-build:
@@ -290,8 +291,6 @@ web-container-build:
     - export SEEDSHIFT_WEB_IMAGE_COMMIT="${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}/web:${CI_COMMIT_SHORT_SHA}"
     - >
       podman --remote build --pull
-      --build-arg NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL}"
-      --build-arg SERVER_INTERNAL_API_BASE_URL="${SERVER_INTERNAL_API_BASE_URL}"
       -t "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
       -f infra/containers/web.Containerfile web
 
@@ -321,8 +320,6 @@ web-container-publish:
     - export SEEDSHIFT_WEB_IMAGE_REF="${SEEDSHIFT_IMAGE_REPOSITORY}/web:${CI_COMMIT_REF_SLUG}"
     - >
       podman --remote build --pull
-      --build-arg NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL}"
-      --build-arg SERVER_INTERNAL_API_BASE_URL="${SERVER_INTERNAL_API_BASE_URL}"
       -t "${SEEDSHIFT_WEB_IMAGE_COMMIT}"
       -t "${SEEDSHIFT_WEB_IMAGE_REF}"
       -f infra/containers/web.Containerfile web
@@ -380,7 +377,7 @@ deploy-app:
   resource_group: seedshift-radio-deploy
   script:
     - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}}}"
-    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN SEEDSHIFT_WEB_ADMIN_PASSWORD SEEDSHIFT_WEB_SESSION_SECRET
     - export SEEDSHIFT_SERVER_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/server:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_WEB_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/web:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_DEPLOY_DIR="${SEEDSHIFT_DEPLOY_DIR:-$HOME/seedshift-radio-deploy}"
@@ -422,6 +419,7 @@ smoke-production:
       done
     - curl -fsS "${SEEDSHIFT_SMOKE_WEB_BASE_URL}/" >/dev/null
     - curl -fsS "${SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL}/api/health" >/dev/null
+    - SEEDSHIFT_SMOKE_REQUIRE_SECURE_COOKIE=true sh scripts/smoke-admin-session.sh
     - podman --remote ps --filter "name=${SEEDSHIFT_SERVER_CONTAINER_NAME:-seedshift-radio-server}"
     - podman --remote ps --filter "name=${SEEDSHIFT_WEB_CONTAINER_NAME:-seedshift-radio-web}"
 
@@ -432,7 +430,7 @@ pipeline-docs-check:
     - test -f doc/16_パイプライン・コンテナデプロイ仕様書.md
     - test -f doc/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
-    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|CI_REGISTRY|MUSICGEN_DATA_VOLUME" doc/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" doc/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "api-contract|apiContractTest|openapi.sha256" doc/02_API仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/16_パイプライン・コンテナデプロイ仕様書.md doc/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:

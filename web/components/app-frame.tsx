@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import type { PropsWithChildren } from "react";
-import { Badge } from "@/components/ui";
-import { getAdminToken } from "@/lib/env";
+import { useState, type PropsWithChildren } from "react";
+import { Badge, Button } from "@/components/ui";
+import { useAdminSession } from "@/lib/admin-session";
 import { useUiStore } from "@/stores/ui-store";
 
 const publicNavItems = [
@@ -20,13 +22,33 @@ const adminNavItems = [
 
 export function AppFrame({ children }: PropsWithChildren) {
   const pathname = usePathname();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const connectionStatus = useUiStore((state) => state.connectionStatus);
   const liveSubtitle = useUiStore((state) => state.liveSubtitle);
   const lastEventId = useUiStore((state) => state.lastEventId);
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const radioName = useUiStore((state) => state.radioName);
-  const hasAdminToken = Boolean(getAdminToken());
-  const navItems = hasAdminToken ? [...publicNavItems, ...adminNavItems] : publicNavItems;
+  const adminSession = useAdminSession();
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const navItems = adminSession.data?.authenticated ? [...publicNavItems, ...adminNavItems] : publicNavItems;
+
+  async function logout() {
+    setLogoutError(null);
+    try {
+      const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+      const session = await sessionResponse.json() as { csrfToken?: string };
+      if (!session.csrfToken) throw new Error("管理 session を確認できませんでした。");
+      const response = await fetch("/api/auth/logout", { method: "POST", headers: { "X-CSRF-Token": session.csrfToken } });
+      if (!response.ok) throw new Error("ログアウトできませんでした。");
+      queryClient.setQueryData(["admin-session"], { authenticated: false });
+      router.push("/");
+      router.refresh();
+    } catch (cause) {
+      setLogoutError(cause instanceof Error ? cause.message : "ログアウトできませんでした。");
+      await queryClient.invalidateQueries({ queryKey: ["admin-session"] });
+    }
+  }
 
   return (
     <div className="relative min-h-screen text-slate-900">
@@ -43,6 +65,7 @@ export function AppFrame({ children }: PropsWithChildren) {
                 <div className="text-lg font-semibold tracking-tight text-slate-950">Local AI radio console</div>
               </div>
             </div>
+            {logoutError ? <p role="alert" className="text-sm font-semibold text-rose-700">{logoutError}</p> : null}
             <nav className="flex flex-wrap gap-2">
               {navItems.map((item) => {
                 const active = pathname === item.href;
@@ -63,6 +86,7 @@ export function AppFrame({ children }: PropsWithChildren) {
               })}
             </nav>
             <div className="flex flex-wrap items-center gap-2">
+              {adminSession.data?.authenticated ? <Button tone="ghost" onClick={logout}>ログアウト</Button> : null}
               <div data-testid="connection-status">
                 <Badge tone={connectionStatus === "connected" ? "success" : connectionStatus === "reconnecting" ? "warning" : "default"}>
                   {connectionStatus.toUpperCase()}

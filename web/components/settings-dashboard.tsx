@@ -19,7 +19,6 @@ import {
   updateStationProgramming,
   updateSettings,
 } from "@/lib/api";
-import { getAdminToken } from "@/lib/env";
 import { formatSafeDisplayText, getSafeMetadataEntries, REDACTED_METADATA_VALUE } from "@/lib/safe-metadata";
 import { buildSettingsExportFilename, buildSettingsExportPayload, parseSettingsImportPayload } from "@/lib/settings-import-export";
 import { applyProgrammingSummaryToStationDraft, cloneStationDraft, createBlankStationDraft, createDuplicatedStationDraft } from "@/lib/station-editor";
@@ -92,7 +91,7 @@ const SELECT_CLASS_NAME =
 
 export function SettingsDashboard() {
   const queryClient = useQueryClient();
-  const hasAdminToken = Boolean(getAdminToken());
+  const hasAdminToken = true;
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const setSelectedStationId = useUiStore((state) => state.setSelectedStationId);
   const [draft, setDraft] = useState<SettingsUpdateRequest | null>(null);
@@ -621,7 +620,7 @@ export function SettingsDashboard() {
             />
             <EmptyState
               title="設定画面は管理トークンが必要です"
-              description="`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` または `NEXT_PUBLIC_ADMIN_TOKEN` を設定してから開いてください。"
+              description="管理者としてログインしてから開いてください。"
             />
           </Card>
         </PanelColumn>

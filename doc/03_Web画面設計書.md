@@ -135,12 +135,14 @@
 - `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を編集できるようにする
 - TTS provider は `VOICEVOX` と `IRODORI_OPENAI_TTS` の default/fallback 切替を扱えるようにする。Irodori の `apiKeyRef` は `env:` / `file:` 参照のみ表示・編集し、bearer token の実値は扱わない
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
-- 管理トークンがない場合は導線を非表示にし、直接開いた時は管理画面であることを案内する
+- 管理 session がない場合は Settings / Monitor 導線を非表示にし、`/settings`、`/monitor` を直接開いた時は `/admin/login` へ遷移する
+- `/admin/login` は Web 管理用パスワードだけを一時入力として受け取り、成功時に server-side で署名した `HttpOnly` session Cookie を確立する。管理 API 用トークンとは別資格情報とし、入力値を browser storage や標準ログへ残さない
+- 認証済み session の確認は `GET /api/auth/session` を使い、返された CSRF token は client memory だけで扱う。状態変更を伴う `/api-proxy` request と `POST /api/auth/logout` は `X-CSRF-Token` を付ける
 - `Import / Export` は Web 側で JSON download / file import として実装し、専用 API は増やさず既存の `GET /api/settings` と `PUT /api/settings` を使う
 - Import 時は `schemaVersion` の一致を確認し、`version` は現在の保存済み設定へ合わせる。`apiKeyRef` と `adminTokenRef` は `env:` / `file:` 参照だけ受け付ける
 - `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
 - `Voice Profiles` の作成/編集 UI は後続実装対象とする。Irodori 取り込みの第一段では seed / DB migration と既存 station の `defaultVoiceProfileId` 差し替えで、チャンネルごとに別 voice id / style preset を割り当てられる状態を優先する
-- `/letters` の管理 inbox、`/settings`、`/monitor` は公開 UI と分離し、production では server-side session を確立した利用者だけが表示・操作できるようにする。`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` は E2E と閉じた開発環境だけの暫定導線であり、公開 build へ埋め込まない。移行は GitLab `P0-11` で追跡する
+- `/letters` の管理 inbox、`/settings`、`/monitor` は公開 UI と分離し、server-side session を確立した利用者だけが表示・操作できるようにする。`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` と legacy browser token 導線は廃止し、公開 build、Cookie、browser storage へ管理 API 用トークンを含めない
 
 ## 8. 監視画面
 
@@ -190,10 +192,10 @@
 - ラジオ画面の再生状態は Client Component に集約する
 - `useEffectEvent` を用いて音声イベント購読処理を安定化する
 - 過剰なグローバル状態は避け、Server State と UI State を分離する
-- `/monitor` は必要に応じて管理トークンがある時だけ導線を表示する
+- Settings / Monitor 導線は `GET /api/auth/session` が認証済みを返す時だけ表示し、同じ導線から session logout を実行できるようにする
 - `/settings` の Import / Export helper は Vitest で、metadata 除外、schemaVersion mismatch、Import/Export 双方の secret 参照検証、未登録 fallback provider を確認する
 - `/settings` / `/monitor` の provider health 表示 helper は Vitest で、metadata/message/object fallback に prompt / lyrics / letter body / radioName / secret が混ざっても露出しないことを確認する
-- `/settings` の station 基本情報更新は API client test で、`X-Admin-Token`、JSON body、URL encode を確認する
-- `/settings` の station programming policy 更新は API client test で、`X-Admin-Token`、JSON body、URL encode を確認する
+- `/settings` の station 基本情報更新は API client test で、CSRF header、JSON body、URL encode を確認し、browser が `X-Admin-Token` を生成しないことを固定する
+- `/settings` の station programming policy 更新は API client test で、CSRF header、JSON body、URL encode を確認し、管理 token 注入は BFF test で固定する
 - Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID` を mock API / mock stream / audio stub で確認する
 - E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する

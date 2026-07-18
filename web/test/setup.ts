@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, vi } from "vitest";
 
-const envKeys = [
-  "NEXT_PUBLIC_API_BASE_URL",
-  "NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN",
-  "NEXT_PUBLIC_ADMIN_TOKEN",
-] as const;
+const envKeys = ["SEEDSHIFT_WEB_ADMIN_PASSWORD", "SEEDSHIFT_WEB_SESSION_SECRET", "SEEDSHIFT_ADMIN_TOKEN"] as const;
 
 let envSnapshot: Record<(typeof envKeys)[number], string | undefined>;
 

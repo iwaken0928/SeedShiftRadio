@@ -27,6 +27,11 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run start:e2e",
+    env: {
+      SEEDSHIFT_WEB_ADMIN_PASSWORD: "playwright-login-password",
+      SEEDSHIFT_WEB_SESSION_SECRET: "playwright-session-secret-at-least-32-bytes",
+      SEEDSHIFT_ADMIN_TOKEN: "playwright-server-admin-token",
+    },
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

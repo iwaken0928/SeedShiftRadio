@@ -18,7 +18,10 @@
 - 設定更新、局管理、番組編成管理、レター管理、履歴参照、監視 API は `X-Admin-Token` を要求する
 - 認証区分は次の表、`src/test/resources/contracts/api-auth-matrix.json`、生成 OpenAPI の `security` を一致させる
 - `PUBLIC` は `X-Admin-Token` 不要、`ADMIN` は `X-Admin-Token` 必須を表す
-- Web 管理 UI は管理トークンを `NEXT_PUBLIC_*` へ埋め込まない。現行開発導線の browser token は production 未対応であり、server-side session と proxy injection への移行を GitLab `P0-11` で追跡する
+- Web 管理 UI は管理トークンを `NEXT_PUBLIC_*`、browser storage、Cookie へ埋め込まない。同一 origin の Next.js BFF が認証済み session を検証し、管理 API に限って server-side の `SEEDSHIFT_ADMIN_TOKEN` を `X-Admin-Token` として注入する
+- BFF は browser から受け取った `X-Admin-Token`、Cookie、`X-CSRF-Token` を Server へ転送しない。管理対象外の公開 API には管理トークンを注入しない
+- `POST /api/auth/login`、`GET /api/auth/session`、`POST /api/auth/logout` は Web BFF 専用 endpoint であり、Spring Boot の共通 `/api` 契約、生成 OpenAPI、`api-auth-matrix.json` には含めない
+- Web の session は `HttpOnly`、`SameSite=Strict`、production では `Secure` の Cookie とし、状態変更を伴う管理 API proxy と logout は `X-CSRF-Token` を要求する
 - 将来 `Spring Security` を導入しても DTO を崩さない
 
 | Method | Path | Access |

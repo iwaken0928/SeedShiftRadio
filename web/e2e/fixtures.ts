@@ -1,7 +1,7 @@
 import type { Locator, Page, Route } from "@playwright/test";
 
-export const API_BASE_URL = "http://127.0.0.1:8080";
 export const APP_BASE_URL = process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://127.0.0.1:3001";
+export const API_BASE_URL = `${APP_BASE_URL}/api-proxy`;
 export const UI_STORE_STORAGE_KEY = "seedshift-radio-web-ui";
 
 export function appUrl(pathname = "/") {
@@ -10,6 +10,14 @@ export function appUrl(pathname = "/") {
 
 export function apiUrl(pathname: string) {
   return `${API_BASE_URL}${pathname}`;
+}
+
+export async function loginAdmin(page: Page) {
+  const response = await page.request.post(appUrl("/api/auth/login"), {
+    data: { password: "playwright-login-password" },
+    headers: { Origin: APP_BASE_URL },
+  });
+  if (!response.ok()) throw new Error(`admin login failed: ${response.status()}`);
 }
 
 export function apiRegExp(pathPattern: string) {

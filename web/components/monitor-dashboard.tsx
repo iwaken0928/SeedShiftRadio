@@ -3,7 +3,6 @@
 import { useDeferredValue, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getHealth, getMonitorSummary, getRadioProgram } from "@/lib/api";
-import { getAdminToken } from "@/lib/env";
 import { extractWorkerStatusDetails, getProviderMetadataHighlights, type WorkerStatusDetails } from "@/lib/monitor-provider-health";
 import { formatSafeDisplayText } from "@/lib/safe-metadata";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
@@ -16,7 +15,7 @@ const PROVIDER_STATUS_FILTERS = ["ALL", "UP", "DEGRADED", "DOWN"] as const;
 type ProviderStatusFilter = (typeof PROVIDER_STATUS_FILTERS)[number];
 
 export function MonitorDashboard() {
-  const hasAdminToken = Boolean(getAdminToken());
+  const hasAdminToken = true;
   const [providerStatusFilter, setProviderStatusFilter] = useState<ProviderStatusFilter>("ALL");
   const [jobSearchText, setJobSearchText] = useState("");
   const [auditSearchText, setAuditSearchText] = useState("");
@@ -62,7 +61,7 @@ export function MonitorDashboard() {
             />
             <EmptyState
               title="監視画面は管理トークンが必要です"
-              description="`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` または `NEXT_PUBLIC_ADMIN_TOKEN` を設定してから開いてください。"
+              description="管理者としてログインしてから開いてください。"
             />
           </Card>
         </PanelColumn>

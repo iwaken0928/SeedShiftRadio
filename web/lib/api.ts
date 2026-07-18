@@ -29,7 +29,7 @@ import {
   type TuneRequest,
   type TuneResponse,
 } from "@/lib/types";
-import { getAdminToken, getApiBaseUrl } from "@/lib/env";
+import { getApiBaseUrl } from "@/lib/env";
 
 export class ApiRequestError extends Error {
   status: number;
@@ -50,13 +50,17 @@ export function buildApiUrl(path: string, apiBase = getApiBaseUrl()) {
 }
 
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json", ...headersToRecord(init?.headers) };
+  if (isUnsafeMethod(init?.method)) {
+    const csrfToken = await getCsrfToken();
+    if (csrfToken) {
+      headers["X-CSRF-Token"] = csrfToken;
+    }
+  }
   const response = await fetch(buildApiUrl(path), {
     cache: "no-store",
     ...init,
-    headers: {
-      Accept: "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -75,18 +79,29 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   return (await response.json()) as T;
 }
 
-export function mergeAdminHeaders(adminToken: string | null, headers?: HeadersInit) {
-  if (!adminToken) {
-    return headers;
-  }
-  return {
-    ...(headers ?? {}),
-    "X-Admin-Token": adminToken,
-  };
+export function withAdminHeaders(headers?: HeadersInit) {
+  return headers;
 }
 
-export function withAdminHeaders(headers?: HeadersInit) {
-  return mergeAdminHeaders(getAdminToken(), headers);
+async function getCsrfToken() {
+  return fetch("/api/auth/session", { cache: "no-store" })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const payload = (await response.clone().json()) as { authenticated?: boolean; csrfToken?: string };
+      return payload.authenticated && payload.csrfToken ? payload.csrfToken : null;
+    })
+    .catch(() => null);
+}
+
+function isUnsafeMethod(method?: string) {
+  return !["GET", "HEAD", "OPTIONS"].includes((method ?? "GET").toUpperCase());
+}
+
+function headersToRecord(headers?: HeadersInit) {
+  if (!headers) return {};
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return { ...headers };
 }
 
 export async function safeReadError(response: Response) {

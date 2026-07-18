@@ -7,7 +7,6 @@ import {
   createProgramTemplate,
   createStation,
   listLetters,
-  mergeAdminHeaders,
   previewProgramming,
   requestJson,
   safeReadError,
@@ -24,18 +23,7 @@ describe("api helpers", () => {
     expect(buildLettersPath()).toBe("/api/letters");
   });
 
-  it("admin token がある時だけ header を追加する", () => {
-    expect(mergeAdminHeaders(null, { Accept: "application/json" })).toEqual({
-      Accept: "application/json",
-    });
-    expect(mergeAdminHeaders("token-123", { Accept: "application/json" })).toEqual({
-      Accept: "application/json",
-      "X-Admin-Token": "token-123",
-    });
-  });
-
   it("requestJson は base URL と Accept header を付けて JSON を返す", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://api.example");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "UP" }), {
         status: 200,
@@ -47,7 +35,7 @@ describe("api helpers", () => {
       status: "UP",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("http://api.example/api/health", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/health", {
       cache: "no-store",
       headers: {
         Accept: "application/json",
@@ -60,6 +48,26 @@ describe("api helpers", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
 
     await expect(requestJson<void>("/api/radio/play", { method: "POST" })).resolves.toBeUndefined();
+  });
+
+  it("unsafe request は session endpoint の CSRF token を送り、管理トークンは生成しない", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/auth/session") {
+        return Response.json({ authenticated: true, csrfToken: "csrf-from-session" });
+      }
+      return new Response(null, { status: 204 });
+    });
+
+    await requestJson<void>("/api/settings/test-connections", { method: "POST" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/settings/test-connections", {
+      cache: "no-store",
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "X-CSRF-Token": "csrf-from-session",
+      },
+    });
   });
 
   it("エラーレスポンスの message を優先して例外化する", async () => {
@@ -132,8 +140,7 @@ describe("api helpers", () => {
     );
   });
 
-  it("listLetters は admin token と query を付けて fetch する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+  it("listLetters は同一 origin BFF の query を付けて fetch する", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([]), {
         status: 200,
@@ -143,17 +150,15 @@ describe("api helpers", () => {
 
     await expect(listLetters("station-a", "ADOPTED")).resolves.toEqual([]);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/letters?stationId=station-a&status=ADOPTED", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/letters?stationId=station-a&status=ADOPTED", {
       cache: "no-store",
       headers: {
         Accept: "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });
 
-  it("updateStationProgramming は admin token と JSON body を付けて PUT する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+  it("updateStationProgramming は JSON body を付けて同一 origin BFF へ PUT する", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -225,20 +230,18 @@ describe("api helpers", () => {
 
     await updateStationProgramming("station/night", body);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight/programming", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/stations/station%2Fnight/programming", {
       cache: "no-store",
       method: "PUT",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });
 
   it("previewProgramming は未保存 draft を含む JSON body を付けて POST する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -343,20 +346,18 @@ describe("api helpers", () => {
 
     await previewProgramming("station/night", body);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight/programming/preview", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/stations/station%2Fnight/programming/preview", {
       cache: "no-store",
       method: "POST",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });
 
-  it("updateStation は admin token と JSON body を付けて PUT する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+  it("updateStation は JSON body を付けて同一 origin BFF へ PUT する", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -393,20 +394,18 @@ describe("api helpers", () => {
 
     await updateStation("station/night", body);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations/station%2Fnight", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/stations/station%2Fnight", {
       cache: "no-store",
       method: "PUT",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });
 
-  it("createStation は admin token と JSON body を付けて POST する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+  it("createStation は JSON body を付けて同一 origin BFF へ POST する", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -443,20 +442,18 @@ describe("api helpers", () => {
 
     await createStation(body);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/stations", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/stations", {
       cache: "no-store",
       method: "POST",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });
 
-  it("updateProgramTemplate は admin token と JSON body を付けて PUT する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+  it("updateProgramTemplate は JSON body を付けて同一 origin BFF へ PUT する", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -529,20 +526,18 @@ describe("api helpers", () => {
 
     await updateProgramTemplate("tmpl/night/deep", body);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/program-templates/tmpl%2Fnight%2Fdeep", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/program-templates/tmpl%2Fnight%2Fdeep", {
       cache: "no-store",
       method: "PUT",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });
 
-  it("createProgramTemplate は admin token と JSON body を付けて POST する", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN", "admin-token");
+  it("createProgramTemplate は JSON body を付けて同一 origin BFF へ POST する", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -615,14 +610,13 @@ describe("api helpers", () => {
 
     await createProgramTemplate(body);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8080/api/program-templates", {
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/program-templates", {
       cache: "no-store",
       method: "POST",
       body: JSON.stringify(body),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Admin-Token": "admin-token",
       },
     });
   });

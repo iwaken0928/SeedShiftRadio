@@ -3,7 +3,7 @@
 import { useDeferredValue, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createLetter, getLetter, getRadioStatus, listLetters, lookupLetterPublicHistory, replyLetter, updateLetterStatus } from "@/lib/api";
-import { getAdminToken } from "@/lib/env";
+import { useAdminSession } from "@/lib/admin-session";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Button, Card, EmptyState, Input, SectionHeader, Textarea } from "@/components/ui";
 import { useUiStore } from "@/stores/ui-store";
@@ -15,7 +15,7 @@ const MAX_BODY_LENGTH = 1000;
 
 export function LettersDashboard() {
   const queryClient = useQueryClient();
-  const hasAdminToken = Boolean(getAdminToken());
+  const hasAdminToken = Boolean(useAdminSession().data?.authenticated);
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const radioName = useUiStore((state) => state.radioName);
   const setRadioName = useUiStore((state) => state.setRadioName);
@@ -302,7 +302,7 @@ export function LettersDashboard() {
             <SectionHeader
               eyebrow="Admin"
               title="Management inbox"
-              description="`X-Admin-Token` か `NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` がある時だけ管理用の一覧と操作を表示します。"
+              description="管理者としてログインしている時だけ、管理用の一覧と操作を表示します。"
             />
             <EmptyState
               title="管理 inbox は非表示です"
@@ -374,7 +374,7 @@ export function LettersDashboard() {
             ) : (
               <EmptyState
                 title="レター一覧を取得できません"
-                description={lettersQuery.error instanceof Error ? lettersQuery.error.message : "管理トークンがある時に一覧が表示されます。"}
+                description={lettersQuery.error instanceof Error ? lettersQuery.error.message : "管理者としてログインしている時に一覧が表示されます。"}
               />
             )}
           </Card>

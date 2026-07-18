@@ -11,6 +11,7 @@ import {
   buildStationProgrammingResponse,
   clearPersistedUiState,
   fulfillJson,
+  loginAdmin,
   mockUnavailableStream,
   panelByHeading,
 } from "./fixtures";
@@ -29,6 +30,7 @@ type TemplateSummaryState = ReturnType<typeof buildProgramTemplateSummary>;
 
 test.beforeEach(async ({ page }) => {
   await clearPersistedUiState(page);
+  await loginAdmin(page);
   await mockUnavailableStream(page);
 });
 

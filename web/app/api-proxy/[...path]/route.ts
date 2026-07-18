@@ -1,4 +1,6 @@
 import type { NextRequest } from "next/server";
+import { getRequestAdminSession, getServerAdminToken, verifyCsrfToken } from "@/lib/server/admin-auth";
+import { isUnsafeMethod, requiresAdminSession } from "@/lib/server/proxy-policy";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,8 +26,28 @@ type RouteContext = {
 
 async function proxy(request: NextRequest, context: RouteContext) {
   const { path = [] } = await context.params;
+  const adminRequest = requiresAdminSession(request.method, path);
+  if (adminRequest) {
+    const session = getRequestAdminSession(request);
+    if (!session) {
+      return Response.json({ code: "ADMIN_SESSION_REQUIRED", message: "管理者ログインが必要です。" }, { status: 401 });
+    }
+    if (isUnsafeMethod(request.method) && !verifyCsrfToken(session, request.headers.get("x-csrf-token"))) {
+      return Response.json({ code: "CSRF_TOKEN_INVALID", message: "CSRF token が不正です。" }, { status: 403 });
+    }
+  }
   const target = buildTargetUrl(path, request.nextUrl.search);
   const headers = filterHeaders(request.headers);
+  headers.delete("cookie");
+  headers.delete("x-admin-token");
+  headers.delete("x-csrf-token");
+  if (adminRequest) {
+    const adminToken = getServerAdminToken();
+    if (!adminToken) {
+      return Response.json({ code: "ADMIN_AUTH_UNAVAILABLE", message: "管理 API の認証設定がありません。" }, { status: 503 });
+    }
+    headers.set("X-Admin-Token", adminToken);
+  }
   const body = await readRequestBody(request);
   const response = await fetch(target, {
     method: request.method,

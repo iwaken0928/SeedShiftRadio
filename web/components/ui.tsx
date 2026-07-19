@@ -1,25 +1,43 @@
 "use client";
 
 import clsx from "clsx";
+import React from "react";
 import type { ButtonHTMLAttributes, ComponentPropsWithoutRef, InputHTMLAttributes, PropsWithChildren, ReactNode, TextareaHTMLAttributes } from "react";
 
 export function Card({
   children,
   className,
+  elevation = "subtle",
+  material = "solid",
+  motion = "none",
   tone = "default",
   ...props
-}: PropsWithChildren<ComponentPropsWithoutRef<"section"> & { tone?: "default" | "accent" | "warning" | "dark" }>) {
+}: PropsWithChildren<
+  ComponentPropsWithoutRef<"section"> & {
+    elevation?: "subtle" | "raised";
+    material?: "solid" | "glass";
+    motion?: "none" | "enter";
+    tone?: "default" | "accent" | "warning" | "dark";
+  }
+>) {
   const toneClass = {
-    default: "bg-white/82 border-slate-200/80",
-    accent: "bg-teal-50/90 border-teal-200/80",
-    warning: "bg-amber-50/90 border-amber-200/80",
-    dark: "bg-slate-950/92 border-slate-800 text-slate-50",
+    default: material === "glass" ? "bg-white/[0.88] border-slate-200/80" : "bg-white/[0.96] border-slate-200/80",
+    accent: material === "glass" ? "bg-teal-50/[0.90] border-teal-200/80" : "bg-teal-50/[0.97] border-teal-200/80",
+    warning: material === "glass" ? "bg-amber-50/[0.90] border-amber-200/80" : "bg-amber-50/[0.97] border-amber-200/80",
+    dark: material === "glass" ? "bg-slate-950/[0.92] border-slate-800 text-slate-50" : "bg-slate-950/[0.97] border-slate-800 text-slate-50",
   }[tone];
 
   return (
     <section
       {...props}
-      className={clsx("glass rounded-3xl border p-5 shadow-glow transition duration-300 animate-floatIn", toneClass, className)}
+      className={clsx(
+        "rounded-3xl border p-5",
+        material === "glass" && "glass",
+        elevation === "raised" ? "shadow-glow" : "shadow-surface",
+        motion === "enter" && "motion-enter",
+        toneClass,
+        className,
+      )}
     >
       {children}
     </section>
@@ -38,7 +56,7 @@ export function Badge({
     accent: "bg-teal-100 text-teal-800 border-teal-200",
   }[tone];
 
-  return <span className={clsx("inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold tracking-wide", toneClass)}>{children}</span>;
+  return <span className={clsx("inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold tracking-wide transition-colors duration-150", toneClass)}>{children}</span>;
 }
 
 export function Button({
@@ -53,7 +71,7 @@ export function Button({
 >) {
   const toneClass = {
     primary: "bg-slate-950 text-white hover:bg-slate-800",
-    secondary: "bg-teal-600 text-white hover:bg-teal-500",
+    secondary: "bg-teal-700 text-white hover:bg-teal-600",
     ghost: "bg-transparent text-slate-900 border border-slate-300 hover:bg-white/60",
     danger: "bg-rose-600 text-white hover:bg-rose-500",
   }[tone];
@@ -62,7 +80,7 @@ export function Button({
     <button
       {...props}
       className={clsx(
-        "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50",
+        "interactive-control inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50",
         toneClass,
         className,
       )}
@@ -77,7 +95,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={clsx(
-        "w-full rounded-2xl border border-slate-300 bg-white/85 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-200",
+        "field-control min-h-11 w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400",
         props.className,
       )}
     />
@@ -89,7 +107,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
     <textarea
       {...props}
       className={clsx(
-        "w-full rounded-2xl border border-slate-300 bg-white/85 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-200",
+        "field-control w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400",
         props.className,
       )}
     />
@@ -98,7 +116,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
 
 export function Label({ children, htmlFor }: PropsWithChildren<{ htmlFor?: string }>) {
   return (
-    <label htmlFor={htmlFor} className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+    <label htmlFor={htmlFor} className="mb-2 block text-[13px] font-semibold tracking-[0.04em] text-slate-500">
       {children}
     </label>
   );
@@ -118,8 +136,8 @@ export function SectionHeader({
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="space-y-1">
-        {eyebrow ? <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-700">{eyebrow}</p> : null}
-        <h2 className="text-xl font-semibold tracking-tight text-slate-950">{title}</h2>
+        {eyebrow ? <p className="font-[var(--font-display)] text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">{eyebrow}</p> : null}
+        <h2 className="font-[var(--font-display)] text-xl font-semibold tracking-tight text-slate-950">{title}</h2>
         {description ? <p className="max-w-2xl text-sm leading-6 text-slate-600">{description}</p> : null}
       </div>
       {action ? <div>{action}</div> : null}
@@ -145,8 +163,8 @@ export function Metric({
 
   return (
     <div className={clsx("rounded-2xl border px-4 py-3", toneClass)}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">{label}</div>
-      <div className="mt-2 text-sm font-semibold text-slate-950">{value}</div>
+      <div className="font-[var(--font-display)] text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+      <div className="mt-2 text-base font-semibold text-slate-950">{value}</div>
     </div>
   );
 }

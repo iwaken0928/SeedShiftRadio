@@ -229,6 +229,21 @@ motion は 160〜240ms の ease-out を基準とする。
 初期表示の主要ブロックだけに 1 回使い、10 秒更新される monitor card や状態 badge の再描画には登場 animation を付けない。
 `prefers-reduced-motion: reduce` では移動と反復 pulse を停止する。
 
+実装で共有する motion token は次を正規値とする。
+
+```css
+--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+--motion-press: 120ms;
+--motion-feedback: 160ms;
+--motion-enter: 200ms;
+```
+
+`Card` は静止を既定とし、公開画面の主役面だけ `motion="enter"` で 6px の移動と opacity を opt-in する。
+設定・監視・一覧カードへ entrance を付けず、値や badge の変化は color transition だけで伝える。
+`prefers-reduced-motion: reduce` では `motion="enter"` を opacity のみへ置き換え、press feedback の scale を停止する。
+レター送信完了のような低頻度 notice は 160ms で同じ方向へ enter / exit し、表示中の読み取り時間を animation で削らない。
+
 ## Shapes
 
 - `frame` 32px: app header などページの外枠。
@@ -272,6 +287,7 @@ Card tone の用途は次の通り。
 高さは 44px 以上、左右 padding は 16px 以上。
 disabled は opacity だけでなく cursor と必要な説明を用意する。
 focus-visible は 2px の `brand-bright` ring と 2px の surface offset を持つ。
+press feedback は `--motion-press` で `scale(0.98)` までに留め、reduced motion では transform を使わない。
 
 ### Form
 
@@ -320,4 +336,3 @@ error は秘密情報や raw response を出さず、再試行、設定確認、
 - mobile header へ全 badge を縦積みし、再生操作を first viewport から追い出さない。
 - placeholder、色、hover だけに意味を依存させない。
 - prompt、lyrics、letter body、radioName、secret、raw provider response を監視カードや error detail に表示しない。
-

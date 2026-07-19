@@ -186,6 +186,8 @@
 - 色だけで状態を表現せず、ラベルとアイコンも併用する
 - 現在ページの navigation には `aria-current="page"` を付け、focus-visible を背景上で識別できる 2px 以上の ring で示す
 - `prefers-reduced-motion: reduce` では移動 animation と反復 pulse を停止し、monitor の定期更新でカード全体を再 animation しない
+- `Card` は静止を既定とし、公開画面の主役カードだけ 200ms の entrance を opt-in する。reduced motion では移動を除いた 160ms の opacity feedback に置き換える
+- navigation、button、選択行の press feedback は 120ms、focus / color feedback は 160ms を基準とし、フォームは border と focus ring 以外を transition しない
 
 ## 12. 実装メモ
 
@@ -199,3 +201,4 @@
 - `/settings` の station programming policy 更新は API client test で、CSRF header、JSON body、URL encode を確認し、管理 token 注入は BFF test で固定する
 - Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID` を mock API / mock stream / audio stub で確認する
 - E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する
+- Playwright では 390px viewport の header 高さ、44px 以上の navigation target、横 overflow、`aria-current`、reduced motion 時の opacity-only entrance を確認する

@@ -13,6 +13,11 @@
   --accent: 11 118 123;
   --accent-strong: 20 184 166;
   --accent-warm: 194 101 54;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --motion-press: 120ms;
+  --motion-feedback: 160ms;
+  --motion-enter: 200ms;
 }
 
 html,
@@ -44,8 +49,8 @@ a {
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .grid-dots {
@@ -53,4 +58,103 @@ a {
     linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+.interactive-control {
+  min-height: 44px;
+  transition-duration: var(--motion-feedback);
+  transition-property: background-color, border-color, color, box-shadow, transform;
+  transition-timing-function: var(--ease-out);
+}
+
+.interactive-control:focus-visible,
+.field-control:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgb(var(--card)),
+    0 0 0 4px rgb(var(--accent-strong) / 0.72);
+}
+
+.interactive-control:active:not(:disabled) {
+  transform: scale(0.98);
+  transition-duration: var(--motion-press);
+}
+
+.field-control {
+  transition-duration: var(--motion-feedback);
+  transition-property: border-color, box-shadow;
+  transition-timing-function: var(--ease-out);
+}
+
+.field-control:focus-visible {
+  border-color: rgb(var(--accent-strong));
+}
+
+.motion-enter {
+  animation: surface-enter var(--motion-enter) var(--ease-out) both;
+}
+
+.motion-notice {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--motion-feedback) var(--ease-out),
+    transform var(--motion-feedback) var(--ease-out);
+}
+
+.motion-notice-closing {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+@starting-style {
+  .motion-notice {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes surface-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interactive-control {
+    transition-property: background-color, border-color, color, box-shadow;
+  }
+
+  .interactive-control:active:not(:disabled),
+  .motion-notice,
+  .motion-notice-closing {
+    transform: none;
+  }
+
+  .motion-enter {
+    animation: surface-fade-in var(--motion-feedback) var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }

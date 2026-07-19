@@ -108,7 +108,7 @@ export function RadioDashboard() {
   return (
     <PanelGrid>
       <PanelColumn className="xl:col-span-7">
-        <Card>
+        <Card elevation="raised" material="glass" motion="enter">
           <SectionHeader
             eyebrow="Radio"
             title="Live Playout"
@@ -154,7 +154,7 @@ export function RadioDashboard() {
                         type="button"
                         onClick={() => setSelectedStationId(station.id)}
                         data-testid={`station-option-${station.id}`}
-                        className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                        className={`interactive-control rounded-full border px-4 py-2 text-sm font-semibold ${
                           selectedStationId === station.id
                             ? "border-slate-950 bg-slate-950 text-white"
                             : "border-slate-200 bg-white/80 text-slate-700 hover:border-teal-300 hover:text-slate-950"

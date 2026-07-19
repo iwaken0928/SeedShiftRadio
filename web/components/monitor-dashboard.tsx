@@ -161,7 +161,7 @@ export function MonitorDashboard() {
                       key={status}
                       type="button"
                       onClick={() => setProviderStatusFilter(status)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      className={`interactive-control rounded-full border px-3 py-1.5 text-xs font-semibold ${
                         providerStatusFilter === status ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"
                       }`}
                     >

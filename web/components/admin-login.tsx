@@ -38,12 +38,12 @@ export function AdminLogin({ returnTo }: { returnTo: string }) {
 
   return (
     <div className="mx-auto max-w-xl pt-12">
-      <Card>
+      <Card elevation="raised" material="glass" motion="enter">
         <SectionHeader eyebrow="Admin" title="管理画面へログイン" description="管理用パスワードを入力してください。Server の管理トークンが browser に送られることはありません。" />
         <form className="space-y-4" onSubmit={submit}>
           <Input aria-label="管理用パスワード" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-          {error ? <p role="alert" className="text-sm font-semibold text-rose-700">{error}</p> : null}
-          <Button type="submit" disabled={submitting}>{submitting ? "確認中..." : "ログイン"}</Button>
+          {error ? <p role="alert" className="motion-notice text-sm font-semibold text-rose-700">{error}</p> : null}
+          <Button type="submit" disabled={submitting} aria-busy={submitting}>{submitting ? "確認中..." : "ログイン"}</Button>
         </form>
       </Card>
     </div>

@@ -28,6 +28,7 @@ export function LettersDashboard() {
   const [body, setBody] = useState("");
   const [replyText, setReplyText] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastClosing, setToastClosing] = useState(false);
   const deferredSearchText = useDeferredValue(searchText.trim().toLowerCase());
 
   const radioStatusQuery = useQuery({
@@ -103,6 +104,7 @@ export function LettersDashboard() {
       addLocalLetterSubmission(submission);
       setSubject("");
       setBody("");
+      setToastClosing(false);
       setToastMessage("レターを送信しました");
       await queryClient.invalidateQueries({ queryKey: ["letters", "public-history"] });
       if (hasAdminToken) {
@@ -115,8 +117,12 @@ export function LettersDashboard() {
     if (!toastMessage) {
       return;
     }
-    const timeout = window.setTimeout(() => setToastMessage(null), 3500);
-    return () => window.clearTimeout(timeout);
+    const closingTimeout = window.setTimeout(() => setToastClosing(true), 3300);
+    const removeTimeout = window.setTimeout(() => setToastMessage(null), 3500);
+    return () => {
+      window.clearTimeout(closingTimeout);
+      window.clearTimeout(removeTimeout);
+    };
   }, [toastMessage]);
 
   const bodyLength = body.length;
@@ -151,7 +157,7 @@ export function LettersDashboard() {
   return (
     <PanelGrid>
       <PanelColumn className="xl:col-span-5">
-        <Card>
+        <Card elevation="raised" material="glass" motion="enter">
           <SectionHeader
             eyebrow="Public"
             title="Submit a letter"
@@ -159,7 +165,7 @@ export function LettersDashboard() {
           />
           {toastMessage ? (
             <div
-              className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
+              className={`motion-notice mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 ${toastClosing ? "motion-notice-closing" : ""}`}
               role="status"
               aria-live="polite"
               data-testid="letter-submit-toast"
@@ -325,7 +331,7 @@ export function LettersDashboard() {
                 <button
                   type="button"
                   onClick={() => setSelectedStatus(undefined)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === undefined ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
+                  className={`interactive-control rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === undefined ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
                 >
                   ALL
                 </button>
@@ -334,7 +340,7 @@ export function LettersDashboard() {
                     key={status}
                     type="button"
                     onClick={() => setSelectedStatus(status)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === status ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
+                    className={`interactive-control rounded-full border px-3 py-1.5 text-xs font-semibold ${selectedStatus === status ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-700"}`}
                   >
                     {status}
                   </button>
@@ -354,7 +360,7 @@ export function LettersDashboard() {
                       onClick={() => setSelectedLetterId(letter.id)}
                       data-testid="admin-letter"
                       data-letter-id={letter.id}
-                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                      className={`interactive-control w-full rounded-2xl border px-4 py-3 text-left ${
                         selectedLetterId === letter.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white/80 text-slate-800"
                       }`}
                     >

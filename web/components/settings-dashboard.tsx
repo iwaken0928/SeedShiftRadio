@@ -87,7 +87,7 @@ const PROVIDER_ADAPTER_OPTIONS = ["MUSICGEN_WORKER", "ACE_STEP"] as const;
 type ProviderEndpointField = "baseUrl" | "healthPath" | "timeoutMs" | "capabilities" | "adapter" | "apiKeyRef" | "defaultModelProfileId";
 type ProviderEndpointValue = string | number | string[] | null;
 const SELECT_CLASS_NAME =
-  "w-full rounded-2xl border border-slate-300 bg-white/85 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-200";
+  "field-control min-h-11 w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none";
 
 export function SettingsDashboard() {
   const queryClient = useQueryClient();
@@ -2709,7 +2709,7 @@ function ProgramTemplateCard({
                   key={entry.id}
                   type="button"
                   onClick={() => onSelectTemplate(entry.id)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                  className={`interactive-control rounded-2xl border px-4 py-3 text-left ${
                     entry.id === selectedTemplateId && !isCreatingTemplate
                       ? "border-slate-950 bg-slate-950 text-white"
                       : "border-slate-200 bg-white/80 text-slate-800"

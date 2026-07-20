@@ -1,6 +1,8 @@
 package com.seedshiftradio.radio;
 
+import com.seedshiftradio.settings.ProviderRegistry;
+
 public interface ScriptProvider {
 
-	GeneratedScript generate(ScriptGenerationContext context);
+	GeneratedScript generate(ProviderRegistry.ResolvedProvider provider, ScriptGenerationContext context);
 }

@@ -182,7 +182,7 @@ public record SettingsDocument(
 
 		public ProviderCatalog normalize() {
 			return new ProviderCatalog(
-					llm == null ? defaults().llm() : llm.normalize(),
+					llm == null ? defaults().llm() : llm.normalize(20_000),
 					tts == null ? defaults().tts() : tts.normalize(),
 					musicGen == null ? defaults().musicGen() : musicGen.normalize());
 		}
@@ -192,7 +192,15 @@ public record SettingsDocument(
 					new ProviderGroup(
 							"ollama",
 							List.of(),
-							Map.of("ollama", new ProviderEndpoint("http://127.0.0.1:11434", "/api/tags", 5_000, List.of("SCRIPT_GEN")))),
+							Map.of("ollama", new ProviderEndpoint(
+									"http://127.0.0.1:11434",
+									"/api/tags",
+									20_000,
+									List.of("SCRIPT_GEN"),
+									"OLLAMA",
+									null,
+									"qwen3:8b",
+									null))),
 					new ProviderGroup(
 							"voicevox",
 							List.of(),
@@ -215,12 +223,16 @@ public record SettingsDocument(
 	public record ProviderGroup(String defaultProvider, List<String> fallbackProviders, Map<String, ProviderEndpoint> providers) {
 
 		public ProviderGroup normalize() {
+			return normalize(5_000);
+		}
+
+		private ProviderGroup normalize(int defaultTimeoutMs) {
 			Map<String, ProviderEndpoint> normalizedProviders = providers == null || providers.isEmpty()
 					? Map.of()
 					: new LinkedHashMap<>(providers.entrySet().stream()
 							.collect(java.util.stream.Collectors.toMap(
 									Map.Entry::getKey,
-									entry -> entry.getValue() == null ? ProviderEndpoint.defaults() : entry.getValue().normalize(),
+									entry -> entry.getValue() == null ? ProviderEndpoint.defaults(defaultTimeoutMs) : entry.getValue().normalize(defaultTimeoutMs),
 									(left, right) -> right,
 									LinkedHashMap::new)));
 			String normalizedDefault = (defaultProvider == null || defaultProvider.isBlank())
@@ -257,6 +269,10 @@ public record SettingsDocument(
 		}
 
 		public ProviderEndpoint normalize() {
+			return normalize(5_000);
+		}
+
+		private ProviderEndpoint normalize(int defaultTimeoutMs) {
 			Map<String, MusicGenerationModelProfile> normalizedProfiles = modelProfiles == null || modelProfiles.isEmpty()
 					? Map.of()
 					: new LinkedHashMap<>(modelProfiles.entrySet().stream()
@@ -273,7 +289,7 @@ public record SettingsDocument(
 			return new ProviderEndpoint(
 					(baseUrl == null || baseUrl.isBlank()) ? "http://127.0.0.1" : baseUrl,
 					(healthPath == null || healthPath.isBlank()) ? "/health" : healthPath,
-					timeoutMs == null || timeoutMs < 100 ? 5_000 : timeoutMs,
+					timeoutMs == null || timeoutMs < 100 ? defaultTimeoutMs : timeoutMs,
 					capabilities == null ? List.of() : List.copyOf(capabilities),
 					(adapter == null || adapter.isBlank()) ? null : adapter.toUpperCase(java.util.Locale.ROOT),
 					apiKeyRef == null || apiKeyRef.isBlank() ? null : apiKeyRef,
@@ -282,7 +298,11 @@ public record SettingsDocument(
 		}
 
 		static ProviderEndpoint defaults() {
-			return new ProviderEndpoint("http://127.0.0.1", "/health", 5_000, List.of());
+			return defaults(5_000);
+		}
+
+		static ProviderEndpoint defaults(int timeoutMs) {
+			return new ProviderEndpoint("http://127.0.0.1", "/health", timeoutMs, List.of());
 		}
 
 		static ProviderEndpoint aceStepDefaults() {

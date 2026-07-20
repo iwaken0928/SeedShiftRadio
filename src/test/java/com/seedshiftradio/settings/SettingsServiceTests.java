@@ -195,12 +195,20 @@ class SettingsServiceTests {
 				"http://127.0.0.1:11434",
 				"/api/tags",
 				5_000,
-				List.of("SCRIPT_GEN"));
+				List.of("SCRIPT_GEN"),
+				"OLLAMA",
+				null,
+				"qwen3:8b",
+				Map.of());
 		SettingsDocument.ProviderEndpoint ollamaFallback = new SettingsDocument.ProviderEndpoint(
 				"http://127.0.0.1:11435",
 				"/api/tags",
 				5_000,
-				List.of("SCRIPT_GEN"));
+				List.of("SCRIPT_GEN"),
+				"OLLAMA",
+				null,
+				"qwen3:8b",
+				Map.of());
 
 		SettingsDtos.SettingsResponse response = settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
 				current.version(),

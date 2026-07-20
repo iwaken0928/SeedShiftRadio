@@ -16,7 +16,7 @@
 
 ```java
 public interface ScriptProvider {
-    ScriptResult generateScript(ScriptRequest request);
+    GeneratedScript generate(ProviderRegistry.ResolvedProvider provider, ScriptGenerationContext context);
 }
 
 public interface TtsProvider {
@@ -63,7 +63,22 @@ Provider 実行失敗は adapter 固有の例外文字列を上位へ流さず�
 
 CLI 方式は worker ラッパーで吸収し、Java 本体から直接プロセス制御しない。
 
-### 5.1 Irodori OpenAI TTS adapter
+### 5.1 LLM adapter
+
+LLM は `OLLAMA` と `OPENAI_COMPATIBLE` の 2 adapter を持つ。現行の `HttpScriptProvider` は既存 Provider 実装と同じ JDK `HttpClient` を使い、新しい Spring AI 依存は追加しない。いずれも `ScriptProvider.generate(ProviderRegistry.ResolvedProvider, ScriptGenerationContext)` の下へ閉じ込め、上位の `ScriptGenerationService` は Provider 固有 endpoint や response envelope を扱わない。Spring AI は将来の adapter 差し替え候補とする。
+
+| adapter | 生成 endpoint | health endpoint | request の要点 | response 抽出元 |
+|---|---|---|---|---|
+| `OLLAMA` | `POST /api/chat` | `GET /api/tags` | `model`, `messages`, `stream=false`, strict JSON format | `message.content` |
+| `OPENAI_COMPATIBLE` | `POST /v1/chat/completions` | `GET /v1/models` | `model`, `messages`, `stream=false`, JSON object response format | `choices[0].message.content` |
+
+model 名には `providers.llm.providers.{providerKey}.defaultModelProfileId` を使う。LLM ではこの field を Music Generation の profile map 参照として解釈せず、実 Provider へ送る model 名そのものとして扱う。`adapter`, `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `defaultModelProfileId` は必須とし、`OPENAI_COMPATIBLE` で認証が必要な場合だけ `apiKeyRef` を設定する。既定 timeout は 20 秒とする。
+
+LLM へ渡す `messages` は system prompt と `ScriptGenerationContext.prompt`、局・personality、信頼しないレター source data から作る。レター本文は `untrustedLetter` として分離し、system instruction として扱わない。adapter は response body が strict structured JSON であることを確認し、`text` と `safetyFlags` 以外の field を拒否してから `GeneratedScript` へ正規化する。`text` は 1 文字以上 20000 文字以下、`safetyFlags` は 32 件以下、各 flag は 1 文字以上 128 文字以下とする。空応答、非 JSON、必須 field 欠落、未知 field、型不正、上限超過は `PROVIDER_BAD_RESPONSE` とする。
+
+LLM の Provider 試行は 1 試行ごとに `provider_job` を作り、同じ論理生成要求では `correlationId` を継承する。回復可能な `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` だけを次 Provider へ送る。`PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` は別 Provider へ同じ prompt を送らない。外部 Provider で成功しなかった場合は `TemplateScriptProvider` の安全な定型台本へ縮退し、この fallback も `providerKey=template-script` の別 `provider_job` として記録する。
+
+### 5.2 Irodori OpenAI TTS adapter
 
 Irodori-TTS は Java Server から Python CLI を直接起動せず、`Aratako/Irodori-TTS-Server` を別プロセスまたは別 container として起動し、HTTP で呼び出す。
 
@@ -93,7 +108,7 @@ request mapping:
 
 `VoiceProfileEntity.referenceVoiceRef` は Provider 側 voice id または安全な相対参照だけを受け付ける。絶対 path、URL、`..` による親 directory traversal は拒否し、参照を指定する場合は `consentPolicyRef` を必須とする。`providerOptions` は Provider ごとの安全な allowlist に限定し、参照音声の実 path、個人名、秘密値を含めない。これらは API response、SSE、標準ログにも露出させない。
 
-### 5.2 VOICEVOX TTS adapter
+### 5.3 VOICEVOX TTS adapter
 
 VOICEVOX は Irodori 失敗時にも使える安定 fallback として、Java Server から HTTP で呼び出す。
 
@@ -157,7 +172,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 ## 8. 設定注入
 
 - 接続 URL
-- `adapter`: `MUSICGEN_WORKER` または `ACE_STEP`
+- `adapter`: LLM は `OLLAMA` または `OPENAI_COMPATIBLE`、Music Generation は `MUSICGEN_WORKER` または `ACE_STEP`
 - model name / model profile
 - timeout
 - provider fingerprint
@@ -167,6 +182,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 - TTS adapter (`VOICEVOX`, `IRODORI_OPENAI_TTS` など)
 
 機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。
+LLM の `defaultModelProfileId` は model 名として使い、`modelProfiles` の存在を要求しない。LLM endpoint の `timeoutMs` を省略する場合は 20000 ms を既定とする。
 
 Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になるが、現行実装では MusicGen の cache-first 再利用までが先行しており、station `preGeneration.preferCacheReuse=false` の場合は reusable asset が存在しても worker submit を優先する。retention/eviction の定期処理は未実装である。
 
@@ -245,7 +261,7 @@ Irodori の設定例:
 
 | 領域 | 第一候補 | 代替 |
 |---|---|---|
-| LLM | Spring AI + Ollama | OpenAI 互換 API, llama.cpp サービス |
+| LLM | JDK `HttpClient` + Ollama | OpenAI 互換 API, Spring AI, llama.cpp サービス |
 | TTS | VOICEVOX / Irodori-TTS-Server | AivisSpeech, Style-Bert-VITS2 |
 | Music Generation | ACE-Step 1.5 REST API + FastAPI Worker | AudioCraft / MusicGen 系 |
 | API文書 | springdoc-openapi | 手書き OpenAPI |
@@ -262,6 +278,7 @@ Provider ごとに以下を持つ。
 - `capabilities`
 - `metadata`: ACE-Step では adapter、profile id、queue stats、model 一覧など。prompt / lyrics / 秘密値は含めない
 - `metadata`: Irodori では adapter、model id、response format、chunking enabled、concurrency limit、queue timeout、voiceRef status、upstream chunk SSE 能力、現行 adapter の streaming 有効状態など。参照音声の実ファイル path、個人名、本文、秘密値は含めない
+- `metadata`: LLM では adapter、model 名、Provider key などの短い診断値だけを許可し、prompt、レター本文、raw response、`apiKeyRef` の解決値は含めない
 
 `metadata` と `message` は診断用の短い状態値に限定する。Web は provider 契約違反の payload が混ざった場合も、secret / prompt / lyrics / letter body / radioName / raw response らしい key や値を redaction し、worker status detail は許可済み metadata key の短い値だけを表示する。
 
@@ -276,6 +293,9 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 
 - Provider ごとの contract test を用意する
 - mock provider を標準実装として持つ
+- Ollama fake HTTP server で `/api/tags`, `/api/chat` の request mapping、strict JSON response、空応答、malformed response、timeout、429/503 を再現する
+- OpenAI 互換 fake HTTP server で `/v1/models`, `/v1/chat/completions` の request mapping、Bearer 認証、401/403、空 choices、malformed response を再現する
+- LLM fallback test では失敗試行と成功試行が別 `provider_job` になり、同じ `correlationId` を持つこと、全滅時に `TemplateScriptProvider` へ縮退することを確認する
 - ACE-Step fake HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現する
 - Irodori fake HTTP server で `/health`, `/v1/models`, `/v1/audio/speech` の成功、503 queue timeout、401 auth failed、voice not found、bad audio bytes を再現する
 - タイムアウト、異常応答、空応答、部分成功を再現できるようにする

@@ -16,10 +16,12 @@
         "ollama": {
           "baseUrl": "http://127.0.0.1:11434",
           "healthPath": "/api/tags",
-          "timeoutMs": 5000,
+          "timeoutMs": 20000,
           "capabilities": [
             "SCRIPT_GEN"
-          ]
+          ],
+          "adapter": "OLLAMA",
+          "defaultModelProfileId": "qwen3:8b"
         }
       }
     },

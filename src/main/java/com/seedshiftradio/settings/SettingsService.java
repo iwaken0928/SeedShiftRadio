@@ -15,6 +15,7 @@ import com.seedshiftradio.common.api.ApiException;
 public class SettingsService {
 
 	private static final Set<String> CACHE_REUSE_SCOPES = Set.of("DISABLED", "SESSION", "STATION", "GLOBAL", "ARCHIVE_ONLY");
+	private static final Set<String> LLM_PROVIDER_ADAPTERS = Set.of("OLLAMA", "OPENAI_COMPATIBLE");
 	private static final Set<String> MUSIC_PROVIDER_ADAPTERS = Set.of("MUSICGEN_WORKER", "ACE_STEP");
 	private static final Set<String> TTS_PROVIDER_ADAPTERS = Set.of("VOICEVOX", "IRODORI_OPENAI_TTS");
 	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("wav", "wav32");
@@ -152,12 +153,32 @@ public class SettingsService {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + "." + entry.getKey() + ".healthPath は必須です。", Map.of("field", field + "." + entry.getKey() + ".healthPath"));
 			}
 			validateSecretRef(endpoint.apiKeyRef(), field + "." + entry.getKey() + ".apiKeyRef");
+			if ("providers.llm".equals(field)) {
+				validateLlmProviderEndpoint(field + "." + entry.getKey(), endpoint);
+			}
 			if ("providers.musicGen".equals(field)) {
 				validateMusicProviderEndpoint(field + "." + entry.getKey(), endpoint);
 			}
 			if ("providers.tts".equals(field)) {
 				validateTtsProviderEndpoint(field + "." + entry.getKey(), endpoint);
 			}
+		}
+	}
+
+	private void validateLlmProviderEndpoint(String field, SettingsDocument.ProviderEndpoint endpoint) {
+		if (endpoint.adapter() == null || !LLM_PROVIDER_ADAPTERS.contains(endpoint.adapter())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".adapter は OLLAMA または OPENAI_COMPATIBLE のいずれかで指定してください。",
+					Map.of("field", field + ".adapter"));
+		}
+		if (endpoint.defaultModelProfileId() == null || endpoint.defaultModelProfileId().isBlank()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".defaultModelProfileId は LLM model 名として必須です。",
+					Map.of("field", field + ".defaultModelProfileId"));
 		}
 	}
 

@@ -6,23 +6,28 @@
 
 ## 2. 採用方針
 
-- Java 側は `Spring AI` を用いて LLM 呼び出しを抽象化する
+- Java 側は `ScriptProvider` で LLM 呼び出しを抽象化し、HTTP adapter と安全な定型台本を同じ上位契約から利用する
+- 現行 HTTP adapter は JDK `HttpClient` を使い、新しい Spring AI 依存は追加しない。Spring AI は将来の adapter 差し替え候補に留め、上位層をその API へ直接依存させない
 - ローカル LLM は `Ollama` を第一候補とする
 - 出力は構造化 JSON を基本とし、その後に読み上げ向け整形を行う
 - 日本語品質改善はプロンプト任せにせず、後段の正規化コンポーネントで補う
-- TTS の style control は LLM に自由記述させず、`emotion`, `tempo`, `speaker`, `safetyFlags` などの中立項目として出力させ、Irodori-TTS の emoji style など engine 固有表現は後段で allowlist 変換する
+- TTS の style control は LLM に自由記述させない。現行 LLM 応答は `text` と `safetyFlags` だけに限定し、`emotion`, `tempo`, `speaker` は既存の後段 component が局・persona 設定から解決する。Irodori-TTS の emoji style など engine 固有表現は後段で allowlist 変換する
 
 ## 3. 生成パイプライン
 
 1. `ContextAssembler` が局設定、直前文脈、セグメント条件を集約する
 2. `ContextAssembler` は必要に応じて `ProgramTemplate` と `ProgramSlot` の制約も集約する
 3. `PromptComposer` が system / developer / task prompt を組み立てる
-4. LLM が JSON 形式で候補台本を返す
-5. `JapaneseScriptNormalizer` が URL、記号、LLM / レター由来の絵文字を除去して話し言葉へ整形する
-6. `SentenceSplitter` が長い文を分割する
-7. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、`style` / `emotion` / `tempo` token を除去する
-8. `PronunciationDictionaryService` が `pronunciationHints` を確定し、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
-9. `PersonaStyleResolver` が Irodori 用の許可済み style だけを最終テキストへ挿入する
+4. `ProviderRegistry` が `providers.llm.defaultProvider` と `fallbackProviders` から Provider chain を解決する
+5. `ScriptProvider.generate(ProviderRegistry.ResolvedProvider, ScriptGenerationContext)` が LLM から strict structured JSON の候補台本を受け取る
+6. `HttpScriptProvider` が `text` と `safetyFlags` だけを許可して検証し、`GeneratedScript` へ正規化する
+7. `JapaneseScriptNormalizer` が URL、記号、LLM / レター由来の絵文字を除去して話し言葉へ整形する
+8. `SentenceSplitter` が長い文を分割する
+9. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、`style` / `emotion` / `tempo` token を除去する
+10. `PronunciationDictionaryService` が `pronunciationHints` を確定し、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
+11. `PersonaStyleResolver` が Irodori 用の許可済み style だけを最終テキストへ挿入する
+
+LLM の候補が不正または Provider chain 全体が利用不能でも、同じ `ScriptGenerationContext` を `TemplateScriptProvider` へ渡して安全な定型台本へ縮退する。実 LLM adapter の追加だけでは script から TTS asset までの orchestration や LETTER 要約が完成したとは扱わず、それぞれ `P0-03`、`P0-04` で追跡する。
 
 ## 4. 入力
 
@@ -42,22 +47,21 @@
 
 ```json
 {
-  "title": "オープニングトーク",
-  "summary": "深夜の作業BGMについて話す導入",
-  "lines": [
-    {
-      "speaker": "main",
-      "text": "こんばんは、今夜もゆるく始めていきましょう。"
-    }
-  ],
-  "estimatedDurationMs": 28000,
-  "emotion": "calm",
-  "tempo": "medium",
+  "text": "こんばんは、今夜もゆるく始めていきましょう。",
   "safetyFlags": []
 }
 ```
 
-`lines` は将来の掛け合い拡張を見据えて配列で持つ。
+現行の `GeneratedScript` は `text` と `safetyFlags` を持つ。title、summary、話者配列、感情、テンポなどを LLM の自由出力へ広げず、必要な演出値は既存の後段 component が `ScriptGenerationContext` と局設定から解決する。掛け合い用の複数話者出力は将来拡張とする。
+
+### 5.1 LLM 応答の検証
+
+- response body は JSON object だけを受け付け、Markdown code fence、前後の説明文、空応答、未知の外部 error object を成功扱いにしない
+- 許可する field は `text` と `safetyFlags` の 2 つだけとし、未知 field を含む応答は拒否する
+- `text` は 1 文字以上 20000 文字以下、`safetyFlags` は 32 件以下の文字列配列、各 flag は 1 文字以上 128 文字以下とする
+- 不正 JSON、必須 field 欠落、型不正、空台本は `PROVIDER_BAD_RESPONSE` へ正規化する
+- 構造化 JSON の検証に成功しても、後段の `JapaneseScriptNormalizer` と `JapaneseQualityGuard` は省略しない
+- 入力 prompt、レター原文、raw Provider response は生成 asset metadata、Provider job、監視 API、SSE、標準ログへ残さない。生成済み `GeneratedScript.text` は放送 directive の正本として script asset に保存する
 
 ## 6. プロンプト構造
 

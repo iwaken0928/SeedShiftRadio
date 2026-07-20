@@ -18,6 +18,7 @@ import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.settings.GeneratedAssetEntity;
 import com.seedshiftradio.settings.GeneratedAssetService;
+import com.seedshiftradio.settings.ProviderErrorClassifier;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobService;
 import com.seedshiftradio.settings.ProviderRegistry;
@@ -27,7 +28,8 @@ import com.seedshiftradio.settings.ProviderRuntimeException;
 public class ScriptGenerationService {
 
 	private final ContextAssembler contextAssembler;
-	private final ScriptProvider scriptProvider;
+	private final HttpScriptProvider httpScriptProvider;
+	private final TemplateScriptProvider templateScriptProvider;
 	private final JapaneseScriptNormalizer normalizer;
 	private final SentenceSplitter sentenceSplitter;
 	private final PronunciationDictionaryService pronunciationDictionaryService;
@@ -41,7 +43,8 @@ public class ScriptGenerationService {
 
 	public ScriptGenerationService(
 			ContextAssembler contextAssembler,
-			ScriptProvider scriptProvider,
+			HttpScriptProvider httpScriptProvider,
+			TemplateScriptProvider templateScriptProvider,
 			JapaneseScriptNormalizer normalizer,
 			SentenceSplitter sentenceSplitter,
 			PronunciationDictionaryService pronunciationDictionaryService,
@@ -53,7 +56,8 @@ public class ScriptGenerationService {
 			ProviderRegistry providerRegistry,
 			ProviderJobService providerJobService) {
 		this.contextAssembler = contextAssembler;
-		this.scriptProvider = scriptProvider;
+		this.httpScriptProvider = httpScriptProvider;
+		this.templateScriptProvider = templateScriptProvider;
 		this.normalizer = normalizer;
 		this.sentenceSplitter = sentenceSplitter;
 		this.pronunciationDictionaryService = pronunciationDictionaryService;
@@ -72,11 +76,11 @@ public class ScriptGenerationService {
 				.orElseGet(() -> createScriptAsset(item));
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public SpeechDirectiveResponse resolveDirective(PlayoutSessionEntity session, QueueItemEntity item, String clientId) {
 		ScriptGenerationContext context = contextAssembler.assemble(session, item);
 		ScriptDirectiveSnapshot snapshot = findPersistedSnapshot(item)
-				.orElseGet(() -> buildSnapshot(context, resolveVoiceHint(context, clientId)));
+				.orElseGet(() -> createScriptAsset(item));
 		String voiceHint = resolveVoiceHint(context, clientId);
 		return new SpeechDirectiveResponse(
 				item.getSpeechDirectiveId() == null ? "sd-" + item.getId() : item.getSpeechDirectiveId(),
@@ -104,19 +108,42 @@ public class ScriptGenerationService {
 		PlayoutSessionEntity session = playoutSessionRepository.findById(item.getSessionId())
 				.orElseThrow(() -> new IllegalStateException("script generation target session is missing: " + item.getSessionId()));
 		ScriptGenerationContext context = contextAssembler.assemble(session, item);
-		String providerKey = resolveScriptProviderKey();
-		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
-				ProviderJobType.SCRIPT_GEN,
-				ProviderType.LLM,
-				providerKey,
-				item.getId(),
-				item.getCorrelationId());
-		providerJobService.markRunning(providerJob.getId(), providerKey, "script-" + item.getId());
+		for (ProviderRegistry.ResolvedProvider provider : providerRegistry.resolveChain(ProviderType.LLM)) {
+			ProviderJobEntity providerJob = createRunningJob(item, provider.providerKey());
+			try {
+				ScriptDirectiveSnapshot snapshot = buildSnapshot(
+						httpScriptProvider,
+						provider,
+						context,
+						resolveVoiceHint(context, null));
+				persistScriptAsset(item, context, snapshot, provider, providerJob.getId());
+				providerJobService.markSucceeded(providerJob.getId());
+				return snapshot;
+			} catch (ProviderRuntimeException exception) {
+				providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
+				if (!ProviderErrorClassifier.fallbackAllowed(ProviderType.LLM, exception.providerErrorCode())) {
+					break;
+				}
+			} catch (RuntimeException exception) {
+				providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
+				throw exception;
+			}
+		}
+		return createTemplateScriptAsset(item, context);
+	}
+
+	private ScriptDirectiveSnapshot createTemplateScriptAsset(QueueItemEntity item, ScriptGenerationContext context) {
+		String providerKey = "template-script";
+		ProviderJobEntity providerJob = createRunningJob(item, providerKey);
 		try {
-			ScriptDirectiveSnapshot snapshot = buildSnapshot(context, resolveVoiceHint(context, null));
+			ScriptDirectiveSnapshot snapshot = buildSnapshot(
+					templateScriptProvider,
+					null,
+					context,
+					resolveVoiceHint(context, null));
 			generatedAssetService.createScriptAsset(
 					snapshot.normalizedText(),
-					providerKey + ":template-script",
+					"template-script:deterministic",
 					item.getId(),
 					providerJob.getId(),
 					metadata(item, context, snapshot, providerKey, providerJob.getId()));
@@ -131,8 +158,44 @@ public class ScriptGenerationService {
 		}
 	}
 
-	private ScriptDirectiveSnapshot buildSnapshot(ScriptGenerationContext context, String voiceHint) {
-		GeneratedScript script = scriptProvider.generate(context);
+	private ProviderJobEntity createRunningJob(QueueItemEntity item, String providerKey) {
+		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
+				ProviderJobType.SCRIPT_GEN,
+				ProviderType.LLM,
+				providerKey,
+				item.getId(),
+				item.getCorrelationId());
+		providerJobService.markRunning(providerJob.getId(), providerKey, "script-" + item.getId());
+		return providerJob;
+	}
+
+	private void persistScriptAsset(
+			QueueItemEntity item,
+			ScriptGenerationContext context,
+			ScriptDirectiveSnapshot snapshot,
+			ProviderRegistry.ResolvedProvider provider,
+			String providerJobId) {
+		generatedAssetService.createScriptAsset(
+				snapshot.normalizedText(),
+				providerFingerprint(provider),
+				item.getId(),
+				providerJobId,
+				metadata(item, context, snapshot, provider.providerKey(), providerJobId));
+	}
+
+	private String providerFingerprint(ProviderRegistry.ResolvedProvider provider) {
+		return String.join(":",
+				provider.providerKey(),
+				provider.adapter(),
+				provider.defaultModelProfileId());
+	}
+
+	private ScriptDirectiveSnapshot buildSnapshot(
+			ScriptProvider selectedProvider,
+			ProviderRegistry.ResolvedProvider provider,
+			ScriptGenerationContext context,
+			String voiceHint) {
+		GeneratedScript script = selectedProvider.generate(provider, context);
 		String normalized = normalizer.normalize(script.text());
 		normalized = sentenceSplitter.splitLongSentences(normalized);
 		JapaneseQualityGuard.QualityResult quality = qualityGuard.inspect(normalized, context);
@@ -203,13 +266,6 @@ public class ScriptGenerationService {
 		return item.getSegmentType() == SegmentType.TALK
 				&& (item.getLetterId() == null || item.getLetterId().isBlank())
 				&& snapshot.safetyFlags().stream().noneMatch(flag -> flag.contains("LETTER"));
-	}
-
-	private String resolveScriptProviderKey() {
-		return providerRegistry.resolveChain(ProviderType.LLM).stream()
-				.findFirst()
-				.map(ProviderRegistry.ResolvedProvider::providerKey)
-				.orElse("template-script");
 	}
 
 	private String resolveEmotion(ScriptGenerationContext context) {

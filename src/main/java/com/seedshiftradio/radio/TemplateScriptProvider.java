@@ -5,12 +5,13 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.settings.ProviderRegistry;
 
 @Component
 public class TemplateScriptProvider implements ScriptProvider {
 
 	@Override
-	public GeneratedScript generate(ScriptGenerationContext context) {
+	public GeneratedScript generate(ProviderRegistry.ResolvedProvider provider, ScriptGenerationContext context) {
 		String stationName = context.station() == null ? "この番組" : context.station().getName();
 		String hostName = context.personality() == null ? stationName : context.personality().getDisplayName();
 		String title = context.item().getTitle() == null || context.item().getTitle().isBlank()

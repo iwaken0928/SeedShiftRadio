@@ -1040,8 +1040,10 @@ Response:
         "ollama": {
           "baseUrl": "http://127.0.0.1:11434",
           "healthPath": "/api/tags",
-          "timeoutMs": 5000,
-          "capabilities": ["SCRIPT_GEN"]
+          "timeoutMs": 20000,
+          "capabilities": ["SCRIPT_GEN"],
+          "adapter": "OLLAMA",
+          "defaultModelProfileId": "qwen3:8b"
         }
       }
     },
@@ -1144,7 +1146,7 @@ Response:
 
 `playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は manual play 待機中に安全バッファ達成後の extra prefetch を許可するフラグです。
 
-`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持ちます。`providers.musicGen.providers.{key}` は追加で `modelProfiles` を持ちます。MusicGen の `adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、TTS の `adapter` は `VOICEVOX` または `IRODORI_OPENAI_TTS` を使います。`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持ちます。`providers.musicGen.providers.{key}` は追加で `modelProfiles` を持ちます。LLM の `adapter` は `OLLAMA` または `OPENAI_COMPATIBLE` を必須とし、`defaultModelProfileId` は実 Provider へ送る model 名として必須です。LLM の timeout 未指定時は 20000 ms に補正します。MusicGen の `adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、TTS の `adapter` は `VOICEVOX` または `IRODORI_OPENAI_TTS` を使います。`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
 
 Irodori-TTS は OpenAI互換 `POST /v1/audio/speech` を使う内部 provider であり、外部公開 API として `/v1/audio/speech` を SeedShiftRadio から再公開しません。Web / C# Client は従来どおり `QueueItem.assetUrl`, `/api/assets/audio/{assetId}.wav`, `SpeechDirective.voiceHint` を利用します。
 

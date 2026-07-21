@@ -138,11 +138,14 @@ public class ProviderHealthService {
 			HttpClient client = HttpClient.newBuilder()
 					.connectTimeout(Duration.ofMillis(provider.timeoutMs()))
 					.build();
-			HttpRequest request = HttpRequest.newBuilder(URI.create(provider.baseUrl() + provider.healthPath()))
+			HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(provider.baseUrl() + provider.healthPath()))
 					.GET()
-					.timeout(Duration.ofMillis(provider.timeoutMs()))
-					.build();
-			HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
+					.timeout(Duration.ofMillis(provider.timeoutMs()));
+			String apiKey = resolveSecret(provider.apiKeyRef());
+			if (apiKey != null && !apiKey.isBlank()) {
+				requestBuilder.header("Authorization", "Bearer " + apiKey);
+			}
+			HttpResponse<Void> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
 			long responseTimeMs = elapsedMillis(startedAt);
 			if (response.statusCode() >= 200 && response.statusCode() < 300) {
 				return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
@@ -218,6 +221,8 @@ public class ProviderHealthService {
 				: provider.defaultModelProfileId());
 		metadata.put("responseFormat", "wav");
 		metadata.put("chunkingEnabled", provider.capabilities().contains("LONG_TEXT_CHUNKING"));
+		metadata.put("upstreamChunkSseAvailable", provider.capabilities().contains("CHUNK_SSE_AVAILABLE"));
+		metadata.put("adapterStreamingEnabled", false);
 		metadata.put("voiceRefStatus", "VOICE_PROFILE_REQUIRED");
 		readIrodoriModels(provider, metadata);
 		return metadata;
@@ -369,7 +374,9 @@ public class ProviderHealthService {
 			if (!Objects.equals(before.status(), after.status())
 					|| !Objects.equals(before.providerKey(), after.providerKey())
 					|| !Objects.equals(before.message(), after.message())
-					|| !Objects.equals(before.baseUrl(), after.baseUrl())) {
+					|| !Objects.equals(before.baseUrl(), after.baseUrl())
+					|| !Objects.equals(before.capabilities(), after.capabilities())
+					|| !Objects.equals(before.metadata(), after.metadata())) {
 				return true;
 			}
 		}

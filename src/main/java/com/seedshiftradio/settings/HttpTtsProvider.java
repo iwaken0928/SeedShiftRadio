@@ -40,10 +40,14 @@ public class HttpTtsProvider implements TtsProvider {
 	}
 
 	@Override
-	public SynthesizedAudio synthesize(ProviderRegistry.ResolvedProvider provider, QueueItemEntity item, SpeechDirectiveResponse directive) {
+	public SynthesizedAudio synthesize(
+			ProviderRegistry.ResolvedProvider provider,
+			QueueItemEntity item,
+			SpeechDirectiveResponse directive,
+			TtsRuntimeProfile runtimeProfile) {
 		String adapter = resolveAdapter(provider, directive);
 		return switch (adapter) {
-			case ADAPTER_IRODORI -> synthesizeIrodori(provider, item, directive);
+			case ADAPTER_IRODORI -> synthesizeIrodori(provider, item, directive, runtimeProfile);
 			case ADAPTER_VOICEVOX -> synthesizeVoicevox(provider, item, directive);
 			default -> placeholderTtsProvider.synthesize(provider, item, directive);
 		};
@@ -100,20 +104,24 @@ public class HttpTtsProvider implements TtsProvider {
 	private SynthesizedAudio synthesizeIrodori(
 			ProviderRegistry.ResolvedProvider provider,
 			QueueItemEntity item,
-			SpeechDirectiveResponse directive) {
+			SpeechDirectiveResponse directive,
+			TtsRuntimeProfile runtimeProfile) {
 		VoiceHint voiceHint = VoiceHint.parse(directive.voiceHint());
-		String voice = isIrodoriEngine(voiceHint.engine()) && voiceHint.speakerKey() != null
-				? voiceHint.speakerKey()
-				: "none";
+		String voice = resolveIrodoriVoice(runtimeProfile, voiceHint);
 		String model = provider.defaultModelProfileId() == null || provider.defaultModelProfileId().isBlank()
 				? "irodori-tts"
 				: provider.defaultModelProfileId();
+		String responseFormat = resolveResponseFormat(runtimeProfile);
+		Map<String, Object> irodoriOptions = resolveIrodoriOptions(runtimeProfile);
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("model", model);
 		body.put("input", synthesisText(directive));
 		body.put("voice", voice);
-		body.put("response_format", "wav");
-		body.put("speed", 1.0d);
+		body.put("response_format", responseFormat);
+		body.put("speed", runtimeProfile == null ? 1.0d : runtimeProfile.speed().doubleValue());
+		if (!irodoriOptions.isEmpty()) {
+			body.put("irodori", irodoriOptions);
+		}
 		HttpRequest.Builder builder = HttpRequest.newBuilder(resolve(provider, "/v1/audio/speech"))
 				.POST(HttpRequest.BodyPublishers.ofByteArray(jsonBytes(body)))
 				.timeout(timeout(provider))
@@ -131,11 +139,122 @@ public class HttpTtsProvider implements TtsProvider {
 		ensureWavAudio(audio);
 		Map<String, Object> metadata = baseMetadata(provider, item, directive, ADAPTER_IRODORI);
 		metadata.put("model", model);
-		metadata.put("voiceId", voice);
-		metadata.put("styleKey", voiceHint.styleKey());
-		metadata.put("responseFormat", "wav");
+		metadata.put("responseFormat", responseFormat);
 		metadata.put("streamingSupported", false);
-		return new SynthesizedAudio(audio, provider.providerKey() + ":irodori:" + sha256(model + ":" + voice), metadata);
+		if (runtimeProfile == null) {
+			metadata.put("voiceIdHash", sha256(voice));
+			metadata.put("stylePreset", voiceHint.styleKey());
+		} else {
+			metadata.put("stationId", runtimeProfile.stationId());
+			metadata.put("voiceProfileId", runtimeProfile.voiceProfileId());
+			metadata.put("engineType", runtimeProfile.engineType());
+			metadata.put("speed", runtimeProfile.speed());
+			metadata.put("stylePreset", runtimeProfile.styleKey());
+			if (runtimeProfile.referenceVoiceRef() == null) {
+				metadata.put("voiceIdHash", sha256(voice));
+			} else {
+				metadata.put("referenceVoiceHash", sha256(runtimeProfile.referenceVoiceRef()));
+				metadata.put("consentPolicyHash", sha256(runtimeProfile.consentPolicyRef()));
+			}
+		}
+		String fingerprintSource = model + ":" + voice + ":" + body.get("speed") + ":" + irodoriOptions;
+		return new SynthesizedAudio(audio, provider.providerKey() + ":irodori:" + sha256(fingerprintSource), metadata);
+	}
+
+	private String resolveIrodoriVoice(TtsRuntimeProfile runtimeProfile, VoiceHint voiceHint) {
+		if (runtimeProfile != null) {
+			if (!isIrodoriEngine(runtimeProfile.engineType())) {
+				throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_REJECTED, "Irodori TTS と音声プロファイルの engine が一致しません。");
+			}
+			if (runtimeProfile.referenceVoiceRef() != null) {
+				return canonicalVoiceId(runtimeProfile.referenceVoiceRef());
+			}
+			if (runtimeProfile.speakerKey() != null && !runtimeProfile.speakerKey().isBlank()) {
+				return runtimeProfile.speakerKey();
+			}
+		}
+		return isIrodoriEngine(voiceHint.engine()) && voiceHint.speakerKey() != null
+				? voiceHint.speakerKey()
+				: "none";
+	}
+
+	private String canonicalVoiceId(String referenceVoiceRef) {
+		String fileName = java.nio.file.Path.of(referenceVoiceRef).getFileName().toString();
+		int extensionIndex = fileName.lastIndexOf('.');
+		String voiceId = extensionIndex > 0 ? fileName.substring(0, extensionIndex) : fileName;
+		if (voiceId.isBlank()) {
+			throw new TtsSynthesisException(ProviderErrorCode.VOICE_REF_NOT_FOUND, "TTS 参照音声を解決できません。");
+		}
+		return voiceId;
+	}
+
+	private String resolveResponseFormat(TtsRuntimeProfile runtimeProfile) {
+		Object configured = runtimeProfile == null ? null : runtimeProfile.providerOptions().get("responseFormat");
+		String responseFormat = configured == null ? "wav" : configured.toString().toLowerCase(Locale.ROOT);
+		if (!"wav".equals(responseFormat)) {
+			throw new TtsSynthesisException(ProviderErrorCode.PROVIDER_REJECTED, "TTS asset は WAV 形式だけを利用できます。");
+		}
+		return responseFormat;
+	}
+
+	private Map<String, Object> resolveIrodoriOptions(TtsRuntimeProfile runtimeProfile) {
+		if (runtimeProfile == null) {
+			return Map.of();
+		}
+		Object configured = runtimeProfile.providerOptions().get("irodori");
+		if (!(configured instanceof Map<?, ?> source)) {
+			return Map.of();
+		}
+		Map<String, Object> sanitized = new LinkedHashMap<>();
+		copyOption(source, sanitized, "num_steps", "num_steps", "numSteps");
+		copyOption(source, sanitized, "seed", "seed");
+		copyOption(source, sanitized, "cfg_scale_text", "cfg_scale_text", "cfgScaleText");
+		copyOption(source, sanitized, "cfg_scale_speaker", "cfg_scale_speaker", "cfgScaleSpeaker");
+		copyOption(source, sanitized, "t_schedule_mode", "t_schedule_mode", "tScheduleMode");
+		copyOption(source, sanitized, "sway_coeff", "sway_coeff", "swayCoeff");
+		copyOption(source, sanitized, "chunking_enabled", "chunking_enabled", "chunkingEnabled", "chunking");
+		copyOption(source, sanitized, "chunk_min_chars", "chunk_min_chars", "chunkMinChars");
+		return Map.copyOf(sanitized);
+	}
+
+	private void copyOption(Map<?, ?> source, Map<String, Object> target, String targetKey, String... sourceKeys) {
+		for (String sourceKey : sourceKeys) {
+			Object value = source.get(sourceKey);
+			Object normalized = normalizeIrodoriOption(targetKey, value);
+			if (normalized != null) {
+				target.put(targetKey, normalized);
+				return;
+			}
+		}
+	}
+
+	private Object normalizeIrodoriOption(String key, Object value) {
+		return switch (key) {
+			case "num_steps" -> integerInRange(value, 1, 200);
+			case "seed" -> value instanceof Number number ? number.longValue() : null;
+			case "cfg_scale_text", "cfg_scale_speaker" -> decimalInRange(value, 0.0d, 20.0d);
+			case "t_schedule_mode" -> value instanceof String text && ("linear".equals(text) || "sway".equals(text)) ? text : null;
+			case "sway_coeff" -> decimalInRange(value, -10.0d, 10.0d);
+			case "chunking_enabled" -> value instanceof Boolean ? value : null;
+			case "chunk_min_chars" -> integerInRange(value, 1, 1_000);
+			default -> null;
+		};
+	}
+
+	private Integer integerInRange(Object value, int minimum, int maximum) {
+		if (!(value instanceof Number number)) {
+			return null;
+		}
+		int normalized = number.intValue();
+		return normalized >= minimum && normalized <= maximum ? normalized : null;
+	}
+
+	private Double decimalInRange(Object value, double minimum, double maximum) {
+		if (!(value instanceof Number number)) {
+			return null;
+		}
+		double normalized = number.doubleValue();
+		return Double.isFinite(normalized) && normalized >= minimum && normalized <= maximum ? normalized : null;
 	}
 
 	private Map<String, Object> baseMetadata(
@@ -153,7 +272,7 @@ public class HttpTtsProvider implements TtsProvider {
 		metadata.put("normalizedTextHash", sha256(directive.normalizedText()));
 		metadata.put("pronunciationHintCount", directive.pronunciationHints().size());
 		metadata.put("pauseHintCount", directive.pauseHints().size());
-		metadata.put("voiceHint", directive.voiceHint());
+		metadata.put("voiceHintHash", sha256(directive.voiceHint()));
 		metadata.put("personaRef", directive.personaRef());
 		metadata.put("archiveEligible", false);
 		return metadata;

@@ -28,7 +28,6 @@ public class PlaceholderTtsProvider {
 		metadata.put("normalizedTextHash", sha256(directive.normalizedText()));
 		metadata.put("pronunciationHintCount", directive.pronunciationHints().size());
 		metadata.put("pauseHintCount", directive.pauseHints().size());
-		metadata.put("voiceHint", directive.voiceHint());
 		metadata.put("personaRef", directive.personaRef());
 		metadata.put("archiveEligible", false);
 		return new TtsProvider.SynthesizedAudio(

@@ -18,12 +18,19 @@ public class ProviderRegistry {
 	}
 
 	public List<ResolvedProvider> resolveChain(ProviderType providerType) {
+		return resolveChain(providerType, null);
+	}
+
+	public List<ResolvedProvider> resolveChain(ProviderType providerType, String preferredProviderKey) {
 		SettingsDocument.ProviderGroup group = group(providerType);
 		if (group == null || group.providers() == null || group.providers().isEmpty()) {
 			return List.of();
 		}
 
 		List<String> orderedKeys = new ArrayList<>();
+		if (preferredProviderKey != null && !preferredProviderKey.isBlank()) {
+			orderedKeys.add(preferredProviderKey);
+		}
 		orderedKeys.add(group.defaultProvider());
 		if (group.fallbackProviders() != null) {
 			orderedKeys.addAll(group.fallbackProviders());
@@ -50,7 +57,7 @@ public class ProviderRegistry {
 					endpoint.apiKeyRef(),
 					endpoint.defaultModelProfileId(),
 					endpoint.modelProfiles(),
-					!providerKey.equals(group.defaultProvider())));
+					!providerKey.equals(orderedKeys.getFirst())));
 		}
 		return List.copyOf(resolved);
 	}

@@ -102,7 +102,7 @@ request mapping:
 | `VoiceProfileEntity.providerOptions` の `responseFormat` | `response_format`。既定は `wav` |
 | `VoiceProfileEntity.providerOptions` の `irodori` | `irodori` object。`num_steps`, CFG, chunking などの安全な allowlist のみ |
 
-初期実装では `response_format=wav` を標準にし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。現行 `HttpTtsProvider` は `SpeechDirective.normalizedText`、`voiceHint=IRODORI_TTS:<voiceId>[:style]`、`providers.tts.providers.{key}.defaultModelProfileId` から `/v1/audio/speech` を呼び、provider job と audio asset を作成する。`VoiceProfileEntity.speed`、`providerOptions`、参照音声同意の runtime 反映は `P0-02b` の後続実装で閉じる。`mp3` などは asset manifest / content type の拡張時に許可する。
+`response_format=wav` を標準かつ唯一の許可形式とし、既存 `/api/assets/audio/{assetId}.wav` 契約を崩さない。`AssetService` は `TtsRuntimeProfileResolver` で生成直前の station と既定 VoiceProfile を解決し、`ProviderRegistry.resolveChain(ProviderType.TTS, preferredProviderKey)` で `VoiceProfileEntity.providerKey` を先頭にする。`HttpTtsProvider` は `SpeechDirective.normalizedText`、検証済み `speed`、canonical voice id、allowlist 済み `providerOptions.irodori`、`providers.tts.providers.{key}.defaultModelProfileId` から `/v1/audio/speech` を呼び、provider job と audio asset を作成する。`mp3` などは asset manifest / content type の拡張時に許可する。
 
 `VoiceProfileEntity.scope` は `GLOBAL` / `STATION` に限定する。`GLOBAL` では `stationId=null`、`STATION` では `stationId` を必須とし、station の `defaultVoiceProfileId` へ他局の profile を割り当てる要求は拒否する。
 
@@ -120,12 +120,12 @@ request mapping:
 | `voiceHint=VOICEVOX:<speakerId>[:style]` | `/audio_query` と `/synthesis` の `speaker` |
 | 既定 provider | `providers.tts.defaultProvider` / `fallbackProviders` の順に解決 |
 
-現行実装では `/audio_query` の JSON をそのまま `/synthesis` へ渡し、戻った WAV を `generated_asset` として保存する。audio asset metadata には `normalizedTextHash`, `providerKey`, `adapter`, `speakerKey`, `styleKey`, `voiceHint`, `pronunciationHintCount`, `pauseHintCount` のような短い値だけを残し、本文、prompt、letter body、raw provider response、秘密値は入れない。
+現行実装では `/audio_query` の JSON をそのまま `/synthesis` へ渡し、戻った WAV を `generated_asset` として保存する。audio asset metadata には `normalizedTextHash`, `providerKey`, `adapter`, `speakerKey`, `styleKey`, `voiceHintHash`, `pronunciationHintCount`, `pauseHintCount` のような短い値だけを残し、raw `voiceHint`、本文、prompt、letter body、raw provider response、秘密値は入れない。Irodori の参照音声と同意参照は `referenceVoiceHash`, `consentPolicyHash` として保存する。
 
 重要な制約:
 
 - Irodori-TTS-Server は `stream_format=sse` で chunk-level SSE を提供する。OpenAI SDK の通常の streaming response は完成音声を逐次転送するだけなので、両者を区別する
-- 現行 SeedShiftRadio adapter は `stream_format=sse` を使わず、完成 WAV を Server 管理 asset として保存する。chunk-level SSE の採用可否は GitLab `P0-02b` で判断する
+- 現行 SeedShiftRadio adapter は `stream_format=sse` を採用せず、完成 WAV を Server 管理 asset として保存する。health metadata では upstream 能力を `upstreamChunkSseAvailable`、adapter の採用状態を `adapterStreamingEnabled=false` として分離する
 - 既定の最大同時 synthesis は 1 件で、混雑や model load timeout は 503 として返りうる
 - `voice: "none"` や無参照発話は可能だが、ラジオパーソナリティ用途では声質の再現性が落ちるため、承認済み reference voice を持つ `VoiceProfile` を優先する
 - VoiceDesign v3 は未公開のため、caption-conditioned voice design は v2 VoiceDesign checkpoint を別 provider profile として将来追加する
@@ -215,7 +215,7 @@ ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/m
 
 ### 8.4 TTS provider profile
 
-`providers.tts.providers.{providerKey}` は通常 endpoint に加え、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持つ。TTS 固有の細かい request option は provider endpoint ではなく `VoiceProfileEntity.providerOptions` に寄せ、station/persona ごとの差し替えをしやすくする。永続化済み option の TTS runtime 反映は `P0-02b` の後続実装とする。
+`providers.tts.providers.{providerKey}` は通常 endpoint に加え、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持つ。TTS 固有の細かい request option は provider endpoint ではなく `VoiceProfileEntity.providerOptions` に寄せ、station/persona ごとの差し替えをしやすくする。永続化済み option は `TtsRuntimeProfileResolver` の scope・同意・速度検証後に `HttpTtsProvider` へ渡し、allowlist 済み field だけを runtime request へ反映する。
 
 Irodori の設定例:
 

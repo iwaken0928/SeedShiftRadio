@@ -49,7 +49,7 @@
 
 `VoiceProfileEntity.scope` が `GLOBAL` の場合は `stationId=null`、`STATION` の場合は所属 `stationId` を必須とする。station へ割り当てられるのは `GLOBAL` または同じ station の profile だけであり、他局の `STATION` profile は拒否する。
 
-`referenceVoiceRef` は Provider が管理する voice id、または許可済み data root から解決する安全な相対参照に限定する。絶対 path、URL、`..` による親 directory traversal は拒否する。参照音声を指定する場合は `consentPolicyRef` を必須とし、失効、未承認、ライセンス不明の参照は利用しない。`providerOptions`、`referenceVoiceRef`、`consentPolicyRef` の TTS runtime 反映は `P0-02b` の後続実装とする。
+`referenceVoiceRef` は Provider が管理する voice id、または許可済み data root から解決する安全な相対参照に限定する。絶対 path、URL、`..` による親 directory traversal は拒否する。参照音声を指定する場合は `consentPolicyRef` を必須とし、生成直前にも `TtsRuntimeProfileResolver` が scope、参照、同意参照を再検証する。検証済み参照は canonical voice id として Irodori へ渡し、生成 asset metadata には生値ではなく `referenceVoiceHash`, `consentPolicyHash` を保存する。現行 `consentPolicyRef` は同意台帳の参照 ID であり、失効状態の自動判定は別途台帳実装を必要とする。
 
 参照音声の実 path、参照元の個人名、同意文書の機微情報は API response、SSE、標準ログへ出さない。
 
@@ -142,7 +142,7 @@ Web では主にデバッグ表示用、Native では実行用とする。
 
 制約と注意点:
 
-- OpenAI SDK の通常の streaming response は完成音声の転送だが、Irodori-TTS-Server は別途 `stream_format=sse` による chunk-level SSE を提供する。現行 SeedShiftRadio adapter はこの mode を使わず、完成 WAV の先行生成と cache を維持する
+- OpenAI SDK の通常の streaming response は完成音声の転送だが、Irodori-TTS-Server は別途 `stream_format=sse` による chunk-level SSE を提供する。現行 SeedShiftRadio adapter はこの mode を採用せず、完成 WAV の先行生成と cache を維持する
 - 既定では同時 synthesis 1 件の queue 運用であり、モデル読み込み中や slot 待ち timeout では HTTP 503 になりうる
 - NVIDIA GPU が実用上推奨される。CPU でも動く可能性はあるが、ラジオ再生の安定運用では `ttsAheadCount` と cache hit を厚めにする
 - 漢字読み精度は同規模 TTS と比べて弱い旨が model card に明記されているため、複雑な漢字や固有名詞は読み辞書・かな化で補正する
@@ -154,7 +154,7 @@ Web では主にデバッグ表示用、Native では実行用とする。
 - `IRODORI_TTS` は server-side TTS の高品質 provider として採用候補に昇格し、現行 server adapter は Irodori-TTS-Server の OpenAI互換 `/v1/audio/speech` を呼び出す
 - `VOICEVOX` は軽量・安定 fallback として残し、現行 server adapter は `/audio_query` から `/synthesis` の順に WAV を生成する
 - 初期 adapter は `Irodori-TTS-Server` の OpenAI互換 API に限定し、Java Server から Irodori の Python CLI を直接実行しない
-- chunk-level SSE を採用する場合も Web へ Provider 固有 event を直接流さず、Server の `QueueItem` と asset 契約へ正規化する
+- chunk-level SSE は現行 playout 契約へ採用しない。将来採用する場合も Web へ Provider 固有 event を直接流さず、Server の `QueueItem` と asset 契約へ正規化する
 - `VoiceProfileEntity.speakerKey` は Irodori server の voice id、`styleKey` は station 側 style preset、`speed` は OpenAI互換 API の `speed` に対応させる
 - 局ごとに異なる Irodori voice id / reference voice / style preset を割り当て、深夜局は落ち着いた声、朝局は明るい声、ニュース寄り局は抑制した声、のように分離してよい
 - `pitch` / `volume` は Irodori-TTS-Server の互換 API では直接効かない可能性があるため、初期は保持のみとし、必要時に post-process または engine option へ拡張する

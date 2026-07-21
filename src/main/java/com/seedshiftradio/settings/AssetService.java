@@ -35,6 +35,7 @@ public class AssetService {
 	private final GeneratedAssetService generatedAssetService;
 	private final ProviderJobService providerJobService;
 	private final PlaceholderAudioFactory placeholderAudioFactory;
+	private final TtsRuntimeProfileResolver ttsRuntimeProfileResolver;
 
 	public AssetService(
 			RadioSettingsStore settingsStore,
@@ -43,7 +44,8 @@ public class AssetService {
 			ScriptGenerationService scriptGenerationService,
 			GeneratedAssetService generatedAssetService,
 			ProviderJobService providerJobService,
-			PlaceholderAudioFactory placeholderAudioFactory) {
+			PlaceholderAudioFactory placeholderAudioFactory,
+			TtsRuntimeProfileResolver ttsRuntimeProfileResolver) {
 		this.settingsStore = settingsStore;
 		this.providerRegistry = providerRegistry;
 		this.ttsProvider = ttsProvider;
@@ -51,6 +53,7 @@ public class AssetService {
 		this.generatedAssetService = generatedAssetService;
 		this.providerJobService = providerJobService;
 		this.placeholderAudioFactory = placeholderAudioFactory;
+		this.ttsRuntimeProfileResolver = ttsRuntimeProfileResolver;
 	}
 
 	@Transactional
@@ -63,12 +66,38 @@ public class AssetService {
 			return;
 		}
 		SpeechDirectiveResponse directive = toSpeechDirective(item, scriptGenerationService.ensureScriptAsset(item));
+		TtsRuntimeProfile runtimeProfile;
+		try {
+			runtimeProfile = ttsRuntimeProfileResolver.resolve(item).orElse(null);
+		} catch (TtsSynthesisException exception) {
+			createSafeTtsFallbackAsset(item, directive, exception);
+			return;
+		}
 		TtsSynthesisException lastFailure = null;
-		for (ProviderRegistry.ResolvedProvider provider : resolveTtsProviders()) {
+		List<ProviderRegistry.ResolvedProvider> ttsProviders;
+		try {
+			ttsProviders = resolveTtsProviders(runtimeProfile);
+		} catch (TtsSynthesisException exception) {
+			createPlaceholderTtsAsset(item, directive, exception);
+			return;
+		}
+		for (ProviderRegistry.ResolvedProvider provider : ttsProviders) {
+			boolean preferredProfileProvider = runtimeProfile != null
+					&& runtimeProfile.providerKey() != null
+					&& runtimeProfile.providerKey().equals(provider.providerKey());
+			if (preferredProfileProvider && !isCompatible(runtimeProfile, provider)) {
+				lastFailure = new TtsSynthesisException(
+						com.seedshiftradio.domain.ProviderErrorCode.PROVIDER_REJECTED,
+						"TTS 音声プロファイルと Provider adapter が一致しません。");
+				continue;
+			}
+			TtsRuntimeProfile effectiveRuntimeProfile = isCompatible(runtimeProfile, provider)
+					? runtimeProfile
+					: null;
 			ProviderJobEntity providerJob = createTtsProviderJob(item, provider);
 			try {
 				providerJobService.markRunning(providerJob.getId(), provider.providerKey(), "tts-" + item.getId() + "-" + provider.providerKey());
-				TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item, directive);
+				TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item, directive, effectiveRuntimeProfile);
 				GeneratedAssetEntity asset = createTtsAudioAsset(item, providerJob, synthesizedAudio, lastFailure);
 				providerJobService.markSucceeded(providerJob.getId());
 				item.setAssetId(asset.getId());
@@ -83,20 +112,65 @@ public class AssetService {
 			}
 		}
 		if (placeholderEnabled()) {
-			ProviderRegistry.ResolvedProvider placeholder = placeholderTtsProvider();
-			ProviderJobEntity providerJob = createTtsProviderJob(item, placeholder);
-			providerJobService.markRunning(providerJob.getId(), placeholder.providerKey(), "tts-" + item.getId() + "-placeholder");
-			TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(placeholder, item, directive);
-			GeneratedAssetEntity asset = createTtsAudioAsset(item, providerJob, synthesizedAudio, lastFailure);
-			providerJobService.markSucceeded(providerJob.getId());
-			item.setAssetId(asset.getId());
-			item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+			createPlaceholderTtsAsset(item, directive, lastFailure);
 			return;
 		}
 		if (lastFailure != null) {
 			throw lastFailure;
 		}
 		throw new TtsSynthesisException("PROVIDER_BAD_RESPONSE", "TTS provider が設定されていません。");
+	}
+
+	private void createSafeTtsFallbackAsset(
+			QueueItemEntity item,
+			SpeechDirectiveResponse directive,
+			TtsSynthesisException profileFailure) {
+		TtsSynthesisException lastFailure = profileFailure;
+		for (ProviderRegistry.ResolvedProvider provider : providerRegistry.resolveChain(ProviderType.TTS)) {
+			if (!isVoicevox(provider)) {
+				continue;
+			}
+			ProviderJobEntity providerJob = createTtsProviderJob(item, provider);
+			try {
+				providerJobService.markRunning(providerJob.getId(), provider.providerKey(), "tts-" + item.getId() + "-" + provider.providerKey());
+				TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(provider, item, directive, null);
+				GeneratedAssetEntity asset = createTtsAudioAsset(item, providerJob, synthesizedAudio, lastFailure);
+				providerJobService.markSucceeded(providerJob.getId());
+				item.setAssetId(asset.getId());
+				item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
+				return;
+			} catch (TtsSynthesisException exception) {
+				lastFailure = exception;
+				providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
+				if (!ProviderErrorClassifier.fallbackAllowed(ProviderType.TTS, exception.providerErrorCode())) {
+					break;
+				}
+			}
+		}
+		createPlaceholderTtsAsset(item, directive, lastFailure);
+	}
+
+	private boolean isCompatible(TtsRuntimeProfile runtimeProfile, ProviderRegistry.ResolvedProvider provider) {
+		if (runtimeProfile == null || runtimeProfile.engineType() == null) {
+			return true;
+		}
+		return switch (runtimeProfile.engineType().toUpperCase(java.util.Locale.ROOT)) {
+			case "IRODORI_TTS", "IRODORI_OPENAI_TTS" -> isIrodori(provider);
+			case "VOICEVOX" -> isVoicevox(provider);
+			default -> false;
+		};
+	}
+
+	private boolean isIrodori(ProviderRegistry.ResolvedProvider provider) {
+		return "IRODORI_OPENAI_TTS".equalsIgnoreCase(provider.adapter())
+				|| provider.capabilities().contains("IRODORI_TTS")
+				|| provider.capabilities().contains("OPENAI_AUDIO_SPEECH");
+	}
+
+	private boolean isVoicevox(ProviderRegistry.ResolvedProvider provider) {
+		return "VOICEVOX".equalsIgnoreCase(provider.adapter())
+				|| provider.capabilities().contains("VOICEVOX")
+				|| provider.providerKey().toLowerCase(java.util.Locale.ROOT).contains("voicevox");
 	}
 
 	private void ensureLocalMusicAsset(QueueItemEntity item) {
@@ -173,12 +247,38 @@ public class AssetService {
 		};
 	}
 
-	private List<ProviderRegistry.ResolvedProvider> resolveTtsProviders() {
-		List<ProviderRegistry.ResolvedProvider> providers = providerRegistry.resolveChain(ProviderType.TTS);
+	private List<ProviderRegistry.ResolvedProvider> resolveTtsProviders(TtsRuntimeProfile runtimeProfile) {
+		String preferredProviderKey = runtimeProfile == null ? null : runtimeProfile.providerKey();
+		List<ProviderRegistry.ResolvedProvider> providers = providerRegistry.resolveChain(ProviderType.TTS, preferredProviderKey);
+		if (preferredProviderKey != null && !preferredProviderKey.isBlank()
+				&& providers.stream().noneMatch(provider -> preferredProviderKey.equals(provider.providerKey()))) {
+			throw new TtsSynthesisException(
+					com.seedshiftradio.domain.ProviderErrorCode.PROVIDER_REJECTED,
+					"TTS 音声プロファイルが指定する Provider は利用できません。");
+		}
 		if (!providers.isEmpty()) {
 			return providers;
 		}
 		return List.of(placeholderTtsProvider());
+	}
+
+	private void createPlaceholderTtsAsset(
+			QueueItemEntity item,
+			SpeechDirectiveResponse directive,
+			TtsSynthesisException previousFailure) {
+		if (!placeholderEnabled()) {
+			throw previousFailure == null
+					? new TtsSynthesisException("PROVIDER_BAD_RESPONSE", "TTS provider が設定されていません。")
+					: previousFailure;
+		}
+		ProviderRegistry.ResolvedProvider placeholder = placeholderTtsProvider();
+		ProviderJobEntity providerJob = createTtsProviderJob(item, placeholder);
+		providerJobService.markRunning(providerJob.getId(), placeholder.providerKey(), "tts-" + item.getId() + "-placeholder");
+		TtsProvider.SynthesizedAudio synthesizedAudio = ttsProvider.synthesize(placeholder, item, directive, null);
+		GeneratedAssetEntity asset = createTtsAudioAsset(item, providerJob, synthesizedAudio, previousFailure);
+		providerJobService.markSucceeded(providerJob.getId());
+		item.setAssetId(asset.getId());
+		item.setAssetUrl("/api/assets/audio/" + asset.getId() + ".wav");
 	}
 
 	private ProviderRegistry.ResolvedProvider placeholderTtsProvider() {

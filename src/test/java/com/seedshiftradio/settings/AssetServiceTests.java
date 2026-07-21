@@ -66,6 +66,9 @@ class AssetServiceTests {
 	@Mock
 	PlaceholderAudioFactory placeholderAudioFactory;
 
+	@Mock
+	TtsRuntimeProfileResolver ttsRuntimeProfileResolver;
+
 	AssetService assetService;
 
 	@BeforeEach
@@ -77,7 +80,8 @@ class AssetServiceTests {
 				scriptGenerationService,
 				generatedAssetService,
 				providerJobService,
-				placeholderAudioFactory);
+				placeholderAudioFactory,
+				ttsRuntimeProfileResolver);
 	}
 
 	@Test
@@ -203,6 +207,148 @@ class AssetServiceTests {
 	}
 
 	@Test
+	void ensureQueueAudioAssetFallsBackFromIrodoriTimeoutToVoicevoxWithoutProfileContext() {
+		QueueItemEntity item = ttsQueueItem("queue-tts-irodori-timeout");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
+		TtsRuntimeProfile runtimeProfile = new TtsRuntimeProfile(
+				"voice-night", "station-night", "irodori", "IRODORI_TTS", "night-main", "calm",
+				new java.math.BigDecimal("1.10"), Map.of("responseFormat", "wav"), null, null);
+		when(ttsRuntimeProfileResolver.resolve(item)).thenReturn(Optional.of(runtimeProfile));
+		ProviderRegistry.ResolvedProvider irodori = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS, "tts", "irodori", "http://127.0.0.1:8088", "/health", 1_000,
+				List.of("TTS_GEN", "IRODORI_TTS"), false);
+		ProviderRegistry.ResolvedProvider voicevox = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS, "tts", "voicevox", "http://127.0.0.1:50021", "/version", 1_000,
+				List.of("TTS_GEN", "VOICEVOX"), true);
+		when(providerRegistry.resolveChain(ProviderType.TTS, "irodori")).thenReturn(List.of(irodori, voicevox));
+		ProviderJobEntity irodoriJob = providerJob("provider-job-irodori-timeout");
+		ProviderJobEntity voicevoxJob = providerJob("provider-job-voicevox-fallback");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN), eq(ProviderType.TTS), eq("irodori"),
+				eq(item.getId()), eq(item.getCorrelationId()))).thenReturn(irodoriJob);
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN), eq(ProviderType.TTS), eq("voicevox"),
+				eq(item.getId()), eq(item.getCorrelationId()))).thenReturn(voicevoxJob);
+		when(ttsProvider.synthesize(eq(irodori), eq(item), any(), eq(runtimeProfile)))
+				.thenThrow(new TtsSynthesisException(ProviderErrorCode.PROVIDER_TIMEOUT, "timeout"));
+		byte[] wav = "voicevox-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		when(ttsProvider.synthesize(eq(voicevox), eq(item), any(), nullable(TtsRuntimeProfile.class)))
+				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "voicevox:fingerprint", Map.of("adapter", "VOICEVOX")));
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-voicevox-fallback");
+		when(generatedAssetService.createAudioAsset(
+				eq(wav), eq("voicevox:fingerprint"), eq(item.getId()), eq(voicevoxJob.getId()),
+				argThat(metadata -> "PROVIDER_TIMEOUT".equals(metadata.get("fallbackErrorCode")))))
+				.thenReturn(asset);
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-voicevox-fallback", item.getAssetId());
+		verify(providerJobService).markFailed(irodoriJob.getId(), ProviderErrorCode.PROVIDER_TIMEOUT);
+		verify(ttsProvider).synthesize(eq(voicevox), eq(item), any(), nullable(TtsRuntimeProfile.class));
+	}
+
+	@Test
+	void ensureQueueAudioAssetUsesVoicevoxFallbackWhenRuntimeProfileConsentIsInvalid() {
+		QueueItemEntity item = ttsQueueItem("queue-tts-invalid-consent");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
+		TtsSynthesisException consentFailure = new TtsSynthesisException(
+				ProviderErrorCode.VOICE_CONSENT_REQUIRED,
+				"consent required");
+		when(ttsRuntimeProfileResolver.resolve(item)).thenThrow(consentFailure);
+		ProviderRegistry.ResolvedProvider irodori = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS, "tts", "irodori", "http://127.0.0.1:8088", "/health", 1_000,
+				List.of("TTS_GEN", "IRODORI_TTS"), false);
+		ProviderRegistry.ResolvedProvider voicevox = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS, "tts", "voicevox", "http://127.0.0.1:50021", "/version", 1_000,
+				List.of("TTS_GEN", "VOICEVOX"), true);
+		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(irodori, voicevox));
+		ProviderJobEntity providerJob = providerJob("provider-job-safe-voicevox");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN), eq(ProviderType.TTS), eq("voicevox"),
+				eq(item.getId()), eq(item.getCorrelationId()))).thenReturn(providerJob);
+		byte[] wav = "voicevox-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		when(ttsProvider.synthesize(eq(voicevox), eq(item), any(), nullable(TtsRuntimeProfile.class)))
+				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "voicevox:fingerprint", Map.of("adapter", "VOICEVOX")));
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-safe-voicevox");
+		when(generatedAssetService.createAudioAsset(
+				eq(wav), eq("voicevox:fingerprint"), eq(item.getId()), eq(providerJob.getId()),
+				argThat(metadata -> Boolean.TRUE.equals(metadata.get("fallbackProviderUsed"))
+						&& "VOICE_CONSENT_REQUIRED".equals(metadata.get("fallbackErrorCode")))))
+				.thenReturn(asset);
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-safe-voicevox", item.getAssetId());
+		verify(ttsProvider, never()).synthesize(eq(irodori), eq(item), any(), nullable(TtsRuntimeProfile.class));
+		verify(ttsProvider).synthesize(eq(voicevox), eq(item), any(), nullable(TtsRuntimeProfile.class));
+	}
+
+	@Test
+	void ensureQueueAudioAssetSkipsIncompatiblePreferredProviderAndUsesMatchingAdapter() {
+		QueueItemEntity item = ttsQueueItem("queue-tts-profile");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
+		TtsRuntimeProfile runtimeProfile = new TtsRuntimeProfile(
+				"voice-night",
+				"station-night",
+				"voicevox",
+				"IRODORI_TTS",
+				"night-main",
+				"calm",
+				new java.math.BigDecimal("1.10"),
+				Map.of("responseFormat", "wav"),
+				null,
+				null);
+		when(ttsRuntimeProfileResolver.resolve(item)).thenReturn(Optional.of(runtimeProfile));
+		ProviderRegistry.ResolvedProvider voicevox = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"voicevox",
+				"http://127.0.0.1:50021",
+				"/version",
+				1_000,
+				List.of("TTS_GEN", "VOICEVOX"),
+				false);
+		ProviderRegistry.ResolvedProvider irodori = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"irodori",
+				"http://127.0.0.1:8088",
+				"/health",
+				1_000,
+				List.of("TTS_GEN", "IRODORI_TTS"),
+				false);
+		when(providerRegistry.resolveChain(ProviderType.TTS, "voicevox")).thenReturn(List.of(voicevox, irodori));
+		ProviderJobEntity providerJob = providerJob("provider-job-irodori");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("irodori"),
+				eq(item.getId()),
+				eq(item.getCorrelationId()))).thenReturn(providerJob);
+		byte[] wav = "irodori-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		when(ttsProvider.synthesize(eq(irodori), eq(item), any(), eq(runtimeProfile)))
+				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "irodori:fingerprint", Map.of("voiceProfileId", "voice-night")));
+		GeneratedAssetEntity asset = new GeneratedAssetEntity();
+		asset.setId("asset-irodori");
+		when(generatedAssetService.createAudioAsset(
+				eq(wav),
+				eq("irodori:fingerprint"),
+				eq(item.getId()),
+				eq(providerJob.getId()),
+				argThat(metadata -> "voice-night".equals(metadata.get("voiceProfileId")))))
+				.thenReturn(asset);
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("asset-irodori", item.getAssetId());
+		verify(ttsProvider, never()).synthesize(eq(voicevox), eq(item), any(), eq(runtimeProfile));
+		verify(ttsProvider).synthesize(eq(irodori), eq(item), any(), eq(runtimeProfile));
+		verify(providerJobService).markSucceeded(providerJob.getId());
+	}
+
+	@Test
 	void ensureQueueAudioAssetFallsBackToPlaceholderWhenTtsProviderFails() {
 		when(settingsStore.load()).thenReturn(settingsDocument());
 		ProviderRegistry.ResolvedProvider voicevoxProvider = new ProviderRegistry.ResolvedProvider(
@@ -214,7 +360,8 @@ class AssetServiceTests {
 				1_000,
 				List.of("TTS_GEN", "VOICEVOX"),
 				false);
-		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(voicevoxProvider));
+		when(ttsRuntimeProfileResolver.resolve(any())).thenReturn(Optional.empty());
+		when(providerRegistry.resolveChain(ProviderType.TTS, null)).thenReturn(List.of(voicevoxProvider));
 		QueueItemEntity item = newQueueItemEntity();
 		item.setId("queue-tts-fallback");
 		item.setSessionId("session-tts");
@@ -246,10 +393,10 @@ class AssetServiceTests {
 				eq("seedshift-placeholder"),
 				eq("queue-tts-fallback"),
 				eq("corr-tts-fallback"))).thenReturn(placeholderJob);
-		when(ttsProvider.synthesize(eq(voicevoxProvider), eq(item), any()))
+		when(ttsProvider.synthesize(eq(voicevoxProvider), eq(item), any(), nullable(TtsRuntimeProfile.class)))
 				.thenThrow(new TtsSynthesisException("PROVIDER_TIMEOUT", "timeout"));
 		byte[] wav = "placeholder-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-		when(ttsProvider.synthesize(argThat(provider -> "seedshift-placeholder".equals(provider.providerKey())), eq(item), any()))
+		when(ttsProvider.synthesize(argThat(provider -> "seedshift-placeholder".equals(provider.providerKey())), eq(item), any(), nullable(TtsRuntimeProfile.class)))
 				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "seedshift-placeholder:placeholder", Map.of("placeholder", true)));
 		GeneratedAssetEntity asset = new GeneratedAssetEntity();
 		asset.setId("asset-tts-placeholder");
@@ -296,7 +443,8 @@ class AssetServiceTests {
 				1_000,
 				List.of("TTS_GEN"),
 				true);
-		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(primary, fallback));
+		when(ttsRuntimeProfileResolver.resolve(any())).thenReturn(Optional.empty());
+		when(providerRegistry.resolveChain(ProviderType.TTS, null)).thenReturn(List.of(primary, fallback));
 		QueueItemEntity item = ttsQueueItem("queue-tts-rejected");
 		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
 		ProviderJobEntity failedJob = providerJob("provider-job-rejected");
@@ -314,9 +462,9 @@ class AssetServiceTests {
 				eq(item.getId()),
 				eq(item.getCorrelationId()))).thenReturn(placeholderJob);
 		TtsSynthesisException expected = new TtsSynthesisException(errorCode, "non-recoverable");
-		when(ttsProvider.synthesize(eq(primary), eq(item), any())).thenThrow(expected);
+		when(ttsProvider.synthesize(eq(primary), eq(item), any(), nullable(TtsRuntimeProfile.class))).thenThrow(expected);
 		byte[] wav = "safe-local-placeholder".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-		when(ttsProvider.synthesize(argThat(provider -> "seedshift-placeholder".equals(provider.providerKey())), eq(item), any()))
+		when(ttsProvider.synthesize(argThat(provider -> "seedshift-placeholder".equals(provider.providerKey())), eq(item), any(), nullable(TtsRuntimeProfile.class)))
 				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "seedshift-placeholder:placeholder", Map.of("placeholder", true)));
 		GeneratedAssetEntity asset = new GeneratedAssetEntity();
 		asset.setId("asset-non-recoverable-placeholder");
@@ -333,7 +481,7 @@ class AssetServiceTests {
 
 		assertEquals("asset-non-recoverable-placeholder", item.getAssetId());
 		verify(providerJobService).markFailed("provider-job-rejected", errorCode);
-		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any());
+		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any(), nullable(TtsRuntimeProfile.class));
 		verify(providerJobService, never()).createQueuedJob(
 				eq(ProviderJobType.TTS_GEN),
 				eq(ProviderType.TTS),
@@ -364,7 +512,8 @@ class AssetServiceTests {
 				1_000,
 				List.of("TTS_GEN"),
 				true);
-		when(providerRegistry.resolveChain(ProviderType.TTS)).thenReturn(List.of(primary, fallback));
+		when(ttsRuntimeProfileResolver.resolve(any())).thenReturn(Optional.empty());
+		when(providerRegistry.resolveChain(ProviderType.TTS, null)).thenReturn(List.of(primary, fallback));
 		QueueItemEntity item = ttsQueueItem("queue-tts-placeholder-disabled");
 		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
 		when(providerJobService.createQueuedJob(
@@ -374,14 +523,14 @@ class AssetServiceTests {
 				eq(item.getId()),
 				eq(item.getCorrelationId()))).thenReturn(providerJob("provider-job-placeholder-disabled"));
 		TtsSynthesisException expected = new TtsSynthesisException(ProviderErrorCode.PROVIDER_REJECTED, "rejected");
-		when(ttsProvider.synthesize(eq(primary), eq(item), any())).thenThrow(expected);
+		when(ttsProvider.synthesize(eq(primary), eq(item), any(), nullable(TtsRuntimeProfile.class))).thenThrow(expected);
 
 		TtsSynthesisException actual = assertThrows(
 				TtsSynthesisException.class,
 				() -> assetService.ensureQueueAudioAsset(item));
 
 		assertEquals(expected, actual);
-		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any());
+		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any(), nullable(TtsRuntimeProfile.class));
 	}
 
 	private QueueItemEntity queueItem(String id, int durationMs) {

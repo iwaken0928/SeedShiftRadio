@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLDecoder;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -121,16 +122,39 @@ class HttpTtsProviderTests {
 						Map.of(),
 						false),
 				queueItem(),
-				directive("IRODORI_TTS:voice-night:soft"));
+				directive("IRODORI_TTS:voice-night:soft"),
+				new TtsRuntimeProfile(
+						"profile-night",
+						"station-night",
+						"irodori",
+						"IRODORI_TTS",
+						"voice-night",
+						"soft",
+						new BigDecimal("1.15"),
+						Map.of(
+								"responseFormat", "wav",
+								"irodori", Map.of(
+										"numSteps", 24,
+										"chunking", false,
+										"lora_adapter", "C:/private/model")),
+						"voices/approved-night.wav",
+						"consent-policy-night"));
 
 		assertArrayEquals(wav, audio.audioBytes());
 		assertEquals("Bearer secret-token", authorization.get());
 		assertEquals("irodori-tts", requestBody.get().path("model").asText());
 		assertEquals("こんにちは。", requestBody.get().path("input").asText());
-		assertEquals("voice-night", requestBody.get().path("voice").asText());
+		assertEquals("approved-night", requestBody.get().path("voice").asText());
 		assertEquals("wav", requestBody.get().path("response_format").asText());
+		assertEquals(1.15d, requestBody.get().path("speed").asDouble());
+		assertEquals(24, requestBody.get().path("irodori").path("num_steps").asInt());
+		assertEquals(false, requestBody.get().path("irodori").path("chunking_enabled").asBoolean());
+		assertFalse(requestBody.get().path("irodori").has("lora_adapter"));
 		assertEquals("IRODORI_OPENAI_TTS", audio.metadata().get("adapter"));
-		assertEquals("voice-night", audio.metadata().get("voiceId"));
+		assertEquals("profile-night", audio.metadata().get("voiceProfileId"));
+		assertEquals(64, audio.metadata().get("consentPolicyHash").toString().length());
+		assertFalse(audio.metadata().containsValue("consent-policy-night"));
+		assertFalse(audio.metadata().containsValue("voices/approved-night.wav"));
 		assertFalse(audio.metadata().containsKey("normalizedText"));
 		assertFalse(audio.metadata().containsValue("こんにちは。"));
 	}
@@ -186,7 +210,7 @@ class HttpTtsProviderTests {
 
 		assertEquals(true, audio.metadata().get("placeholder"));
 		assertEquals("seedshift-placeholder", audio.metadata().get("providerKey"));
-		assertEquals("VOICEVOX:4:normal", audio.metadata().get("voiceHint"));
+		assertFalse(audio.metadata().containsKey("voiceHint"));
 		assertEquals('R', audio.audioBytes()[0]);
 		assertEquals('I', audio.audioBytes()[1]);
 		assertEquals('F', audio.audioBytes()[2]);

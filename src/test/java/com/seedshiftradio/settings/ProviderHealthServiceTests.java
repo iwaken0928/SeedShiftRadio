@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -104,6 +105,91 @@ class ProviderHealthServiceTests {
 		assertEquals(1, events.size());
 		assertEquals("provider.health.changed", events.getFirst().eventType());
 		assertEquals(response, events.getFirst().payload());
+	}
+
+	@Test
+	void metadataOnlyChangeIsMeaningfulForProviderHealthEvents() throws Exception {
+		Instant checkedAt = Instant.parse("2026-07-21T00:00:00Z");
+		SettingsDtos.ProviderHealthPayload before = new SettingsDtos.ProviderHealthPayload(
+				"tts", "irodori", "UP", checkedAt, 10L, "接続成功",
+				List.of("TTS_GEN"), "http://127.0.0.1:8088",
+				Map.of("upstreamChunkSseAvailable", false));
+		SettingsDtos.ProviderHealthPayload after = new SettingsDtos.ProviderHealthPayload(
+				"tts", "irodori", "UP", checkedAt.plusSeconds(1), 11L, "接続成功",
+				List.of("TTS_GEN"), "http://127.0.0.1:8088",
+				Map.of("upstreamChunkSseAvailable", true));
+		var method = ProviderHealthService.class.getDeclaredMethod("hasMeaningfulChange", Map.class, Map.class);
+		method.setAccessible(true);
+
+		boolean meaningful = (boolean) method.invoke(providerHealthService, Map.of("tts", before), Map.of("tts", after));
+
+		assertEquals(true, meaningful);
+	}
+
+	@Test
+	void irodoriHealthUsesBearerTokenAndSeparatesUpstreamStreamingCapability() throws Exception {
+		Path tokenFile = tempDir.resolve("irodori-token.txt");
+		java.nio.file.Files.writeString(tokenFile, "health-secret");
+		AtomicReference<String> healthAuthorization = new AtomicReference<>();
+		AtomicReference<String> modelsAuthorization = new AtomicReference<>();
+		httpServer.createContext("/irodori/health", exchange -> {
+			healthAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+			write(exchange, 200, "ok");
+		});
+		httpServer.createContext("/irodori/v1/models", exchange -> {
+			modelsAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+			write(exchange, 200, "{\"object\":\"list\",\"data\":[{\"id\":\"irodori-tts\"}]}");
+		});
+		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/irodori";
+		SettingsDocument.ProviderCatalog defaults = SettingsDocument.ProviderCatalog.defaults();
+		SettingsDocument settings = SettingsDocument.defaults();
+		settings = new SettingsDocument(
+				settings.version(),
+				settings.schemaVersion(),
+				settings.updatedAt(),
+				settings.server(),
+				new SettingsDocument.PathSettings(tempDir.resolve("data").toString(), tempDir.resolve("music").toString()),
+				settings.playout(),
+				settings.cache(),
+				settings.programming(),
+				new SettingsDocument.ProviderCatalog(
+						defaults.llm(),
+						new SettingsDocument.ProviderGroup(
+								"irodori",
+								List.of(),
+								Map.of("irodori", new SettingsDocument.ProviderEndpoint(
+										baseUrl,
+										"/health",
+										1_000,
+										List.of("TTS_GEN", "IRODORI_TTS", "LONG_TEXT_CHUNKING", "CHUNK_SSE_AVAILABLE"),
+										"IRODORI_OPENAI_TTS",
+										"file:" + tokenFile,
+										"irodori-tts",
+										Map.of()))),
+						defaults.musicGen()),
+				settings.security(),
+				settings.features()).normalize();
+		ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+		RadioSettingsStore store = new RadioSettingsStore(objectMapper, new RadioConfigProperties(tempDir.resolve("irodori-config.json").toString()));
+		store.save(settings);
+		ProviderHealthService service = new ProviderHealthService(new ProviderRegistry(store), new StreamEventService(), objectMapper);
+
+		SettingsDtos.ProviderHealthPayload health = service.refreshHealth().get("tts");
+
+		assertEquals("UP", health.status());
+		assertEquals("Bearer health-secret", healthAuthorization.get());
+		assertEquals("Bearer health-secret", modelsAuthorization.get());
+		assertEquals(true, health.metadata().get("upstreamChunkSseAvailable"));
+		assertEquals(false, health.metadata().get("adapterStreamingEnabled"));
+		assertEquals(List.of("irodori-tts"), health.metadata().get("models"));
+	}
+
+	private void write(HttpExchange exchange, int statusCode, String body) throws IOException {
+		byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		exchange.sendResponseHeaders(statusCode, bytes.length);
+		try (OutputStream outputStream = exchange.getResponseBody()) {
+			outputStream.write(bytes);
+		}
 	}
 
 	@SuppressWarnings("unchecked")

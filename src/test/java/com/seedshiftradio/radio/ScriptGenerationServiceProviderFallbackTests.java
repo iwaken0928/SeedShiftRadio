@@ -1,6 +1,7 @@
 package com.seedshiftradio.radio;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -23,8 +24,10 @@ import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.LetterStatus;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.letter.LetterEntity;
 import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.settings.GeneratedAssetEntity;
 import com.seedshiftradio.settings.ProviderJobEntity;
@@ -87,8 +90,8 @@ class ScriptGenerationServiceProviderFallbackTests {
 				providerJobService,
 				settingsStore);
 		SettingsDocument settingsDocument = org.mockito.Mockito.mock(SettingsDocument.class);
-		when(settingsStore.load()).thenReturn(settingsDocument);
-		when(settingsDocument.cache()).thenReturn(new SettingsDocument.CacheSettings(
+		org.mockito.Mockito.lenient().when(settingsStore.load()).thenReturn(settingsDocument);
+		org.mockito.Mockito.lenient().when(settingsDocument.cache()).thenReturn(new SettingsDocument.CacheSettings(
 				1L, 1L, 1L, 1, 1, 1, "STATION", "STATION", "GLOBAL", 1));
 
 		item = new QueueItemEntity();
@@ -205,6 +208,39 @@ class ScriptGenerationServiceProviderFallbackTests {
 		verify(providerJobService).markSucceeded("job-cache-hit");
 		verify(httpScriptProvider, never()).generate(any(), any());
 		verify(generatedAssetService, never()).createScriptAsset(anyString(), anyString(), anyString(), anyString(), any(Map.class));
+	}
+
+	@Test
+	void letterSnapshotKeepsQualityFlagsAndMarksSafeSummary() {
+		item.setLetterId("letter-script-1");
+		LetterEntity letter = new LetterEntity(
+				"letter-script-1",
+				null,
+				"リスナー",
+				"深夜の応援",
+				"毎晩楽しく聴いています。",
+				LetterStatus.ADOPTED,
+				"idem-script-1");
+		context = new ScriptGenerationContext(
+				context.session(), item, null, null, null, letter, "safe letter prompt");
+		ProviderRegistry.ResolvedProvider provider = provider("llm-primary", false);
+		ProviderJobEntity providerJob = job("job-letter");
+		when(contextAssembler.assemble(context.session(), item)).thenReturn(context);
+		when(providerRegistry.resolveChain(ProviderType.LLM)).thenReturn(List.of(provider));
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.SCRIPT_GEN), eq(ProviderType.LLM), eq("llm-primary"),
+				eq("queue-script-1"), eq("corr-script-1"))).thenReturn(providerJob);
+		when(httpScriptProvider.generate(provider, context))
+				.thenReturn(new GeneratedScript("安全なレター要約です。", List.of("LLM_GENERATED")));
+		when(qualityGuard.inspect("安全なレター要約です。", context))
+				.thenReturn(new JapaneseQualityGuard.QualityResult(
+						"安全なレター要約です。", List.of("LETTER_SOURCE")));
+
+		ScriptDirectiveSnapshot result = service.ensureScriptAsset(item);
+
+		assertTrue(result.safetyFlags().contains("LLM_GENERATED"));
+		assertTrue(result.safetyFlags().contains("LETTER_SOURCE"));
+		assertTrue(result.safetyFlags().contains("LETTER_SUMMARIZED"));
 	}
 
 	private ProviderRegistry.ResolvedProvider provider(String providerKey, boolean fallback) {

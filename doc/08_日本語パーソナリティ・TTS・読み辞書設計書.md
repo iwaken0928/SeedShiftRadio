@@ -55,13 +55,16 @@
 
 ## 4. 正規化パイプライン
 
-1. `JapaneseScriptNormalizer` が記号、URL、絵文字本体、variation selector、ZWJ、skin-tone modifier を整理する
-2. `SentenceSplitter` が長文を短文化する
-3. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、文字列の TTS control token を除去する
-4. `PronunciationDictionaryService` が `pronunciationHints` を保持しつつ、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
-5. `PersonaStyleResolver` が `IRODORI_TTS` の場合だけ許可済み style emoji を文頭へ挿入する
+1. LETTER では `LetterBroadcastContentFactory` が原文を Unicode NFKC 正規化し、命令文を捨て、個人情報候補、SSML、TTS control token、絵文字を除去または代替した安全要約を作る
+2. `JapaneseScriptNormalizer` が生成済み台本の記号、URL、絵文字本体、variation selector、ZWJ、skin-tone modifier を整理する
+3. `SentenceSplitter` が長文を短文化する
+4. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、文字列の TTS control token を再検査して除去する
+5. `PronunciationDictionaryService` が `pronunciationHints` を保持しつつ、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
+6. `PersonaStyleResolver` が `IRODORI_TTS` の場合だけ許可済み style emoji を文頭へ挿入する
 
 ASCII の surface は英数字境界で照合し、`AI` を `AIVIS` の一部として誤置換しない。
+
+LETTER では入力要約と台本生成後の二段階でガードする。`LetterBroadcastContentFactory` の要約はレター原文の代替保存ではなく放送用の一時入力であり、生成 asset metadata に原文 body と中間要約を独立 field として保存しない。放送 directive の正本となる生成済み `text` / `normalizedText` は従来どおり保存する。`SpeechDirective.safetyFlags` の `LETTER_SUMMARIZED` で安全要約経路を示し、後段の `LETTER_SOURCE` と control token 除去 flag は従来どおり併用する。
 
 ## 5. 読み辞書
 

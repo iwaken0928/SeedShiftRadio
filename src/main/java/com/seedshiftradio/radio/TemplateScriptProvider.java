@@ -35,21 +35,11 @@ public class TemplateScriptProvider implements ScriptProvider {
 		if (context.letter() == null) {
 			return "%sでは、レターを紹介します。%sです。".formatted(stationName, context.item().getTitle());
 		}
-		String subject = sanitize(context.letter().getSubject(), 40);
-		String excerpt = sanitize(context.letter().getBody(), 80);
-		return "%sでは、届いたレターを紹介します。テーマは%s。内容を短くまとめると、%s、というお便りです。".formatted(
+		LetterBroadcastContent content = LetterBroadcastContentFactory.from(context.letter());
+		return ("%sでは、届いたレターを紹介します。テーマは%s。内容を短くまとめると、%s、というお便りです。"
+				+ "お便りを送ってくださり、ありがとうございます。これからも一緒に楽しんでいきましょう。").formatted(
 				stationName,
-				subject.isBlank() ? "近況" : subject,
-				excerpt.isBlank() ? "番組へのメッセージ" : excerpt);
-	}
-
-	private String sanitize(String value, int maxLength) {
-		String sanitized = value == null
-				? ""
-				: value.replaceAll("[\\r\\n\\t]+", " ")
-						.replaceAll("(?i)(ignore previous instructions|system prompt|プロンプト|命令)", " ")
-						.replaceAll("[<>\\[\\]{}]", " ")
-						.trim();
-		return sanitized.length() > maxLength ? sanitized.substring(0, maxLength) : sanitized;
+				content.subject(),
+				content.summary());
 	}
 }

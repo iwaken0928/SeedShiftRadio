@@ -19,15 +19,16 @@
 2. `ContextAssembler` は必要に応じて `ProgramTemplate` と `ProgramSlot` の制約も集約する
 3. `PromptComposer` が system / developer / task prompt を組み立てる
 4. `ProviderRegistry` が `providers.llm.defaultProvider` と `fallbackProviders` から Provider chain を解決する
-5. `ScriptProvider.generate(ProviderRegistry.ResolvedProvider, ScriptGenerationContext)` が LLM から strict structured JSON の候補台本を受け取る
-6. `HttpScriptProvider` が `text` と `safetyFlags` だけを許可して検証し、`GeneratedScript` へ正規化する
-7. `JapaneseScriptNormalizer` が URL、記号、LLM / レター由来の絵文字を除去して話し言葉へ整形する
-8. `SentenceSplitter` が長い文を分割する
-9. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、`style` / `emotion` / `tempo` token を除去する
-10. `PronunciationDictionaryService` が `pronunciationHints` を確定し、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
-11. `PersonaStyleResolver` が Irodori 用の許可済み style だけを最終テキストへ挿入する
+5. `ScriptProvider.generate(ProviderRegistry.ResolvedProvider, ScriptGenerationContext)` が台本生成 context を受け取る
+6. LETTER では各 `ScriptProvider` が台本本文を組み立てる前に、`LetterBroadcastContentFactory` で `LetterBroadcastContent(subject, summary, sourceLetterId)` を作り、安全要約と原文参照 ID を分離する
+7. HTTP LLM は strict structured JSON の候補台本を返し、`HttpScriptProvider` が `text` と `safetyFlags` だけを許可して検証し、`GeneratedScript` へ正規化する
+8. `JapaneseScriptNormalizer` が URL、記号、LLM / レター由来の絵文字を除去して話し言葉へ整形する
+9. `SentenceSplitter` が長い文を分割する
+10. `JapaneseQualityGuard` が prompt injection、個人情報、SSML、`style` / `emotion` / `tempo` token を除去する
+11. `PronunciationDictionaryService` が `pronunciationHints` を確定し、長い surface を優先して最終 `normalizedText` をかな・カナへ置換する
+12. `PersonaStyleResolver` が Irodori 用の許可済み style だけを最終テキストへ挿入する
 
-LLM の候補が不正または Provider chain 全体が利用不能でも、同じ `ScriptGenerationContext` を `TemplateScriptProvider` へ渡して安全な定型台本へ縮退する。実 LLM adapter の追加だけでは script から TTS asset までの orchestration や LETTER 要約が完成したとは扱わず、それぞれ `P0-03`、`P0-04` で追跡する。
+LLM の候補が不正または Provider chain 全体が利用不能でも、同じ `ScriptGenerationContext` を `TemplateScriptProvider` へ渡して安全な定型台本へ縮退する。LETTER の定型台本も `LetterBroadcastContentFactory` の安全要約だけを使い、原文本文を抜粋しない。
 
 ## 4. 入力
 
@@ -97,10 +98,14 @@ LLM の候補が不正または Provider chain 全体が利用不能でも、同
 
 ## 7. LETTER の安全設計
 
-- レター本文は引用データとしてのみ扱う
-- 設定変更要求やシステム命令文は無視する
-- 本文中の個人情報候補は `JapaneseQualityGuard` でマスク対象を判定する。MVP ではメールアドレス、電話番号、URL、住所候補を対象にし、放送用 `normalizedText` へ生値を残さない
-- 採用時は要約版と原文参照を分離する
+- レター原文は `letter` を正本とする引用データであり、台本生成への命令として扱わない
+- `LetterBroadcastContentFactory` は原文本文を文境界で分け、設定・ルール・役割の変更、旧命令の無視、prompt 開示などを求める文を要約候補から除外する
+- 要約の生成前に Unicode NFKC 正規化を行い、URL、メールアドレス、電話番号、住所候補を代替文言へ置き換え、SSML、TTS control token、絵文字と不可視制御文字を除去する
+- 放送用入力は件名 40 文字、安全要約 120 文字を上限とする。安全な要約候補が空の場合は定型文言へ縮退する
+- `HttpScriptProvider` は `letterBroadcastSummary={subject, summary}` と `letterSourceReference={letterId, handling}` だけを data-only の source data として送る。レター原文本文は HTTP LLM request へ含めない
+- `TemplateScriptProvider` も同じ `LetterBroadcastContent` の `summary` だけを放送用台本へ使い、外部 Provider 失敗時にも原文抜粋へ戻さない
+- LETTER context から作った `SpeechDirective` には `LETTER_SUMMARIZED` を `safetyFlags` へ付与し、後段ガードの `LETTER_SOURCE`、`LETTER_CONTROL_TOKEN_REMOVED` と併用する
+- 生成 asset metadata にはレター由来の追跡値として `letterId` と `safetyFlags` を残す。原文 body と中間要約は独立 field や HTTP request payload として保存せず、放送 directive の正本となる生成済み `text` / `normalizedText` は従来どおり保存する
 
 ## 8. キャッシュ方針
 

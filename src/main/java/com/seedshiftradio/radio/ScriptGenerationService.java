@@ -261,7 +261,12 @@ public class ScriptGenerationService {
 						emotion,
 						tempo,
 						context.voiceProfile().getStyleKey());
-		List<String> safetyFlags = java.util.stream.Stream.concat(script.safetyFlags().stream(), quality.safetyFlags().stream())
+		java.util.stream.Stream<String> contextFlags = context.letter() == null
+				? java.util.stream.Stream.empty()
+				: java.util.stream.Stream.of("LETTER_SUMMARIZED");
+		List<String> safetyFlags = java.util.stream.Stream.concat(
+				java.util.stream.Stream.concat(script.safetyFlags().stream(), quality.safetyFlags().stream()),
+				contextFlags)
 				.distinct()
 				.toList();
 		return new ScriptDirectiveSnapshot(

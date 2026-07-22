@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -73,15 +74,20 @@ class AssetServiceTests {
 
 	@BeforeEach
 	void setUp() {
-		assetService = new AssetService(
+		org.mockito.Mockito.lenient().when(settingsStore.load()).thenReturn(settingsDocument());
+		SpeechAssetGenerationService speechAssetGenerationService = new SpeechAssetGenerationService(
 				settingsStore,
 				providerRegistry,
 				ttsProvider,
 				scriptGenerationService,
 				generatedAssetService,
 				providerJobService,
-				placeholderAudioFactory,
 				ttsRuntimeProfileResolver);
+		assetService = new AssetService(
+				settingsStore,
+				generatedAssetService,
+				placeholderAudioFactory,
+				speechAssetGenerationService);
 	}
 
 	@Test
@@ -233,12 +239,22 @@ class AssetServiceTests {
 				.thenThrow(new TtsSynthesisException(ProviderErrorCode.PROVIDER_TIMEOUT, "timeout"));
 		byte[] wav = "voicevox-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 		when(ttsProvider.synthesize(eq(voicevox), eq(item), any(), nullable(TtsRuntimeProfile.class)))
-				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "voicevox:fingerprint", Map.of("adapter", "VOICEVOX")));
+				.thenReturn(new TtsProvider.SynthesizedAudio(wav, "voicevox:fingerprint", Map.of(
+						"adapter", "VOICEVOX",
+						"text", "本文です。",
+						"voiceHint", "VOICEVOX:4:normal",
+						"speakerKey", "4",
+						"apiKey", "secret")));
 		GeneratedAssetEntity asset = new GeneratedAssetEntity();
 		asset.setId("asset-voicevox-fallback");
 		when(generatedAssetService.createAudioAsset(
 				eq(wav), eq("voicevox:fingerprint"), eq(item.getId()), eq(voicevoxJob.getId()),
-				argThat(metadata -> "PROVIDER_TIMEOUT".equals(metadata.get("fallbackErrorCode")))))
+				anyString(),
+				argThat(metadata -> "PROVIDER_TIMEOUT".equals(metadata.get("fallbackErrorCode"))
+						&& !metadata.containsKey("text")
+						&& !metadata.containsKey("voiceHint")
+						&& !metadata.containsKey("speakerKey")
+						&& !metadata.containsKey("apiKey"))))
 				.thenReturn(asset);
 
 		assetService.ensureQueueAudioAsset(item);
@@ -274,6 +290,7 @@ class AssetServiceTests {
 		asset.setId("asset-safe-voicevox");
 		when(generatedAssetService.createAudioAsset(
 				eq(wav), eq("voicevox:fingerprint"), eq(item.getId()), eq(providerJob.getId()),
+				anyString(),
 				argThat(metadata -> Boolean.TRUE.equals(metadata.get("fallbackProviderUsed"))
 						&& "VOICE_CONSENT_REQUIRED".equals(metadata.get("fallbackErrorCode")))))
 				.thenReturn(asset);
@@ -337,6 +354,7 @@ class AssetServiceTests {
 				eq("irodori:fingerprint"),
 				eq(item.getId()),
 				eq(providerJob.getId()),
+				anyString(),
 				argThat(metadata -> "voice-night".equals(metadata.get("voiceProfileId")))))
 				.thenReturn(asset);
 
@@ -405,6 +423,7 @@ class AssetServiceTests {
 				eq("seedshift-placeholder:placeholder"),
 				eq("queue-tts-fallback"),
 				eq("provider-job-placeholder"),
+				anyString(),
 				argThat(metadata -> Boolean.TRUE.equals(metadata.get("fallbackProviderUsed"))
 						&& "PROVIDER_TIMEOUT".equals(metadata.get("fallbackErrorCode")))))
 				.thenReturn(asset);
@@ -473,6 +492,7 @@ class AssetServiceTests {
 				eq("seedshift-placeholder:placeholder"),
 				eq(item.getId()),
 				eq(placeholderJob.getId()),
+				anyString(),
 				argThat(metadata -> Boolean.TRUE.equals(metadata.get("fallbackProviderUsed"))
 						&& errorCode.name().equals(metadata.get("fallbackErrorCode")))))
 				.thenReturn(asset);
@@ -531,6 +551,66 @@ class AssetServiceTests {
 
 		assertEquals(expected, actual);
 		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any(), nullable(TtsRuntimeProfile.class));
+	}
+
+	@Test
+	void ensureQueueAudioAssetReusesCachedSpeechAssetWithScriptTraceWithoutCallingProvider() {
+		QueueItemEntity item = ttsQueueItem("queue-tts-cache-hit");
+		when(scriptGenerationService.ensureScriptAsset(item)).thenReturn(scriptSnapshot());
+		GeneratedAssetEntity scriptAsset = new GeneratedAssetEntity();
+		scriptAsset.setId("script-asset-1");
+		scriptAsset.setProviderJobId("script-job-1");
+		when(generatedAssetService.findLatestScriptAssetForQueueItem(item.getId())).thenReturn(Optional.of(scriptAsset));
+		when(ttsRuntimeProfileResolver.resolve(item)).thenReturn(Optional.empty());
+		ProviderRegistry.ResolvedProvider voicevox = new ProviderRegistry.ResolvedProvider(
+				ProviderType.TTS,
+				"tts",
+				"voicevox",
+				"http://127.0.0.1:50021",
+				"/version",
+				1_000,
+				List.of("TTS_GEN", "VOICEVOX"),
+				"VOICEVOX",
+				null,
+				null,
+				Map.of(),
+				false);
+		when(providerRegistry.resolveChain(ProviderType.TTS, null)).thenReturn(List.of(voicevox));
+		GeneratedAssetEntity cached = new GeneratedAssetEntity();
+		cached.setId("audio-cache-source");
+		when(generatedAssetService.findReusableAsset(eq(GeneratedAssetType.AUDIO), anyString()))
+				.thenReturn(Optional.of(cached));
+		ProviderJobEntity cacheJob = providerJob("tts-cache-job");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.TTS_GEN),
+				eq(ProviderType.TTS),
+				eq("voicevox"),
+				eq(item.getId()),
+				eq(item.getCorrelationId()))).thenReturn(cacheJob);
+		GeneratedAssetEntity cloned = new GeneratedAssetEntity();
+		cloned.setId("audio-cache-clone");
+		when(generatedAssetService.cloneAssetForQueue(
+				eq(cached),
+				eq(item.getId()),
+				eq(cacheJob.getId()),
+				anyString(),
+				argThat(metadata -> Boolean.TRUE.equals(metadata.get("cacheHit"))
+						&& "script-asset-1".equals(metadata.get("scriptAssetId"))
+						&& "script-job-1".equals(metadata.get("scriptProviderJobId"))
+						&& metadata.containsKey("normalizedTextHash")
+						&& metadata.containsKey("voiceHintHash")
+						&& !metadata.containsKey("normalizedText")
+						&& !metadata.containsKey("voiceHint"))))
+				.thenReturn(cloned);
+
+		assetService.ensureQueueAudioAsset(item);
+
+		assertEquals("audio-cache-clone", item.getAssetId());
+		assertEquals("/api/assets/audio/audio-cache-clone.wav", item.getAssetUrl());
+		assertEquals("CACHE_REUSED", item.getContentOrigin());
+		verify(providerJobService).markRunning("tts-cache-job", "voicevox", "cache-hit:audio-cache-source");
+		verify(providerJobService).markSucceeded("tts-cache-job");
+		verify(ttsProvider, never()).synthesize(any(), eq(item), any(), nullable(TtsRuntimeProfile.class));
 	}
 
 	private QueueItemEntity queueItem(String id, int durationMs) {

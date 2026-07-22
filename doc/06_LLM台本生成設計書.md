@@ -115,12 +115,15 @@ LLM の候補が不正または Provider chain 全体が利用不能でも、同
 - recent context hash
 - letter id または body hash
 
+現行 `ScriptGenerationService` は Provider identity、`config.json.cache.scriptReuseScope` と scope partition、segment / slot、program block / slot、personality、`promptHash` から `generated_asset.cache_key` を算出する。hit 時は Provider 呼び出しを省略し、既存 script payload を現在の queue item と論理 `SCRIPT_GEN` job へ clone する。clone metadata は `sourceAssetId`, `cacheHit=true` と現在の `providerJobId` を持つ。
+
 以下の場合はキャッシュ再利用を禁止する。
 
 - 最新のレター状態が変化した
 - persona version が変わった
 - NG ポリシーが更新された
 - station `compositionPolicy` や `preGenerationPolicy` の script 影響項目が変わった
+- queue item が `LETTER` 由来である
 
 再利用範囲:
 

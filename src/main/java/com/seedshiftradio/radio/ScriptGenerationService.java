@@ -22,10 +22,12 @@ import com.seedshiftradio.settings.ProviderErrorClassifier;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobService;
 import com.seedshiftradio.settings.ProviderRegistry;
+import com.seedshiftradio.settings.RadioSettingsStore;
 import com.seedshiftradio.settings.ProviderRuntimeException;
 
 @Service
 public class ScriptGenerationService {
+	private static final List<String> NO_REUSE_SCOPES = List.of("DISABLED", "ARCHIVE_ONLY");
 
 	private final ContextAssembler contextAssembler;
 	private final HttpScriptProvider httpScriptProvider;
@@ -40,6 +42,7 @@ public class ScriptGenerationService {
 	private final GeneratedAssetService generatedAssetService;
 	private final ProviderRegistry providerRegistry;
 	private final ProviderJobService providerJobService;
+	private final RadioSettingsStore settingsStore;
 
 	public ScriptGenerationService(
 			ContextAssembler contextAssembler,
@@ -54,7 +57,8 @@ public class ScriptGenerationService {
 			PlayoutSessionRepository playoutSessionRepository,
 			GeneratedAssetService generatedAssetService,
 			ProviderRegistry providerRegistry,
-			ProviderJobService providerJobService) {
+			ProviderJobService providerJobService,
+			RadioSettingsStore settingsStore) {
 		this.contextAssembler = contextAssembler;
 		this.httpScriptProvider = httpScriptProvider;
 		this.templateScriptProvider = templateScriptProvider;
@@ -68,6 +72,7 @@ public class ScriptGenerationService {
 		this.generatedAssetService = generatedAssetService;
 		this.providerRegistry = providerRegistry;
 		this.providerJobService = providerJobService;
+		this.settingsStore = settingsStore;
 	}
 
 	@Transactional
@@ -109,6 +114,11 @@ public class ScriptGenerationService {
 				.orElseThrow(() -> new IllegalStateException("script generation target session is missing: " + item.getSessionId()));
 		ScriptGenerationContext context = contextAssembler.assemble(session, item);
 		for (ProviderRegistry.ResolvedProvider provider : providerRegistry.resolveChain(ProviderType.LLM)) {
+			String cacheKey = buildCacheKey(context, provider);
+			Optional<GeneratedAssetEntity> reusableAsset = findReusableScriptAsset(cacheKey);
+			if (reusableAsset.isPresent()) {
+				return reuseScriptAsset(item, provider.providerKey(), cacheKey, reusableAsset.orElseThrow());
+			}
 			ProviderJobEntity providerJob = createRunningJob(item, provider.providerKey());
 			try {
 				ScriptDirectiveSnapshot snapshot = buildSnapshot(
@@ -116,7 +126,7 @@ public class ScriptGenerationService {
 						provider,
 						context,
 						resolveVoiceHint(context, null));
-				persistScriptAsset(item, context, snapshot, provider, providerJob.getId());
+				persistScriptAsset(item, context, snapshot, provider, providerJob.getId(), cacheKey);
 				providerJobService.markSucceeded(providerJob.getId());
 				return snapshot;
 			} catch (ProviderRuntimeException exception) {
@@ -134,6 +144,11 @@ public class ScriptGenerationService {
 
 	private ScriptDirectiveSnapshot createTemplateScriptAsset(QueueItemEntity item, ScriptGenerationContext context) {
 		String providerKey = "template-script";
+		String cacheKey = buildCacheKey(context, null);
+		Optional<GeneratedAssetEntity> reusableAsset = findReusableScriptAsset(cacheKey);
+		if (reusableAsset.isPresent()) {
+			return reuseScriptAsset(item, providerKey, cacheKey, reusableAsset.orElseThrow());
+		}
 		ProviderJobEntity providerJob = createRunningJob(item, providerKey);
 		try {
 			ScriptDirectiveSnapshot snapshot = buildSnapshot(
@@ -146,7 +161,7 @@ public class ScriptGenerationService {
 					"template-script:deterministic",
 					item.getId(),
 					providerJob.getId(),
-					metadata(item, context, snapshot, providerKey, providerJob.getId()));
+					metadata(item, context, snapshot, providerKey, providerJob.getId(), cacheKey, false));
 			providerJobService.markSucceeded(providerJob.getId());
 			return snapshot;
 		} catch (ProviderRuntimeException exception) {
@@ -159,13 +174,17 @@ public class ScriptGenerationService {
 	}
 
 	private ProviderJobEntity createRunningJob(QueueItemEntity item, String providerKey) {
+		return createRunningJob(item, providerKey, "script-" + item.getId());
+	}
+
+	private ProviderJobEntity createRunningJob(QueueItemEntity item, String providerKey, String externalRef) {
 		ProviderJobEntity providerJob = providerJobService.createQueuedJob(
 				ProviderJobType.SCRIPT_GEN,
 				ProviderType.LLM,
 				providerKey,
 				item.getId(),
 				item.getCorrelationId());
-		providerJobService.markRunning(providerJob.getId(), providerKey, "script-" + item.getId());
+		providerJobService.markRunning(providerJob.getId(), providerKey, externalRef);
 		return providerJob;
 	}
 
@@ -174,13 +193,44 @@ public class ScriptGenerationService {
 			ScriptGenerationContext context,
 			ScriptDirectiveSnapshot snapshot,
 			ProviderRegistry.ResolvedProvider provider,
-			String providerJobId) {
+			String providerJobId,
+			String cacheKey) {
 		generatedAssetService.createScriptAsset(
 				snapshot.normalizedText(),
 				providerFingerprint(provider),
 				item.getId(),
 				providerJobId,
-				metadata(item, context, snapshot, provider.providerKey(), providerJobId));
+				metadata(item, context, snapshot, provider.providerKey(), providerJobId, cacheKey, false));
+	}
+
+	private Optional<GeneratedAssetEntity> findReusableScriptAsset(String cacheKey) {
+		return cacheKey == null
+				? Optional.empty()
+				: generatedAssetService.findReusableAsset(GeneratedAssetType.SCRIPT, cacheKey);
+	}
+
+	private ScriptDirectiveSnapshot reuseScriptAsset(
+			QueueItemEntity item,
+			String providerKey,
+			String cacheKey,
+			GeneratedAssetEntity reusableAsset) {
+		ProviderJobEntity providerJob = createRunningJob(item, providerKey, "cache-hit:" + reusableAsset.getId());
+		Map<String, Object> metadata = new LinkedHashMap<>(reusableAsset.getMetadata());
+		metadata.put("queueItemId", item.getId());
+		metadata.put("providerKey", providerKey);
+		metadata.put("providerJobId", providerJob.getId());
+		metadata.put("cacheKey", cacheKey);
+		metadata.put("cacheHit", true);
+		metadata.put("sourceAssetId", reusableAsset.getId());
+		try {
+			GeneratedAssetEntity cloned = generatedAssetService.cloneAssetForQueue(
+					reusableAsset, item.getId(), providerJob.getId(), cacheKey, metadata);
+			providerJobService.markSucceeded(providerJob.getId());
+			return ScriptDirectiveSnapshot.fromMetadata(cloned.getMetadata());
+		} catch (RuntimeException exception) {
+			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
+			throw exception;
+		}
 	}
 
 	private String providerFingerprint(ProviderRegistry.ResolvedProvider provider) {
@@ -233,11 +283,15 @@ public class ScriptGenerationService {
 			ScriptGenerationContext context,
 			ScriptDirectiveSnapshot snapshot,
 			String providerKey,
-			String providerJobId) {
+			String providerJobId,
+			String cacheKey,
+			boolean cacheHit) {
 		Map<String, Object> metadata = new LinkedHashMap<>();
 		metadata.put("queueItemId", item.getId());
 		metadata.put("providerKey", providerKey);
 		metadata.put("providerJobId", providerJobId);
+		metadata.put("cacheKey", cacheKey);
+		metadata.put("cacheHit", cacheHit);
 		metadata.put("segmentType", item.getSegmentType().name());
 		metadata.put("slotRole", item.getSlotRole().name());
 		metadata.put("text", snapshot.text());
@@ -260,6 +314,44 @@ public class ScriptGenerationService {
 			metadata.put("letterId", item.getLetterId());
 		}
 		return metadata;
+	}
+
+	private String buildCacheKey(ScriptGenerationContext context, ProviderRegistry.ResolvedProvider provider) {
+		if (context.item().getLetterId() != null && !context.item().getLetterId().isBlank()) {
+			return null;
+		}
+		String reuseScope = settingsStore.load().cache().scriptReuseScope();
+		if (NO_REUSE_SCOPES.contains(reuseScope)) {
+			return null;
+		}
+		String scopePartition = switch (reuseScope) {
+			case "GLOBAL" -> "global";
+			case "SESSION" -> normalize(context.session().getId());
+			case "STATION" -> context.station() == null
+					? normalize(context.session().getId())
+					: normalize(context.station().getId());
+			default -> normalize(context.session().getId());
+		};
+		String raw = String.join(
+				"|",
+				"script-v1",
+				normalize(reuseScope),
+				scopePartition,
+				provider == null ? "template-script" : normalize(provider.providerKey()),
+				provider == null ? "deterministic" : normalize(provider.baseUrl()),
+				provider == null ? "template" : normalize(provider.adapter()),
+				provider == null ? "" : normalize(provider.defaultModelProfileId()),
+				normalize(context.item().getSegmentType().name()),
+				normalize(context.item().getSlotRole().name()),
+				normalize(context.item().getProgramBlockId()),
+				normalize(context.item().getProgramSlotId()),
+				context.personality() == null ? "" : normalize(context.personality().getId()),
+				sha256(context.prompt()));
+		return sha256(raw);
+	}
+
+	private String normalize(String value) {
+		return value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
 	}
 
 	private boolean archiveEligible(QueueItemEntity item, ScriptDirectiveSnapshot snapshot) {

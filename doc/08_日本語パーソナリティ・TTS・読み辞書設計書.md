@@ -183,9 +183,11 @@ Web では主にデバッグ表示用、Native では実行用とする。
 ## 9. 生成物の扱い
 
 - `normalizedText` は script asset metadata に保持して再現可能にする
-- TTS audio asset metadata は本文を保持せず、`normalizedTextHash`, `providerKey`, `adapter`, `voiceHint`, `speakerKey` / `voiceId`, hint count のような短い値だけにする
+- TTS audio asset metadata は本文を保持せず、`normalizedTextHash`, `providerKey`, `adapter`, `voiceHintHash`, `speakerKeyHash`, hint count のような短い値だけにする
 - Voice Persona 変更時は TTS キャッシュを無効化する
-- `pronunciationHints`, `pauseHints`, `voiceHint` も replay 対応のため script asset metadata に保持し、audio asset metadata では count と `voiceHint` に抑える
+- `pronunciationHints`, `pauseHints`, `voiceHint` も replay 対応のため script asset metadata に保持し、audio asset metadata では hint count と `voiceHintHash` に抑える
+- VoiceProfile の engine、speaker、style、speed、Provider options、参照音声、同意方針の有効設定 fingerprint を TTS cache key に含め、同じ profile ID の設定変更でも cache miss にする
+- `LETTER` 由来の script / TTS は通常 cache の横断再利用を行わない
 - `LETTER` 由来の音声は既定で archive replay 候補にしない
 - `TALK` の replay 候補化は station `replayPolicy` と `safetyFlags` の両方を満たした場合のみ許可する
 

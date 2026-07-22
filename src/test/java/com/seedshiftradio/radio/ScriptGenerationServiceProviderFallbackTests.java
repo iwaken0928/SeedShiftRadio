@@ -22,12 +22,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.SegmentType;
 import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.settings.GeneratedAssetService;
+import com.seedshiftradio.settings.GeneratedAssetEntity;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobService;
 import com.seedshiftradio.settings.ProviderRegistry;
+import com.seedshiftradio.settings.RadioSettingsStore;
+import com.seedshiftradio.settings.SettingsDocument;
 
 @ExtendWith(MockitoExtension.class)
 class ScriptGenerationServiceProviderFallbackTests {
@@ -58,6 +62,8 @@ class ScriptGenerationServiceProviderFallbackTests {
 	ProviderRegistry providerRegistry;
 	@Mock
 	ProviderJobService providerJobService;
+	@Mock
+	RadioSettingsStore settingsStore;
 
 	ScriptGenerationService service;
 	QueueItemEntity item;
@@ -78,7 +84,12 @@ class ScriptGenerationServiceProviderFallbackTests {
 				playoutSessionRepository,
 				generatedAssetService,
 				providerRegistry,
-				providerJobService);
+				providerJobService,
+				settingsStore);
+		SettingsDocument settingsDocument = org.mockito.Mockito.mock(SettingsDocument.class);
+		when(settingsStore.load()).thenReturn(settingsDocument);
+		when(settingsDocument.cache()).thenReturn(new SettingsDocument.CacheSettings(
+				1L, 1L, 1L, 1, 1, 1, "STATION", "STATION", "GLOBAL", 1));
 
 		item = new QueueItemEntity();
 		item.setId("queue-script-1");
@@ -97,12 +108,12 @@ class ScriptGenerationServiceProviderFallbackTests {
 		when(generatedAssetService.findLatestScriptAssetForQueueItem("queue-script-1")).thenReturn(Optional.empty());
 		when(playoutSessionRepository.findById("session-script-1")).thenReturn(Optional.of(session));
 		when(contextAssembler.assemble(session, item)).thenReturn(context);
-		when(normalizer.normalize(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-		when(sentenceSplitter.splitLongSentences(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-		when(qualityGuard.inspect(anyString(), eq(context))).thenAnswer(invocation ->
+		org.mockito.Mockito.lenient().when(normalizer.normalize(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+		org.mockito.Mockito.lenient().when(sentenceSplitter.splitLongSentences(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+		org.mockito.Mockito.lenient().when(qualityGuard.inspect(anyString(), eq(context))).thenAnswer(invocation ->
 				new JapaneseQualityGuard.QualityResult(invocation.getArgument(0), List.of()));
-		when(pronunciationDictionaryService.resolveHints(anyString())).thenReturn(List.of());
-		when(pronunciationDictionaryService.applyReadings(anyString(), eq(List.of())))
+		org.mockito.Mockito.lenient().when(pronunciationDictionaryService.resolveHints(anyString())).thenReturn(List.of());
+		org.mockito.Mockito.lenient().when(pronunciationDictionaryService.applyReadings(anyString(), eq(List.of())))
 				.thenAnswer(invocation -> invocation.getArgument(0));
 	}
 
@@ -157,6 +168,43 @@ class ScriptGenerationServiceProviderFallbackTests {
 		verify(httpScriptProvider, never()).generate(fallback, context);
 		verify(templateScriptProvider).generate(null, context);
 		verify(providerJobService).markSucceeded("job-template");
+	}
+
+	@Test
+	void reusableScriptAssetSkipsProviderAndKeepsCurrentJobTrace() {
+		ProviderRegistry.ResolvedProvider provider = provider("llm-primary", false);
+		when(providerRegistry.resolveChain(ProviderType.LLM)).thenReturn(List.of(provider));
+		GeneratedAssetEntity reusable = mock(GeneratedAssetEntity.class);
+		when(reusable.getId()).thenReturn("script-cache-source");
+		when(reusable.getMetadata()).thenReturn(Map.of(
+				"text", "cached script",
+				"normalizedText", "cached script",
+				"pronunciationHints", List.of(),
+				"pauseHints", List.of(),
+				"emotion", "calm",
+				"tempo", "medium",
+				"safetyFlags", List.of()));
+		when(generatedAssetService.findReusableAsset(eq(GeneratedAssetType.SCRIPT), anyString()))
+				.thenReturn(Optional.of(reusable));
+		ProviderJobEntity cacheJob = job("job-cache-hit");
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.SCRIPT_GEN), eq(ProviderType.LLM), eq("llm-primary"),
+				eq("queue-script-1"), eq("corr-script-1"))).thenReturn(cacheJob);
+		when(generatedAssetService.cloneAssetForQueue(
+				eq(reusable), eq("queue-script-1"), eq("job-cache-hit"), anyString(), any(Map.class)))
+				.thenAnswer(invocation -> {
+					GeneratedAssetEntity cloned = mock(GeneratedAssetEntity.class);
+					when(cloned.getMetadata()).thenReturn(invocation.getArgument(4));
+					return cloned;
+				});
+
+		ScriptDirectiveSnapshot result = service.ensureScriptAsset(item);
+
+		assertEquals("cached script", result.normalizedText());
+		verify(providerJobService).markRunning("job-cache-hit", "llm-primary", "cache-hit:script-cache-source");
+		verify(providerJobService).markSucceeded("job-cache-hit");
+		verify(httpScriptProvider, never()).generate(any(), any());
+		verify(generatedAssetService, never()).createScriptAsset(anyString(), anyString(), anyString(), anyString(), any(Map.class));
 	}
 
 	private ProviderRegistry.ResolvedProvider provider(String providerKey, boolean fallback) {

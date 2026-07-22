@@ -184,17 +184,17 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。
 LLM の `defaultModelProfileId` は model 名として使い、`modelProfiles` の存在を要求しない。LLM endpoint の `timeoutMs` を省略する場合は 20000 ms を既定とする。
 
-Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になるが、現行実装では MusicGen の cache-first 再利用までが先行しており、station `preGeneration.preferCacheReuse=false` の場合は reusable asset が存在しても worker submit を優先する。retention/eviction の定期処理は未実装である。
+Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になり、script、TTS、MusicGen が cache-first 再利用へ接続済みである。MusicGen では station `preGeneration.preferCacheReuse=false` の場合に reusable asset が存在しても worker submit を優先する。
 
 ### 8.1 Cache-first 実行
 
-1. `contentHash` を計算し `generated_asset` を reuse scope に従って検索する
+1. Provider identity、reuse scope と正規化入力から `cacheKey` を計算し、`generated_asset.cache_key` を reuse scope に従って検索する
 2. hit した場合は Provider 呼び出しを省略し、`queue_item.content_origin=CACHE_REUSED` を記録する
 3. miss した場合のみ Provider を呼び出す
 4. 完了 asset は `byte_size`, `reuse_scope`, `expires_at`, `archive_eligible` を付けて保存する
 5. `archive_eligible=true` かつ安全条件を満たすものは `broadcast_archive` へ昇格可能にする
 
-現行実装で cache-first が使われているのは MusicGen のみで、`generated_asset.cache_key` と provider/request の正規化入力を使って再利用候補を探す。`script` と `TTS` の cache-first も設計上は同じ契約だが、実処理と eviction job はまだ未接続である。
+現行実装は script、TTS、MusicGen で `generated_asset.cache_key` と Provider/request の正規化入力を使って再利用候補を探す。script と TTS の orchestration は cache hit でも現在の queue item と correlationId を持つ論理 `provider_job` を作り、`external_ref=cache-hit:{sourceAssetId}`、clone asset の `sourceAssetId` と現在の `providerJobId` で追跡する。TTS audio metadata は `scriptAssetId` と `scriptProviderJobId` も持ち、成功した script job から最終 audio asset までを辿れる。`LETTER` 由来は script / TTS とも通常 cache を再利用しない。
 
 ### 8.2 Music generation profile
 

@@ -65,6 +65,7 @@ class SeedShiftRadioApplicationTests {
 		ProviderJobEntity queued = providerJobService.createQueuedJob(
 				ProviderJobType.MUSIC_GEN, ProviderType.MUSIC, "worker-primary", null, "corr-queued");
 
+		providerJobRepository.flush();
 		setUpdatedAt(stale.getId(), now.minusSeconds(30 * 60));
 		setUpdatedAt(fresh.getId(), now.minusSeconds(5 * 60));
 		setUpdatedAt(queued.getId(), now.minusSeconds(30 * 60));
@@ -88,7 +89,10 @@ class SeedShiftRadioApplicationTests {
 	}
 
 	private void setUpdatedAt(String providerJobId, Instant updatedAt) {
-		jdbcTemplate.update("update provider_job set updated_at = ? where id = ?", Timestamp.from(updatedAt), providerJobId);
+		assertEquals(1, jdbcTemplate.update(
+				"update provider_job set updated_at = ? where id = ?",
+				Timestamp.from(updatedAt),
+				providerJobId));
 	}
 
 }

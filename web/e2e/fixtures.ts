@@ -3,6 +3,7 @@ import type { Locator, Page, Route } from "@playwright/test";
 export const APP_BASE_URL = process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://127.0.0.1:3001";
 export const API_BASE_URL = `${APP_BASE_URL}/api-proxy`;
 export const UI_STORE_STORAGE_KEY = "seedshift-radio-web-ui";
+const E2E_ADMIN_PASSWORD = process.env.E2E_WEB_ADMIN_PASSWORD?.trim() || "playwright-login-password";
 
 export function appUrl(pathname = "/") {
   return new URL(pathname, APP_BASE_URL).toString();
@@ -14,10 +15,14 @@ export function apiUrl(pathname: string) {
 
 export async function loginAdmin(page: Page) {
   const response = await page.request.post(appUrl("/api/auth/login"), {
-    data: { password: "playwright-login-password" },
-    headers: { Origin: APP_BASE_URL },
+    data: { password: E2E_ADMIN_PASSWORD },
+    headers: { Origin: new URL(APP_BASE_URL).origin },
   });
-  if (!response.ok()) throw new Error(`admin login failed: ${response.status()}`);
+  if (!response.ok()) {
+    const stage = response.status() === 403 ? "same-origin check" : "credential or session setup";
+    throw new Error(`admin login failed during ${stage}: status=${response.status()}, appOrigin=${new URL(APP_BASE_URL).origin}`);
+  }
+  return response;
 }
 
 export function apiRegExp(pathPattern: string) {

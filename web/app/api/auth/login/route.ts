@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE, createAdminSession, sessionCookieOptions, verifyLoginPassword } from "@/lib/server/admin-auth";
+import { hasSameRequestOrigin } from "@/lib/server/request-origin";
 
 export async function POST(request: NextRequest) {
-  if (!hasSameOrigin(request)) {
+  if (!hasSameRequestOrigin(request)) {
     return Response.json({ message: "同一 origin から操作してください。" }, { status: 403 });
   }
   const payload = (await request.json().catch(() => null)) as { password?: unknown } | null;
@@ -14,9 +15,4 @@ export async function POST(request: NextRequest) {
   response.headers.set("Cache-Control", "no-store");
   response.cookies.set(ADMIN_SESSION_COOKIE, createAdminSession(), sessionCookieOptions());
   return response;
-}
-
-function hasSameOrigin(request: NextRequest) {
-  const origin = request.headers.get("origin");
-  return Boolean(origin && origin === request.nextUrl.origin);
 }

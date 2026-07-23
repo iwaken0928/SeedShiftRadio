@@ -1,6 +1,19 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://127.0.0.1:3001";
+const serverURL = new URL(baseURL);
+const isCI = /^(1|true)$/i.test(process.env.CI?.trim() || "");
+const webServerEnv = {
+  HOSTNAME: serverURL.hostname,
+  PORT: serverURL.port || "3001",
+  SEEDSHIFT_WEB_ADMIN_PASSWORD:
+    process.env.E2E_WEB_ADMIN_PASSWORD?.trim() || "playwright-login-password",
+  SEEDSHIFT_WEB_SESSION_SECRET:
+    process.env.E2E_WEB_SESSION_SECRET?.trim() || "playwright-session-secret-at-least-32-bytes",
+  SEEDSHIFT_ADMIN_TOKEN:
+    process.env.E2E_ADMIN_TOKEN?.trim() || "playwright-server-admin-token",
+  ...(isCI ? { CI: "true" } : {}),
+};
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,13 +40,9 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run start:e2e",
-    env: {
-      SEEDSHIFT_WEB_ADMIN_PASSWORD: "playwright-login-password",
-      SEEDSHIFT_WEB_SESSION_SECRET: "playwright-session-secret-at-least-32-bytes",
-      SEEDSHIFT_ADMIN_TOKEN: "playwright-server-admin-token",
-    },
+    env: webServerEnv,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !isCI,
     timeout: 120_000,
   },
 });

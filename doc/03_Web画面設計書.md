@@ -137,6 +137,7 @@
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
 - 管理 session がない場合は Settings / Monitor 導線を非表示にし、`/settings`、`/monitor` を直接開いた時は `/admin/login` へ遷移する
 - `/admin/login` は Web 管理用パスワードだけを一時入力として受け取り、成功時に server-side で署名した `HttpOnly` session Cookie を確立する。管理 API 用トークンとは別資格情報とし、入力値を browser storage や標準ログへ残さない
+- `/admin/login` の同一 origin 判定は、Next.js 内部 URL ではなく利用者から見える protocol と host を基準にする。host は reverse proxy が設定した `X-Forwarded-Host` の先頭要素を優先し、なければ `Host`、protocol は `X-Forwarded-Proto` の先頭要素を優先し、なければ request URL を使う。`Origin` の欠落、不正 URL、protocol / host 不一致は拒否する
 - 認証済み session の確認は `GET /api/auth/session` を使い、返された CSRF token は client memory だけで扱う。状態変更を伴う `/api-proxy` request と `POST /api/auth/logout` は `X-CSRF-Token` を付ける
 - `Import / Export` は Web 側で JSON download / file import として実装し、専用 API は増やさず既存の `GET /api/settings` と `PUT /api/settings` を使う
 - Import 時は `schemaVersion` の一致を確認し、`version` は現在の保存済み設定へ合わせる。`apiKeyRef` と `adminTokenRef` は `env:` / `file:` 参照だけ受け付ける
@@ -195,6 +196,7 @@
 - `useEffectEvent` を用いて音声イベント購読処理を安定化する
 - 過剰なグローバル状態は避け、Server State と UI State を分離する
 - Settings / Monitor 導線は `GET /api/auth/session` が認証済みを返す時だけ表示し、同じ導線から session logout を実行できるようにする
+- 管理認証 E2E は `/api/auth/login` の同一 origin 成功、cross-origin の `403` 拒否、`GET /api/auth/session` の認証成立を独立ケースで確認する。失敗診断には status と判定段階だけを残し、password、session Cookie、CSRF token、管理 API 用トークンを出さない
 - `/settings` の Import / Export helper は Vitest で、metadata 除外、schemaVersion mismatch、Import/Export 双方の secret 参照検証、未登録 fallback provider を確認する
 - `/settings` / `/monitor` の provider health 表示 helper は Vitest で、metadata/message/object fallback に prompt / lyrics / letter body / radioName / secret が混ざっても露出しないことを確認する
 - `/settings` の station 基本情報更新は API client test で、CSRF header、JSON body、URL encode を確認し、browser が `X-Admin-Token` を生成しないことを固定する

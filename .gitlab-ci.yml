@@ -218,6 +218,11 @@ web-unit:
 web-e2e:
   extends: .test-job
   stage: test
+  variables:
+    PLAYWRIGHT_BASE_URL: "http://127.0.0.1:3001"
+    E2E_WEB_ADMIN_PASSWORD: "playwright-login-password"
+    E2E_WEB_SESSION_SECRET: "playwright-session-secret-at-least-32-bytes"
+    E2E_ADMIN_TOKEN: "playwright-server-admin-token"
   script:
     - podman --remote pull "${PODMAN_TEST_PLAYWRIGHT_IMAGE}"
     - >
@@ -227,6 +232,11 @@ web-e2e:
       --security-opt=label=disable
       -e HOME=/tmp/home
       -e npm_config_cache=/tmp/npm-cache
+      -e CI
+      -e PLAYWRIGHT_BASE_URL
+      -e E2E_WEB_ADMIN_PASSWORD
+      -e E2E_WEB_SESSION_SECRET
+      -e E2E_ADMIN_TOKEN
       -v "${CI_PROJECT_DIR}:/workspace"
       -w /workspace/web
       "${PODMAN_TEST_PLAYWRIGHT_IMAGE}"

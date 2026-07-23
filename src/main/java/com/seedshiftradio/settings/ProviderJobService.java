@@ -2,9 +2,11 @@ package com.seedshiftradio.settings;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -89,6 +91,32 @@ public class ProviderJobService {
 		ProviderJobEntity saved = providerJobRepository.save(entity);
 		publishAuditEvent("provider.job.failed", saved);
 		return saved;
+	}
+
+	@Transactional(readOnly = true)
+	public List<ProviderJobEntity> findStaleRunning(Instant cutoff, int limit) {
+		int effectiveLimit = Math.max(1, limit);
+		return providerJobRepository.findByStatusAndUpdatedAtBeforeOrderByUpdatedAtAsc(
+				ProviderJobStatus.RUNNING,
+				cutoff,
+				PageRequest.of(0, effectiveLimit));
+	}
+
+	@Transactional
+	public boolean failIfStaleRunning(String providerJobId, Instant cutoff, Instant failedAt) {
+		int updated = providerJobRepository.failIfStaleRunning(
+				providerJobId,
+				ProviderJobStatus.RUNNING,
+				ProviderJobStatus.FAILED,
+				ProviderErrorCode.PROVIDER_INTERRUPTED.name(),
+				cutoff,
+				failedAt);
+		if (updated == 0) {
+			return false;
+		}
+		ProviderJobEntity failed = providerJobRepository.findById(providerJobId).orElseThrow();
+		publishAuditEvent("provider.job.failed", failed);
+		return true;
 	}
 
 	private void publishAuditEvent(String eventName, ProviderJobEntity entity) {

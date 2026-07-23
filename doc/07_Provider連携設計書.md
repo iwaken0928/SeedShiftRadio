@@ -143,13 +143,25 @@ fallback 方針:
 |---|---|---|
 | LLM | 20 秒 | 1 回 |
 | TTS | 15 秒。Irodori は初回 model load / CPU fallback を考慮し provider ごとに 60 から 300 秒へ延長可能 | 1 回。Irodori の 503 / queue timeout は同一 provider 再試行より fallback provider を優先 |
-| Music Generation | submit/poll は provider timeout、完了待ちは 180 秒 | 即時再試行なし。fallback provider またはジョブ再投入のみ |
+| Music Generation | submit/poll は provider timeout、完了待ちは 180 秒 | 即時再試行なし。許可された error code に限る fallback provider、または上位の queue planning による新規論理要求で回復する |
 
 再試行時は `correlationId` を継承する。
 
 Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` と、TTS 固有の `VOICE_REF_NOT_FOUND`, `VOICE_CONSENT_REQUIRED` に限定する。
 `PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では同じ要求を別 Provider へ自動送信しない。
 ただし Provider chain の fallback を行わない場合でも、上位の playout は安全な cache、archive、local asset、placeholder による縮退継続を選べる。
+
+### 6.1 stale `RUNNING` の回収
+
+Server process の停止や中断で `provider_job.status=RUNNING` のまま残った job は、`ProviderJobRecoveryJob` が `updated_at` を基準に stale 判定する。
+回収処理は `seedshift.radio.provider-job.recovery.enabled` で有効化し、`seedshift.radio.provider-job.recovery.stale-after=15m`, `seedshift.radio.provider-job.recovery.fixed-delay=60s`, `seedshift.radio.provider-job.recovery.batch-size=100` を既定として個別に変更できる。
+`stale-after` は正の Duration を必須とし、`batch-size` は実行時に 1 から 1000 の範囲へ補正する。
+1 回の実行では batch 上限までを処理し、残件は次回周期へ持ち越す。
+
+stale job は条件付き更新で `FAILED`、`error_code=PROVIDER_INTERRUPTED`、`ended_at=回収時刻` へ確定し、通常の失敗と同じ `provider.job.failed` を safe metadata だけで配信する。
+`PROVIDER_INTERRUPTED` は Provider chain の fallback 対象外であり、`provider_job` には request 本文も再投入に必要な完全な payload も保存しないため、回収処理は同じ要求を自動再送しない。
+再生に必要な生成物は、上位の queue warmup / refill / planning が新しい論理要求として補充し、古い job の `correlationId` を再利用しない。
+これにより、process 復旧後の回収は生成要求の二重送信を避けながら、再生経路の通常の縮退・補充へ収束する。
 
 ## 7. エラー分類
 

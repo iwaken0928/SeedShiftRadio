@@ -40,6 +40,10 @@ public interface MusicGenerationProvider {
 
 `MusicJobStatus` は `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` を Server 内部状態として返す。`provider_job` も `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` へ集約し、`DEGRADED` は追加しない。Provider chain は最終 Provider と論理ジョブの最終結果を一つの `provider_job` に残し、縮退中であることは Provider health と playout state で表す。`external_ref` に `providerTaskId`、`generated_asset` に `assetId`, `providerFingerprint`, `metadata.model`, `metadata.lmModel`, `metadata.seed`, `metadata.duration`, `metadata.promptHash`, `metadata.lyricsHash` を残す。prompt / lyrics 本文は保存メタ、SSE、標準ログへ含めない。
 
+Server process の停止などで worker の完了確認前に `provider_job` が `RUNNING` のまま残った場合、共通の provider job 回収処理が `updated_at` の stale 閾値を超えた job を `FAILED / PROVIDER_INTERRUPTED` へ確定する。
+回収時は worker へ同じ prompt / lyrics を自動再送しない。
+`provider_job` に再投入用の本文を保存しない契約を維持し、必要な音楽は queue planning が cache、archive、local asset、placeholder による縮退、または新しい論理生成要求として補充する。
+
 ## 4. Provider 種別
 
 ### 4.1 `MUSICGEN_WORKER`
@@ -126,8 +130,12 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 - cache hit rate
 - 失敗率と分類済み失敗理由
 - provider response time と timeout count
+- stale `RUNNING` の回収件数 `seedshift.provider.jobs.recovered`
+- provider job 回収処理の例外終了回数 `seedshift.provider.jobs.recovery.failures`
 
 設定/監視 UI は接続テスト、model profile 選択、queue stats、直近失敗理由を表示する。prompt / lyrics / API key / radioName / letter body は表示しない。
+回収済み job は専用の公開 DTO を増やさず、`/api/monitor/summary` の `runningJobs` から外れ、`recentErrors` に `PROVIDER_INTERRUPTED` として現れる。
+定期処理の `runOnce` 結果は `checkedAt`, `cutoff`, `scannedCount`, `recoveredCount` を内部の test / 運用確認に使う。
 
 ## 10. テスト方針
 
@@ -136,6 +144,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 - `429`, timeout, provider down で `DEGRADED` へ進み、playout が止まらないこと
 - Worker が返す既知 error code は共通分類を維持し、未知 error code は `PROVIDER_BAD_RESPONSE` へ正規化すること
 - `PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では Provider chain の fallback を行わず、同じ prompt / lyrics を再送しないこと
+- stale 閾値を超えた `RUNNING` job は `FAILED / PROVIDER_INTERRUPTED` へ一度だけ条件付き更新され、worker への再送なしで `provider.job.failed` と monitor summary に反映されること
 - config validation で未知 profile、不正 duration、秘密値直書き、`wav` / `wav32` 以外の outputFormat を検出すること
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に生で出ないこと
 - fake ACE-Step HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現すること

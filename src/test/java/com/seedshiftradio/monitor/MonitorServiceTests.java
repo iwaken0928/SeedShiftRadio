@@ -152,6 +152,7 @@ class MonitorServiceTests {
 		assertEquals("job-running", summary.runningJobs().getFirst().id());
 		assertEquals(1, summary.recentErrors().size());
 		assertEquals("job-failed", summary.recentErrors().getFirst().id());
+		assertEquals("PROVIDER_INTERRUPTED", summary.recentErrors().getFirst().errorCode());
 		assertEquals(3, summary.auditEvents().size());
 		assertEquals("provider.job.failed", summary.auditEvents().getFirst().eventType());
 		assertEquals("buffer.warning", summary.auditEvents().get(1).eventType());
@@ -245,7 +246,7 @@ class MonitorServiceTests {
 		entity.setProviderKey("ace-step");
 		entity.setQueueItemId("queue-001");
 		entity.setExternalRef("worker-job-001");
-		entity.setErrorCode(status == ProviderJobStatus.FAILED ? "PROVIDER_TIMEOUT" : null);
+		entity.setErrorCode(status == ProviderJobStatus.FAILED ? "PROVIDER_INTERRUPTED" : null);
 		entity.setCorrelationId("corr-001");
 		entity.setCreatedAt(Instant.parse("2026-03-20T09:00:00Z"));
 		entity.setUpdatedAt(Instant.parse("2026-03-20T09:10:00Z"));

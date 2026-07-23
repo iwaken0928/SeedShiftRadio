@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 
@@ -87,7 +88,7 @@ class SeedShiftRadioApplicationTests {
 	}
 
 	private void setUpdatedAt(String providerJobId, Instant updatedAt) {
-		jdbcTemplate.update("update provider_job set updated_at = ? where id = ?", updatedAt, providerJobId);
+		jdbcTemplate.update("update provider_job set updated_at = ? where id = ?", Timestamp.from(updatedAt), providerJobId);
 	}
 
 }

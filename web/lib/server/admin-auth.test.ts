@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAdminSession, createCsrfToken, readAdminSession, verifyCsrfToken, verifyLoginPassword } from "@/lib/server/admin-auth";
+import {
+  createAdminSession,
+  createCsrfToken,
+  readAdminSession,
+  sessionCookieOptions,
+  verifyCsrfToken,
+  verifyLoginPassword,
+} from "@/lib/server/admin-auth";
 
 describe("admin auth", () => {
   beforeEach(() => {
@@ -26,6 +33,11 @@ describe("admin auth", () => {
   it("login password を timing-safe 比較する", () => {
     expect(verifyLoginPassword("login-password")).toBe(true);
     expect(verifyLoginPassword("wrong-password")).toBe(false);
+  });
+
+  it("session Cookie の Secure 属性を公開 protocol に合わせる", () => {
+    expect(sessionCookieOptions(true).secure).toBe(true);
+    expect(sessionCookieOptions(false).secure).toBe(false);
   });
 
   it("production では 32 bytes 未満の session secret を拒否する", () => {

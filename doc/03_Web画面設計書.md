@@ -138,6 +138,7 @@
 - 管理 session がない場合は Settings / Monitor 導線を非表示にし、`/settings`、`/monitor` を直接開いた時は `/admin/login` へ遷移する
 - `/admin/login` は Web 管理用パスワードだけを一時入力として受け取り、成功時に server-side で署名した `HttpOnly` session Cookie を確立する。管理 API 用トークンとは別資格情報とし、入力値を browser storage や標準ログへ残さない
 - `/admin/login` の同一 origin 判定は、Next.js 内部 URL ではなく利用者から見える protocol と host を基準にする。host は reverse proxy が設定した `X-Forwarded-Host` の先頭要素を優先し、なければ `Host`、protocol は `X-Forwarded-Proto` の先頭要素を優先し、なければ request URL を使う。`Origin` の欠落、不正 URL、protocol / host 不一致は拒否する
+- 管理 session Cookie の `Secure` 属性は同じ公開 protocol 判定に従い、HTTPS 利用者経路では有効、loopback を含む HTTP 利用者経路では無効にする。login と logout で同じ属性を使う
 - 認証済み session の確認は `GET /api/auth/session` を使い、返された CSRF token は client memory だけで扱う。状態変更を伴う `/api-proxy` request と `POST /api/auth/logout` は `X-CSRF-Token` を付ける
 - `Import / Export` は Web 側で JSON download / file import として実装し、専用 API は増やさず既存の `GET /api/settings` と `PUT /api/settings` を使う
 - Import 時は `schemaVersion` の一致を確認し、`version` は現在の保存済み設定へ合わせる。`apiKeyRef` と `adminTokenRef` は `env:` / `file:` 参照だけ受け付ける

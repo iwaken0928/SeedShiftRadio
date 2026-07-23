@@ -6,6 +6,7 @@ import {
   sessionCookieOptions,
   verifyCsrfToken,
 } from "@/lib/server/admin-auth";
+import { getRequestProtocol } from "@/lib/server/request-origin";
 
 export function POST(request: NextRequest) {
   const session = getRequestAdminSession(request);
@@ -13,6 +14,9 @@ export function POST(request: NextRequest) {
     return Response.json({ message: "CSRF token が不正です。" }, { status: 403 });
   }
   const response = new NextResponse(null, { status: 204 });
-  response.cookies.set(ADMIN_SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 });
+  response.cookies.set(ADMIN_SESSION_COOKIE, "", {
+    ...sessionCookieOptions(getRequestProtocol(request) === "https:"),
+    maxAge: 0,
+  });
   return response;
 }

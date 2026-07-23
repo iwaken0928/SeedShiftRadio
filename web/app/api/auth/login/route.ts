@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE, createAdminSession, sessionCookieOptions, verifyLoginPassword } from "@/lib/server/admin-auth";
-import { hasSameRequestOrigin } from "@/lib/server/request-origin";
+import { getRequestProtocol, hasSameRequestOrigin } from "@/lib/server/request-origin";
 
 export async function POST(request: NextRequest) {
   if (!hasSameRequestOrigin(request)) {
@@ -13,6 +13,10 @@ export async function POST(request: NextRequest) {
   }
   const response = NextResponse.json({ authenticated: true });
   response.headers.set("Cache-Control", "no-store");
-  response.cookies.set(ADMIN_SESSION_COOKIE, createAdminSession(), sessionCookieOptions());
+  response.cookies.set(
+    ADMIN_SESSION_COOKIE,
+    createAdminSession(),
+    sessionCookieOptions(getRequestProtocol(request) === "https:"),
+  );
   return response;
 }

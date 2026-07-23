@@ -3,11 +3,16 @@ import type { NextRequest } from "next/server";
 export function hasSameRequestOrigin(request: NextRequest) {
   const origin = parseOrigin(request.headers.get("origin"));
   const host = firstForwardedValue(request.headers.get("x-forwarded-host")) ?? request.headers.get("host")?.trim();
-  const protocol =
-    normalizeProtocol(firstForwardedValue(request.headers.get("x-forwarded-proto"))) ??
-    normalizeProtocol(request.nextUrl.protocol);
+  const protocol = getRequestProtocol(request);
 
   return Boolean(origin && host && protocol && origin.host.toLowerCase() === host.toLowerCase() && origin.protocol === protocol);
+}
+
+export function getRequestProtocol(request: NextRequest) {
+  return (
+    normalizeProtocol(firstForwardedValue(request.headers.get("x-forwarded-proto"))) ??
+    normalizeProtocol(request.nextUrl.protocol)
+  );
 }
 
 function parseOrigin(value: string | null) {

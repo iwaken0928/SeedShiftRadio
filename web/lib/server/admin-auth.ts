@@ -49,10 +49,10 @@ export function getServerAdminToken() {
   return process.env.SEEDSHIFT_ADMIN_TOKEN?.trim() || null;
 }
 
-export function sessionCookieOptions() {
+export function sessionCookieOptions(secure: boolean) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     sameSite: "strict" as const,
     path: "/",
     maxAge: SESSION_TTL_SECONDS,

@@ -50,7 +50,7 @@ test("settings: existing station programming policy save", async ({ page }) => {
   await stationPanel.getByRole("button", { name: "Save Policy", exact: true }).click();
 
   await expect.poll(() => programmingUpdateRequests.length).toBe(1);
-  await expect(programmingUpdateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  expectBrowserAdminHeaders(programmingUpdateRequests[0]?.headers);
   await expect(programmingUpdateRequests[0]?.body).toMatchObject({
     version: 3,
     planningHorizonMinutes: 45,
@@ -83,7 +83,7 @@ test("settings: station create draft -> save and select new station", async ({ p
   await stationPanel.getByRole("button", { name: "Create Station", exact: true }).click();
 
   await expect.poll(() => stationCreateRequests.length).toBe(1);
-  await expect(stationCreateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  expectBrowserAdminHeaders(stationCreateRequests[0]?.headers);
   await expect(stationCreateRequests[0]?.body).toMatchObject({
     version: 0,
     id: "station-dawn",
@@ -135,7 +135,7 @@ test("settings: station duplicate draft strips station policy and can be closed"
   await stationPanel.getByRole("button", { name: "Create Station", exact: true }).click();
 
   await expect.poll(() => stationCreateRequests.length).toBe(1);
-  await expect(stationCreateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  expectBrowserAdminHeaders(stationCreateRequests[0]?.headers);
   await expect(stationCreateRequests[0]?.body).toMatchObject({
     version: 0,
     id: "station-night-clone",
@@ -179,7 +179,7 @@ test("settings: preview uses unsaved programming and template drafts", async ({ 
   await previewPanel.getByRole("button", { name: "Run Preview", exact: true }).click();
 
   await expect.poll(() => previewRequests.length).toBe(1);
-  await expect(previewRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  expectBrowserAdminHeaders(previewRequests[0]?.headers);
   await expect(previewRequests[0]?.body.policyDraft).toMatchObject({
     defaultTemplateId: "tmpl-global-fallback",
     version: 3,
@@ -235,7 +235,7 @@ test("settings: ProgramTemplate blank create -> save and select new template", a
   await createButton.click();
 
   await expect.poll(() => templateCreateRequests.length).toBe(1);
-  await expect(templateCreateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  expectBrowserAdminHeaders(templateCreateRequests[0]?.headers);
   await expect(templateCreateRequests[0]?.body).toMatchObject({
     version: 0,
     id: "tmpl-night-blank",
@@ -331,7 +331,7 @@ test("settings: ProgramTemplate duplicate draft -> update existing", async ({ pa
   await templatePanel.getByRole("button", { name: "Save Template", exact: true }).click();
 
   await expect.poll(() => templateUpdateRequests.length).toBe(1);
-  await expect(templateUpdateRequests[0]?.headers["x-admin-token"]).toBe("playwright-admin");
+  expectBrowserAdminHeaders(templateUpdateRequests[0]?.headers);
   await expect(templateUpdateRequests[0]?.body).toMatchObject({
     id: "tmpl-night",
     name: "Night Talk Updated",
@@ -601,6 +601,11 @@ function upsertTemplateSummary(summaries: TemplateSummaryState[], detail: Record
     return [...summaries, next];
   }
   return summaries.map((entry, index) => (index === existingIndex ? next : entry));
+}
+
+function expectBrowserAdminHeaders(headers: Record<string, string> | undefined) {
+  expect(headers?.["x-admin-token"]).toBeUndefined();
+  expect(headers?.["x-csrf-token"]).toBeTruthy();
 }
 
 function toTemplateSummary(detail: Record<string, unknown>): TemplateSummaryState {

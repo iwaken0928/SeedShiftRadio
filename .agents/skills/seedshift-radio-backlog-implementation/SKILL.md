@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-backlog-implementation
-description: Use when working on SeedShiftRadio backlog-driven implementation from the design documents, especially when the request is to identify remaining unimplemented work from `doc/15_設計差分棚卸しと段階実装計画.md`, implement one or two items without broad re-survey, update the relevant design docs, and verify the change with focused tests.
+description: Use when working on SeedShiftRadio backlog-driven implementation from the design documents, especially when the request is to identify remaining unimplemented work from `docs/15_設計差分棚卸しと段階実装計画.md`, implement one or two items without broad re-survey, update the relevant design docs, and verify the change with focused tests.
 ---
 
 # SeedShiftRadio Backlog Implementation
@@ -14,23 +14,23 @@ description: Use when working on SeedShiftRadio backlog-driven implementation fr
 
 ## 最初に見るドキュメント
 
-- 実装管理の起点: `doc/15_設計差分棚卸しと段階実装計画.md`
-- 全体入口: `doc/00_実装ドキュメント一覧.md`
+- 実装管理の起点: `docs/15_設計差分棚卸しと段階実装計画.md`
+- 全体入口: `docs/00_実装ドキュメント一覧.md`
 - 変更対象に応じた設計書:
-  - API/DTO/SSE: `doc/02_API仕様書.md`
-  - Web UI: `doc/03_Web画面設計書.md`
-  - Data/DB/cache: `doc/04_データ構造設計書.md`
-  - Playout/queue: `doc/05_プレイアウト・キュー制御設計書.md`
-  - Provider/runtime: `doc/07_Provider連携設計書.md`
-  - Security/test: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
-  - Letter: `doc/12_レター機能設計書.md`
-  - Station/programming: `doc/13_局管理・番組編成制御設計書.md`
+  - API/DTO/SSE: `docs/02_API仕様書.md`
+  - Web UI: `docs/03_Web画面設計書.md`
+  - Data/DB/cache: `docs/04_データ構造設計書.md`
+  - Playout/queue: `docs/05_プレイアウト・キュー制御設計書.md`
+  - Provider/runtime: `docs/07_Provider連携設計書.md`
+  - Security/test: `docs/11_運用・監視・セキュリティ・テスト設計書.md`
+  - Letter: `docs/12_レター機能設計書.md`
+  - Station/programming: `docs/13_局管理・番組編成制御設計書.md`
 
 ## ワークフロー
 
-1. GitLab の対象 Issue を確認する。Issue が未指定なら `doc/15` から残タスクを 1 つか 2 つ選び、open Issue との重複を確認する
+1. GitLab の対象 Issue を確認する。Issue が未指定なら `docs/15` から残タスクを 1 つか 2 つ選び、open Issue との重複を確認する
 2. 選んだ項目に必要な設計書だけ読む。無関係な章まで広げない
-3. 変更境界を `server`, `web`, `worker`, `doc` に分け、主担当を決める
+3. 変更境界を `server`, `web`, `worker`, `docs` に分け、主担当を決める
 4. まずコードを通し、次に設計書差分を同じ変更で閉じる
 5. 検証は変更規模に合わせて `typecheck`, unit/service test, Playwright, `git diff --check` を選ぶ
 6. 完了時は「何を選んだか」「何を直したか」「何を確認したか」「残りは何か」を短くまとめる
@@ -45,7 +45,7 @@ description: Use when working on SeedShiftRadio backlog-driven implementation fr
 
 ## ガードレール
 
-- `doc/15` を起点にするが、正本は各設計書なので差分を放置しない
+- `docs/15` を起点にするが、正本は各設計書なので差分を放置しない
 - 1 回で広く触りすぎず、着手項目を絞る
 - 未保存 draft preview、station/template create/duplicate、secret redaction など既存 `/settings` 前提を壊さない
 - 実行中 block 影響は「次の番組から反映」を維持する
@@ -54,8 +54,8 @@ description: Use when working on SeedShiftRadio backlog-driven implementation fr
 
 ## 完了前チェック
 
-- `doc/15` の状態・残タスク記述を更新したか
-- 変更箇所に対応する `doc/02` から `doc/13` の更新要否を見たか
+- `docs/15` の状態・残タスク記述を更新したか
+- 変更箇所に対応する `docs/02` から `docs/13` の更新要否を見たか
 - テスト実施結果と未実施理由を説明できるか
 - `git diff --check` が通るか
 

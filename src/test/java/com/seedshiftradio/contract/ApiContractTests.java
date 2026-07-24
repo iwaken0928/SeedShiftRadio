@@ -77,7 +77,7 @@ import com.seedshiftradio.stream.StreamEventService;
 class ApiContractTests {
 
 	private static final Set<String> HTTP_METHODS = Set.of("get", "post", "put", "patch", "delete");
-	private static final Path API_DOCUMENT = Path.of("doc", "02_API仕様書.md");
+	private static final Path API_DOCUMENT = Path.of("docs", "02_API仕様書.md");
 
 	@Autowired
 	MockMvc mockMvc;
@@ -210,7 +210,7 @@ class ApiContractTests {
 		String document = Files.readString(API_DOCUMENT, StandardCharsets.UTF_8);
 		for (Map.Entry<OperationKey, Access> entry : expected.entrySet()) {
 			String row = "| `" + entry.getKey().method() + "` | `" + entry.getKey().path() + "` | `" + entry.getValue() + "` |";
-			assertTrue(document.contains(row), "doc/02 の認証マトリクスに行がありません: " + row);
+			assertTrue(document.contains(row), "docs/02 の認証マトリクスに行がありません: " + row);
 		}
 	}
 
@@ -219,14 +219,14 @@ class ApiContractTests {
 				.getContentAsString(StandardCharsets.UTF_8)
 				.trim();
 		String apiDocument = Files.readString(API_DOCUMENT, StandardCharsets.UTF_8);
-		assertTrue(apiDocument.contains(expectedHash), "doc/02 に現在の OpenAPI snapshot hash が記録されていません。");
+		assertTrue(apiDocument.contains(expectedHash), "docs/02 に現在の OpenAPI snapshot hash が記録されていません。");
 		String actualHash = snapshotHash(openApi);
 		assertEquals(expectedHash, actualHash, "OpenAPI の endpoint または DTO schema が snapshot から変わりました。\n" + updateHint(openApi));
 	}
 
 	private String updateHint(JsonNode openApi) {
 		try {
-			return "契約変更が意図どおりなら contracts/api-auth-matrix.json、doc/02、openapi.sha256 を同時更新してください。actual sha256="
+			return "契約変更が意図どおりなら contracts/api-auth-matrix.json、docs/02、openapi.sha256 を同時更新してください。actual sha256="
 					+ snapshotHash(openApi);
 		} catch (Exception exception) {
 			return "OpenAPI snapshot hash の計算に失敗しました: " + exception.getMessage();

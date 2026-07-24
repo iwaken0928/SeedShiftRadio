@@ -21,7 +21,7 @@ description: Use when updating SeedShiftRadio Codex configuration, `.codex/confi
 3. 既存 skill に足せる場合は新規 skill を作らず、重複する説明を避けて最小更新にする
 4. 新規 skill が必要な場合は `skill-creator` の `init_skill.py` で雛形を作り、`SKILL.md` と `agents/openai.yaml` を整える
 5. サブエージェントは常設 role を増やす前に、ユーザーまたは Issue による明示的な委任と、重ならないファイル境界があるか確認する
-6. 設計正本や責務境界に影響する説明は、必要に応じて関連 `doc/*.md` も更新する
+6. 設計正本や責務境界に影響する説明は、必要に応じて関連 `docs/*.md` も更新する
 7. 最後に TOML / YAML / skill validation と未処理マーカーの残りを確認する
 
 ## 判断基準

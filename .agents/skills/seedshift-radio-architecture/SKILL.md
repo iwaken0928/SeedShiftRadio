@@ -1,39 +1,39 @@
 ---
 name: seedshift-radio-architecture
-description: Use when working on SeedShiftRadio architecture, API contracts, module boundaries, playout behavior, data layout, provider integration, or implementation planning across the Spring Boot server, Next.js web UI, Python MusicGen worker, and the design documents under /doc. This skill helps keep changes aligned with the API-first local AI radio architecture and preserve compatibility with the future C# native client.
+description: Use when working on SeedShiftRadio architecture, API contracts, module boundaries, playout behavior, data layout, provider integration, or implementation planning across the Spring Boot server, Next.js web UI, Python MusicGen worker, and the design documents under /docs. This skill helps keep changes aligned with the API-first local AI radio architecture and preserve compatibility with the future C# native client.
 ---
 
 # SeedShiftRadio Architecture
 
 ## 最初に見るドキュメント
 
-- 実装順序と全体入口: `doc/00_実装ドキュメント一覧.md`
-- 責務境界: `doc/01_アーキテクチャ方針設計書.md`
-- API と共有契約: `doc/02_API仕様書.md`
-- UI と再生挙動: `doc/03_Web画面設計書.md`
-- データとファイル配置: `doc/04_データ構造設計書.md`
-- プレイアウトと fallback: `doc/05_プレイアウト・キュー制御設計書.md`
-- Provider 連携: `doc/07_Provider連携設計書.md`
-- MusicGen worker: `doc/09_MusicGen連携設計書.md`
-- C# Native Client 互換: `doc/10_CSharpネイティブクライアント連携設計書.md`
-- 運用とテスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
-- 局管理と番組編成: `doc/13_局管理・番組編成制御設計書.md`
-- レビュー対応と再試験順序: `doc/14_レビュー対応・再試験計画.md`
+- 実装順序と全体入口: `docs/00_実装ドキュメント一覧.md`
+- 責務境界: `docs/01_アーキテクチャ方針設計書.md`
+- API と共有契約: `docs/02_API仕様書.md`
+- UI と再生挙動: `docs/03_Web画面設計書.md`
+- データとファイル配置: `docs/04_データ構造設計書.md`
+- プレイアウトと fallback: `docs/05_プレイアウト・キュー制御設計書.md`
+- Provider 連携: `docs/07_Provider連携設計書.md`
+- MusicGen worker: `docs/09_MusicGen連携設計書.md`
+- C# Native Client 互換: `docs/10_CSharpネイティブクライアント連携設計書.md`
+- 運用とテスト: `docs/11_運用・監視・セキュリティ・テスト設計書.md`
+- 局管理と番組編成: `docs/13_局管理・番組編成制御設計書.md`
+- レビュー対応と再試験順序: `docs/14_レビュー対応・再試験計画.md`
 
 ## 現物確認の起点
 
 - 現在の実装は想定上の `/server`, `/web`, `/workers/musicgen` 分離前で、主な現物は `src/main/java/com/seedshiftradio/**` と `src/test/java/com/seedshiftradio/**` にある
 - Spring Boot サーバーの現物確認は `radio`, `letter`, `programming`, `settings`, `monitor`, `station`, `stream` を優先する
-- 複数領域にまたがるレビュー対応では `doc/14_レビュー対応・再試験計画.md` を起点に phase と担当を揃える
+- 複数領域にまたがるレビュー対応では `docs/14_レビュー対応・再試験計画.md` を起点に phase と担当を揃える
 
 ## ワークフロー
 
-1. 要求が触る境界を `server`, `web`, `worker`, `doc` に分解する
-2. 共有契約が絡むなら `doc/02_API仕様書.md` を必須参照にする
-3. 複数領域やレビュー指摘の対応では `doc/14_レビュー対応・再試験計画.md` を参照し、実装順と再試験を先に固定する
+1. 要求が触る境界を `server`, `web`, `worker`, `docs` に分解する
+2. 共有契約が絡むなら `docs/02_API仕様書.md` を必須参照にする
+3. 複数領域やレビュー指摘の対応では `docs/14_レビュー対応・再試験計画.md` を参照し、実装順と再試験を先に固定する
 4. 再生状態とキュー正本は `Server` に残し、`Web` は表示と操作に限定する
 5. MusicGen は高遅延な別ワーカー前提を崩さない
-6. 挙動変更がある場合は、対応する `doc/*.md` を同じ変更で更新する
+6. 挙動変更がある場合は、対応する `docs/*.md` を同じ変更で更新する
 
 ## ガードレール
 
@@ -50,11 +50,11 @@ description: Use when working on SeedShiftRadio architecture, API contracts, mod
 - DTO, REST, SSE, queue, playout, persistence は `server`
 - 音楽生成ジョブと外部推論ワーカーは `workers/musicgen`
 - 現在の Spring Boot 実装では `src/main/java/com/seedshiftradio/**` が `server` 相当の現物になる
-- 仕様更新と判断根拠は `doc`
+- 仕様更新と判断根拠は `docs`
 
 ## 完了前チェック
 
 - 変更先の境界は妥当か
 - 共有契約を壊していないか
-- 影響する `doc/*.md` を更新したか
+- 影響する `docs/*.md` を更新したか
 - fallback と監視への影響を見たか

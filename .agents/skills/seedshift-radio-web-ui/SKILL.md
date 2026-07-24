@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-web-ui
-description: Use when working on SeedShiftRadio Next.js routes, radio player UX, SSE subscription and reconnect behavior, TanStack Query and Zustand state boundaries, or the `/`, `/letters`, `/settings`, and `/monitor` screens. This skill helps keep the web client aligned with `doc/03`, `doc/02`, `doc/05`, and `doc/12`.
+description: Use when working on SeedShiftRadio Next.js routes, radio player UX, SSE subscription and reconnect behavior, TanStack Query and Zustand state boundaries, or the `/`, `/letters`, `/settings`, and `/monitor` screens. This skill helps keep the web client aligned with `docs/03`, `docs/02`, `docs/05`, and `docs/12`.
 ---
 
 # SeedShiftRadio Web UI
@@ -13,10 +13,10 @@ description: Use when working on SeedShiftRadio Next.js routes, radio player UX,
 
 ## 最初に見るドキュメント
 
-- 画面構成と UI 状態: `doc/03_Web画面設計書.md`
-- 参照する API と SSE: `doc/02_API仕様書.md`
-- 再生と queue 契約: `doc/05_プレイアウト・キュー制御設計書.md`
-- レター導線: `doc/12_レター機能設計書.md`
+- 画面構成と UI 状態: `docs/03_Web画面設計書.md`
+- 参照する API と SSE: `docs/02_API仕様書.md`
+- 再生と queue 契約: `docs/05_プレイアウト・キュー制御設計書.md`
+- レター導線: `docs/12_レター機能設計書.md`
 
 ## 実装時の前提
 
@@ -41,6 +41,6 @@ description: Use when working on SeedShiftRadio Next.js routes, radio player UX,
 
 ## 完了前チェック
 
-- `doc/03_Web画面設計書.md` を必要に応じて更新したか
-- 参照する API/SSE 契約が `doc/02_API仕様書.md` と一致しているか
+- `docs/03_Web画面設計書.md` を必要に応じて更新したか
+- 参照する API/SSE 契約が `docs/02_API仕様書.md` と一致しているか
 - `Vitest` と `Playwright` で happy path と再接続導線を押さえたか

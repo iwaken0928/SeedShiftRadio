@@ -1,4 +1,4 @@
 interface:
   display_name: "SeedShiftRadio Backlog Implementation"
-  short_description: "Drive focused implementation from doc/15 and related design docs"
-  default_prompt: "Use $seedshift-radio-backlog-implementation to pick one or two remaining SeedShiftRadio backlog items from doc/15, implement them without broad re-survey, update the relevant design docs, and verify the change."
+  short_description: "Drive focused implementation from docs/15 and related design docs"
+  default_prompt: "Use $seedshift-radio-backlog-implementation to pick one or two remaining SeedShiftRadio backlog items from docs/15, implement them without broad re-survey, update the relevant design docs, and verify the change."

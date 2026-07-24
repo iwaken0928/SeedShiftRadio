@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-qa-guardrails
-description: Use when working on SeedShiftRadio test planning, regression review, CI split, observability checks, privacy and logging validation, or release-readiness verification across server, web, and worker changes. This skill helps keep verification aligned with `doc/11` and `doc/14`.
+description: Use when working on SeedShiftRadio test planning, regression review, CI split, observability checks, privacy and logging validation, or release-readiness verification across server, web, and worker changes. This skill helps keep verification aligned with `docs/11` and `docs/14`.
 ---
 
 # SeedShiftRadio QA Guardrails
@@ -15,9 +15,9 @@ description: Use when working on SeedShiftRadio test planning, regression review
 
 ## 最初に見るドキュメント
 
-- 非機能, 監視, セキュリティ, テスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
-- 再試験順序と担当分担: `doc/14_レビュー対応・再試験計画.md`
-- 変更箇所に対応する設計書: `doc/02` から `doc/13` の必要部分
+- 非機能, 監視, セキュリティ, テスト: `docs/11_運用・監視・セキュリティ・テスト設計書.md`
+- 再試験順序と担当分担: `docs/14_レビュー対応・再試験計画.md`
+- 変更箇所に対応する設計書: `docs/02` から `docs/13` の必要部分
 
 ## 現物確認の起点
 
@@ -44,5 +44,5 @@ description: Use when working on SeedShiftRadio test planning, regression review
 ## 完了前チェック
 
 - 変更領域ごとの test と手動確認観点を列挙したか
-- `doc/11_運用・監視・セキュリティ・テスト設計書.md` や `doc/14_レビュー対応・再試験計画.md` の更新要否を確認したか
+- `docs/11_運用・監視・セキュリティ・テスト設計書.md` や `docs/14_レビュー対応・再試験計画.md` の更新要否を確認したか
 - 実行不可だった検証の前提条件と残リスクを明示したか

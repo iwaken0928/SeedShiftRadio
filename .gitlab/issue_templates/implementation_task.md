@@ -4,12 +4,12 @@
 
 ## 対象範囲
 
-<!-- server / web / workers/musicgen / infra / doc の対象を具体化する。 -->
+<!-- server / web / workers/musicgen / infra / docs の対象を具体化する。 -->
 
 ## 参照資料
 
-- `doc/15_設計差分棚卸しと段階実装計画.md`
-- <!-- 関係する doc/02 から doc/17 を追加する。 -->
+- `docs/15_設計差分棚卸しと段階実装計画.md`
+- <!-- 関係する docs/02 から docs/17 を追加する。 -->
 
 ## 作業内容
 

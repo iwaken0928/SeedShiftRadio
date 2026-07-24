@@ -1,6 +1,6 @@
 # MusicGen Worker
 
-`doc/09_MusicGen連携設計書.md` に合わせた FastAPI worker です。
+`docs/09_MusicGen連携設計書.md` に合わせた FastAPI worker です。
 
 現段階では実モデル推論の代わりに deterministic な WAV を生成し、Server 側の `submit -> poll -> generated_asset` 契約を先に成立させます。
 

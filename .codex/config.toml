@@ -17,14 +17,14 @@ project_root_markers = [
   "gradlew",
   "package.json",
   "pnpm-workspace.yaml",
-  "doc/00_実装ドキュメント一覧.md",
+  "docs/00_実装ドキュメント一覧.md",
 ]
 
 [sandbox_workspace_write]
 network_access = true
 
 developer_instructions = """
-SeedShiftRadio is an API-first local AI radio project guided by the design documents under /doc.
+SeedShiftRadio is an API-first local AI radio project guided by the design documents under /docs.
 Always start by reading the smallest relevant set of documents instead of guessing.
 
 Use GitLab Project Issues, scoped labels, and the Issue Board as the source of truth for work status and ownership. Follow .gitlab/WORK_MANAGEMENT.md.
@@ -41,7 +41,7 @@ Keep these architectural boundaries:
 
 Favor degraded continuation over stopping playback.
 Preserve compatibility with the future C# native client when changing shared contracts.
-When behavior changes, update the corresponding document under /doc in the same task.
+When behavior changes, update the corresponding document under /docs in the same task.
 Use the local project skills under .agents/skills when they match the task.
 For CI/CD, deploy, Podman Compose, local orchestration, or Codex agent/skill maintenance, use the matching local skills.
 """

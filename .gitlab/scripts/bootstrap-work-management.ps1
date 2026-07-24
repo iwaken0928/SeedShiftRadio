@@ -59,27 +59,27 @@ $labels = @(
 )
 
 $issues = @(
-    @{ id = 'P0-01'; title = 'LLM adapter を追加する'; area = 'area::server'; purpose = 'TemplateScriptProviderではなく実providerからGeneratedScriptを生成できるようにする。'; scope = 'ScriptProvider、ProviderRegistry、ProviderJobService、SettingsDocument.providers.llm'; docs = 'doc/06、doc/07、doc/15' },
-    @{ id = 'P0-02b'; title = 'Irodori OpenAI TTS adapter のruntime反映を完成する'; area = 'area::server'; purpose = 'VoiceProfileの速度、provider option、参照音声、同意情報をIrodori TTS呼び出しへ安全に反映する。'; scope = 'TtsProvider、ProviderRegistry、ProviderHealthService、AssetService、station scope validation'; docs = 'doc/04、doc/07、doc/08、doc/15' },
-    @{ id = 'P0-02c'; title = 'VoiceProfile と参照音声 metadata を拡張する'; area = 'area::architecture'; purpose = '局別voice割当、参照範囲、同意確認、path redactionを一貫して扱えるようにする。'; scope = 'voice_profile migration、VoiceProfileEntity、seed data、station validation'; docs = 'doc/04、doc/07、doc/08、doc/15' },
-    @{ id = 'P0-03'; title = '音声生成 orchestration を明示 service へ分離する'; area = 'area::server'; purpose = 'scriptからTTS assetまでのprovider job、metadata、cache keyを追跡可能にする。'; scope = 'AssetService、ScriptGenerationService、生成orchestration'; docs = 'doc/04、doc/06、doc/07、doc/08、doc/15' },
-    @{ id = 'P0-04'; title = 'LETTER 回答案生成を実装する'; area = 'area::server'; purpose = '信頼できないletter bodyを安全に要約・引用し、放送用台本へ変換する。'; scope = 'LetterService、ScriptGenerationService、prompt safety'; docs = 'doc/06、doc/08、doc/12、doc/15' },
-    @{ id = 'P0-05'; title = 'provider error と fallback 連鎖を統一する'; area = 'area::architecture'; purpose = 'LLM、TTS、MUSICの失敗分類と縮退理由を共通契約へ揃える。'; scope = 'provider adapter共通result/error、provider_job.errorCode、degraded reason'; docs = 'doc/05、doc/07、doc/09、doc/11、doc/15' },
-    @{ id = 'P0-05a'; title = 'Irodori 読み・style safety test を追加する'; area = 'area::server'; purpose = 'かな補正、style allowlist、letter由来token遮断をgolden testで固定する。'; scope = 'JapaneseScriptNormalizer、PronunciationDictionaryService、PersonaStyleResolver、JapaneseQualityGuard'; docs = 'doc/06、doc/08、doc/12、doc/14、doc/15' },
-    @{ id = 'P0-06'; title = 'MusicGen worker に実モデル backend を追加する'; area = 'area::worker'; purpose = 'deterministic backend以外でWAVを生成し、実際に聴けるMVPへ進める。'; scope = 'workers/musicgen、worker backend、生成asset'; docs = 'doc/07、doc/09、doc/11、doc/15' },
-    @{ id = 'P0-09'; title = 'ACE-Step 運用設定を compose・settings・docs へ接続する'; area = 'area::ops'; purpose = 'ServerからACE-StepまたはMusicGen workerへ疎通できる運用経路を整える。'; scope = 'infra/compose、settings、worker接続、運用手順'; docs = 'doc/07、doc/09、doc/11、doc/16、doc/17' },
-    @{ id = 'P2-06'; title = 'Spring Boot 4.1.0 追随可否と更新方針を確定する'; area = 'area::architecture'; kind = 'kind::docs'; purpose = '現行4.0.4から公式stable 4.1.0へ追随するかを判断し、採用根拠と更新手順を設計・運用資料へ残す。'; scope = '依存version方針、更新手順、互換性確認'; docs = 'doc/00、doc/01、doc/11、doc/15'; status = 'status::着手可能' },
-    @{ id = 'P0-10'; title = 'TTS placeholder fallback の adapter 再選択を修正する'; area = 'area::server'; kind = 'kind::bug'; purpose = '外部TTSが接続不能でもplaceholder fallbackを再選択し、queue warmupと縮退再生を継続する。'; scope = 'HttpTtsProvider、HttpTtsProviderTests、RadioApiTests'; docs = 'doc/05、doc/07、doc/11、doc/14、doc/15'; status = 'status::作業中' },
-    @{ id = 'P0-11'; title = 'Web 管理 API 認証を browser 非露出の session 方式へ移行する'; area = 'area::architecture'; kind = 'kind::bug'; purpose = 'NEXT_PUBLIC管理トークンを廃止し、productionの設定・監視・レター管理画面を秘密値非露出で利用可能にする。'; scope = 'web admin login/session、api-proxy、Server認証、compose、smoke、E2E'; docs = 'doc/02、doc/03、doc/11、doc/16、doc/17'; status = 'status::着手可能' },
-    @{ id = 'P0-12'; title = 'Next.js 15.5.20 へ更新して production advisory を解消する'; area = 'area::web'; kind = 'kind::maintenance'; purpose = 'Next.js 15.5.14に残るServer Components DoS、proxy bypass、SSRF等のproduction advisoryを同一minorの修正版で解消する。'; scope = 'web/package.json、web/package-lock.json、typecheck、Vitest、Playwright、npm audit'; docs = 'doc/03、doc/11、doc/14、doc/15'; status = 'status::作業中' },
-    @{ id = 'P1-17'; title = 'VoiceProfile 管理 UI を追加する'; area = 'area::web'; purpose = '局別VoiceProfileを作成・編集し、Irodori voice、style、同意参照を安全に割り当てられるようにする。'; scope = 'web/settings、VoiceProfile API、redaction、E2E'; docs = 'doc/02、doc/03、doc/04、doc/08'; status = 'status::未着手'; depends = 'P0-02b、P0-02c' },
-    @{ id = 'P1-18'; title = 'OpenAPI 契約差分と認証マトリクスを CI で検査する'; area = 'area::architecture'; kind = 'kind::maintenance'; purpose = 'Controller、OpenAPI、doc/02のendpoint・DTO・認証区分のずれを自動検出する。'; scope = 'springdoc schema、contract snapshot、docs check、CI'; docs = 'doc/02、doc/10、doc/11、doc/14'; status = 'status::着手可能' },
-    @{ id = 'P1-19'; title = '監査イベントを永続化して再起動後も追跡可能にする'; area = 'area::server'; purpose = 'SSE履歴だけに依存する監査summaryを永続化し、設定・局切替・Provider縮退を追跡可能にする。'; scope = 'audit event migration、service、monitor API、retention、redaction'; docs = 'doc/04、doc/11、doc/15'; status = 'status::着手可能' },
-    @{ id = 'P1-20'; title = 'config.json schema migration と backup・restore を実装する'; area = 'area::server'; kind = 'kind::maintenance'; purpose = 'schemaVersion変更時の安全な移行、backup、restore、失敗時rollbackを実装する。'; scope = 'RadioSettingsStore、SettingsService、config backup、migration test、runbook'; docs = 'doc/04、doc/11、doc/17'; status = 'status::着手可能' },
-    @{ id = 'P1-21'; title = '読み辞書を永続化して管理 UI から編集可能にする'; area = 'area::server'; purpose = 'hard-coded共通辞書をglobal・station・persona層へ拡張し、読み補正を運用可能にする。'; scope = 'pronunciation dictionary DB/API、resolver優先順位、settings UI、test'; docs = 'doc/02、doc/03、doc/04、doc/08'; status = 'status::着手可能' },
-    @{ id = 'P1-22'; title = 'stale provider job の回収と再試行方針を実装する'; area = 'area::server'; kind = 'kind::maintenance'; purpose = 'process停止やtimeoutでRUNNINGに残ったprovider_jobを検出し、失敗確定または安全な再投入へ収束させる。'; scope = 'ProviderJobService、cleanup job、retry policy、monitor metrics'; docs = 'doc/07、doc/09、doc/11'; status = 'status::未着手'; depends = 'P0-05' },
-    @{ id = 'P2-11'; title = '生成物を追跡対象から除外しローカル起動ガイドを正本化する'; area = 'area::ops'; kind = 'kind::maintenance'; purpose = 'pycacheとtsbuildinfoをGit管理から外し、ignored HELP.mdをPodman前提のtracked guideにする。'; scope = '.gitignore、HELP.md、web/tsconfig.tsbuildinfo、workers/musicgen/**/__pycache__'; docs = 'doc/00、doc/11、doc/15'; status = 'status::作業中' },
-    @{ id = 'P2-12'; title = 'C# Native Client 共有契約 test harness を追加する'; area = 'area::architecture'; purpose = 'REST、SSE、SpeechDirective、playback-eventsの互換性をNative Client実装前に固定する。'; scope = 'OpenAPI/SSE fixture、DTO contract test、reconnect scenario'; docs = 'doc/02、doc/05、doc/10、doc/11'; status = 'status::未着手'; depends = 'P1-18' }
+    @{ id = 'P0-01'; title = 'LLM adapter を追加する'; area = 'area::server'; purpose = 'TemplateScriptProviderではなく実providerからGeneratedScriptを生成できるようにする。'; scope = 'ScriptProvider、ProviderRegistry、ProviderJobService、SettingsDocument.providers.llm'; docs = 'docs/06、docs/07、docs/15' },
+    @{ id = 'P0-02b'; title = 'Irodori OpenAI TTS adapter のruntime反映を完成する'; area = 'area::server'; purpose = 'VoiceProfileの速度、provider option、参照音声、同意情報をIrodori TTS呼び出しへ安全に反映する。'; scope = 'TtsProvider、ProviderRegistry、ProviderHealthService、AssetService、station scope validation'; docs = 'docs/04、docs/07、docs/08、docs/15' },
+    @{ id = 'P0-02c'; title = 'VoiceProfile と参照音声 metadata を拡張する'; area = 'area::architecture'; purpose = '局別voice割当、参照範囲、同意確認、path redactionを一貫して扱えるようにする。'; scope = 'voice_profile migration、VoiceProfileEntity、seed data、station validation'; docs = 'docs/04、docs/07、docs/08、docs/15' },
+    @{ id = 'P0-03'; title = '音声生成 orchestration を明示 service へ分離する'; area = 'area::server'; purpose = 'scriptからTTS assetまでのprovider job、metadata、cache keyを追跡可能にする。'; scope = 'AssetService、ScriptGenerationService、生成orchestration'; docs = 'docs/04、docs/06、docs/07、docs/08、docs/15' },
+    @{ id = 'P0-04'; title = 'LETTER 回答案生成を実装する'; area = 'area::server'; purpose = '信頼できないletter bodyを安全に要約・引用し、放送用台本へ変換する。'; scope = 'LetterService、ScriptGenerationService、prompt safety'; docs = 'docs/06、docs/08、docs/12、docs/15' },
+    @{ id = 'P0-05'; title = 'provider error と fallback 連鎖を統一する'; area = 'area::architecture'; purpose = 'LLM、TTS、MUSICの失敗分類と縮退理由を共通契約へ揃える。'; scope = 'provider adapter共通result/error、provider_job.errorCode、degraded reason'; docs = 'docs/05、docs/07、docs/09、docs/11、docs/15' },
+    @{ id = 'P0-05a'; title = 'Irodori 読み・style safety test を追加する'; area = 'area::server'; purpose = 'かな補正、style allowlist、letter由来token遮断をgolden testで固定する。'; scope = 'JapaneseScriptNormalizer、PronunciationDictionaryService、PersonaStyleResolver、JapaneseQualityGuard'; docs = 'docs/06、docs/08、docs/12、docs/14、docs/15' },
+    @{ id = 'P0-06'; title = 'MusicGen worker に実モデル backend を追加する'; area = 'area::worker'; purpose = 'deterministic backend以外でWAVを生成し、実際に聴けるMVPへ進める。'; scope = 'workers/musicgen、worker backend、生成asset'; docs = 'docs/07、docs/09、docs/11、docs/15' },
+    @{ id = 'P0-09'; title = 'ACE-Step 運用設定を compose・settings・docs へ接続する'; area = 'area::ops'; purpose = 'ServerからACE-StepまたはMusicGen workerへ疎通できる運用経路を整える。'; scope = 'infra/compose、settings、worker接続、運用手順'; docs = 'docs/07、docs/09、docs/11、docs/16、docs/17' },
+    @{ id = 'P2-06'; title = 'Spring Boot 4.1.0 追随可否と更新方針を確定する'; area = 'area::architecture'; kind = 'kind::docs'; purpose = '現行4.0.4から公式stable 4.1.0へ追随するかを判断し、採用根拠と更新手順を設計・運用資料へ残す。'; scope = '依存version方針、更新手順、互換性確認'; docs = 'docs/00、docs/01、docs/11、docs/15'; status = 'status::着手可能' },
+    @{ id = 'P0-10'; title = 'TTS placeholder fallback の adapter 再選択を修正する'; area = 'area::server'; kind = 'kind::bug'; purpose = '外部TTSが接続不能でもplaceholder fallbackを再選択し、queue warmupと縮退再生を継続する。'; scope = 'HttpTtsProvider、HttpTtsProviderTests、RadioApiTests'; docs = 'docs/05、docs/07、docs/11、docs/14、docs/15'; status = 'status::作業中' },
+    @{ id = 'P0-11'; title = 'Web 管理 API 認証を browser 非露出の session 方式へ移行する'; area = 'area::architecture'; kind = 'kind::bug'; purpose = 'NEXT_PUBLIC管理トークンを廃止し、productionの設定・監視・レター管理画面を秘密値非露出で利用可能にする。'; scope = 'web admin login/session、api-proxy、Server認証、compose、smoke、E2E'; docs = 'docs/02、docs/03、docs/11、docs/16、docs/17'; status = 'status::着手可能' },
+    @{ id = 'P0-12'; title = 'Next.js 15.5.20 へ更新して production advisory を解消する'; area = 'area::web'; kind = 'kind::maintenance'; purpose = 'Next.js 15.5.14に残るServer Components DoS、proxy bypass、SSRF等のproduction advisoryを同一minorの修正版で解消する。'; scope = 'web/package.json、web/package-lock.json、typecheck、Vitest、Playwright、npm audit'; docs = 'docs/03、docs/11、docs/14、docs/15'; status = 'status::作業中' },
+    @{ id = 'P1-17'; title = 'VoiceProfile 管理 UI を追加する'; area = 'area::web'; purpose = '局別VoiceProfileを作成・編集し、Irodori voice、style、同意参照を安全に割り当てられるようにする。'; scope = 'web/settings、VoiceProfile API、redaction、E2E'; docs = 'docs/02、docs/03、docs/04、docs/08'; status = 'status::未着手'; depends = 'P0-02b、P0-02c' },
+    @{ id = 'P1-18'; title = 'OpenAPI 契約差分と認証マトリクスを CI で検査する'; area = 'area::architecture'; kind = 'kind::maintenance'; purpose = 'Controller、OpenAPI、docs/02のendpoint・DTO・認証区分のずれを自動検出する。'; scope = 'springdoc schema、contract snapshot、docs check、CI'; docs = 'docs/02、docs/10、docs/11、docs/14'; status = 'status::着手可能' },
+    @{ id = 'P1-19'; title = '監査イベントを永続化して再起動後も追跡可能にする'; area = 'area::server'; purpose = 'SSE履歴だけに依存する監査summaryを永続化し、設定・局切替・Provider縮退を追跡可能にする。'; scope = 'audit event migration、service、monitor API、retention、redaction'; docs = 'docs/04、docs/11、docs/15'; status = 'status::着手可能' },
+    @{ id = 'P1-20'; title = 'config.json schema migration と backup・restore を実装する'; area = 'area::server'; kind = 'kind::maintenance'; purpose = 'schemaVersion変更時の安全な移行、backup、restore、失敗時rollbackを実装する。'; scope = 'RadioSettingsStore、SettingsService、config backup、migration test、runbook'; docs = 'docs/04、docs/11、docs/17'; status = 'status::着手可能' },
+    @{ id = 'P1-21'; title = '読み辞書を永続化して管理 UI から編集可能にする'; area = 'area::server'; purpose = 'hard-coded共通辞書をglobal・station・persona層へ拡張し、読み補正を運用可能にする。'; scope = 'pronunciation dictionary DB/API、resolver優先順位、settings UI、test'; docs = 'docs/02、docs/03、docs/04、docs/08'; status = 'status::着手可能' },
+    @{ id = 'P1-22'; title = 'stale provider job の回収と再試行方針を実装する'; area = 'area::server'; kind = 'kind::maintenance'; purpose = 'process停止やtimeoutでRUNNINGに残ったprovider_jobを検出し、失敗確定または安全な再投入へ収束させる。'; scope = 'ProviderJobService、cleanup job、retry policy、monitor metrics'; docs = 'docs/07、docs/09、docs/11'; status = 'status::未着手'; depends = 'P0-05' },
+    @{ id = 'P2-11'; title = '生成物を追跡対象から除外しローカル起動ガイドを正本化する'; area = 'area::ops'; kind = 'kind::maintenance'; purpose = 'pycacheとtsbuildinfoをGit管理から外し、ignored HELP.mdをPodman前提のtracked guideにする。'; scope = '.gitignore、HELP.md、web/tsconfig.tsbuildinfo、workers/musicgen/**/__pycache__'; docs = 'docs/00、docs/11、docs/15'; status = 'status::作業中' },
+    @{ id = 'P2-12'; title = 'C# Native Client 共有契約 test harness を追加する'; area = 'area::architecture'; purpose = 'REST、SSE、SpeechDirective、playback-eventsの互換性をNative Client実装前に固定する。'; scope = 'OpenAPI/SSE fixture、DTO contract test、reconnect scenario'; docs = 'docs/02、docs/05、docs/10、docs/11'; status = 'status::未着手'; depends = 'P1-18' }
 )
 
 try {
@@ -153,7 +153,7 @@ $depends
 - [ ] 関係する設計書と現行実装を確認する
 - [ ] 対象範囲を実装または更新する
 - [ ] focused testを追加・実行する
-- [ ] `doc/15_設計差分棚卸しと段階実装計画.md` の状態を更新する
+- [ ] `docs/15_設計差分棚卸しと段階実装計画.md` の状態を更新する
 
 ## 変更してはいけない範囲
 
@@ -163,7 +163,7 @@ $depends
 
 ## 完了条件
 
-- [ ] `doc/15` に記載された完了条件を満たす
+- [ ] `docs/15` に記載された完了条件を満たす
 - [ ] 実装と関係設計書が一致する
 - [ ] 対象領域のtestが成功する
 - [ ] 未実施testと残課題をIssueコメントへ記録する

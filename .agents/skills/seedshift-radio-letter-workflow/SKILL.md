@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-letter-workflow
-description: Use when working on SeedShiftRadio letter submission, moderation, adoption and reply transitions, idempotency, reply threads, broadcast linkage, or letter-related UI and API behavior. This skill helps keep `letter` workflows aligned with `doc/02`, `doc/12`, `doc/06`, and `doc/08`.
+description: Use when working on SeedShiftRadio letter submission, moderation, adoption and reply transitions, idempotency, reply threads, broadcast linkage, or letter-related UI and API behavior. This skill helps keep `letter` workflows aligned with `docs/02`, `docs/12`, `docs/06`, and `docs/08`.
 ---
 
 # SeedShiftRadio Letter Workflow
@@ -14,10 +14,10 @@ description: Use when working on SeedShiftRadio letter submission, moderation, a
 
 ## 最初に見るドキュメント
 
-- レター API 契約: `doc/02_API仕様書.md`
-- レター状態遷移: `doc/12_レター機能設計書.md`
-- LLM 安全設計: `doc/06_LLM台本生成設計書.md`
-- 日本語品質と安全性: `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
+- レター API 契約: `docs/02_API仕様書.md`
+- レター状態遷移: `docs/12_レター機能設計書.md`
+- LLM 安全設計: `docs/06_LLM台本生成設計書.md`
+- 日本語品質と安全性: `docs/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
 
 ## 現物確認の起点
 
@@ -43,6 +43,6 @@ description: Use when working on SeedShiftRadio letter submission, moderation, a
 
 ## 完了前チェック
 
-- `doc/02_API仕様書.md` と `doc/12_レター機能設計書.md` を必要に応じて更新したか
+- `docs/02_API仕様書.md` と `docs/12_レター機能設計書.md` を必要に応じて更新したか
 - 投稿 idempotency、状態遷移、返信追加、採用 session 紐付けの test を押さえたか
 - UI を触る場合は `/letters` の二重送信防止と履歴表示を確認したか

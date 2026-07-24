@@ -2,7 +2,7 @@
 
 ## 目的
 
-このリポジトリは `SeedShiftRadio` の実装・設計ベースであり、現時点では `doc/` 配下の設計書が最重要の正本です。実装や更新を行う時は、関係する設計書を先に確認し、コードと設計のずれを放置しないでください。
+このリポジトリは `SeedShiftRadio` の実装・設計ベースであり、現時点では `docs/` 配下の設計書が最重要の正本です。実装や更新を行う時は、関係する設計書を先に確認し、コードと設計のずれを放置しないでください。
 
 ## 基本方針
 
@@ -25,39 +25,39 @@
 
 ## 参照優先ドキュメント
 
-- 全体像と実装順序: `doc/00_実装ドキュメント一覧.md`
-- アーキテクチャと責務境界: `doc/01_アーキテクチャ方針設計書.md`
-- API, DTO, SSE 契約: `doc/02_API仕様書.md`
-- Web UI の画面・状態・再生挙動: `doc/03_Web画面設計書.md`
-- 設定, DB, ファイル配置, キャッシュ: `doc/04_データ構造設計書.md`
-- プレイアウトとキュー制御: `doc/05_プレイアウト・キュー制御設計書.md`
-- LLM 台本生成: `doc/06_LLM台本生成設計書.md`
-- Provider 抽象と接続: `doc/07_Provider連携設計書.md`
-- 日本語パーソナリティ, TTS, 読み辞書: `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
-- MusicGen worker 契約: `doc/09_MusicGen連携設計書.md`
-- 将来の C# Native Client 契約: `doc/10_CSharpネイティブクライアント連携設計書.md`
-- 運用, 監視, セキュリティ, テスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
-- レター機能の状態遷移: `doc/12_レター機能設計書.md`
-- 局管理と番組編成制御: `doc/13_局管理・番組編成制御設計書.md`
-- レビュー対応と再試験: `doc/14_レビュー対応・再試験計画.md`
-- 実装差分と残タスク: `doc/15_設計差分棚卸しと段階実装計画.md`
-- パイプラインとコンテナデプロイ仕様: `doc/16_パイプライン・コンテナデプロイ仕様書.md`
-- パイプラインとコンテナデプロイ手順: `doc/17_パイプライン・コンテナデプロイ手順書.md`
+- 全体像と実装順序: `docs/00_実装ドキュメント一覧.md`
+- アーキテクチャと責務境界: `docs/01_アーキテクチャ方針設計書.md`
+- API, DTO, SSE 契約: `docs/02_API仕様書.md`
+- Web UI の画面・状態・再生挙動: `docs/03_Web画面設計書.md`
+- 設定, DB, ファイル配置, キャッシュ: `docs/04_データ構造設計書.md`
+- プレイアウトとキュー制御: `docs/05_プレイアウト・キュー制御設計書.md`
+- LLM 台本生成: `docs/06_LLM台本生成設計書.md`
+- Provider 抽象と接続: `docs/07_Provider連携設計書.md`
+- 日本語パーソナリティ, TTS, 読み辞書: `docs/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
+- MusicGen worker 契約: `docs/09_MusicGen連携設計書.md`
+- 将来の C# Native Client 契約: `docs/10_CSharpネイティブクライアント連携設計書.md`
+- 運用, 監視, セキュリティ, テスト: `docs/11_運用・監視・セキュリティ・テスト設計書.md`
+- レター機能の状態遷移: `docs/12_レター機能設計書.md`
+- 局管理と番組編成制御: `docs/13_局管理・番組編成制御設計書.md`
+- レビュー対応と再試験: `docs/14_レビュー対応・再試験計画.md`
+- 実装差分と残タスク: `docs/15_設計差分棚卸しと段階実装計画.md`
+- パイプラインとコンテナデプロイ仕様: `docs/16_パイプライン・コンテナデプロイ仕様書.md`
+- パイプラインとコンテナデプロイ手順: `docs/17_パイプライン・コンテナデプロイ手順書.md`
 
 ## 変更時の更新ルール
 
-- API, DTO, SSE の変更時は `doc/02_API仕様書.md` を更新する
-- 画面遷移, UI状態, プレイヤー挙動の変更時は `doc/03_Web画面設計書.md` を更新する
-- DB, `config.json`, asset path, cache policy の変更時は `doc/04_データ構造設計書.md` を更新する
-- Tune, Queue, fallback, 先読み制御の変更時は `doc/05_プレイアウト・キュー制御設計書.md` と必要に応じて `doc/11_運用・監視・セキュリティ・テスト設計書.md` を更新する
-- LLM, TTS, 読み辞書, persona, speech directive の変更時は `doc/06_LLM台本生成設計書.md`, `doc/07_Provider連携設計書.md`, `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md` を見直す
-- MusicGen worker の API やジョブ制御を変える時は `doc/09_MusicGen連携設計書.md` を更新する
-- レター状態や放送採用フローの変更時は `doc/12_レター機能設計書.md` を更新する
-- 局管理、番組テンプレート、編成ルール、preview、queue 計画入力を変える時は `doc/13_局管理・番組編成制御設計書.md` を更新する
-- レビュー指摘の対応順や再試験計画を変える時は `doc/14_レビュー対応・再試験計画.md` を更新する
-- 残タスク、実装状況、設計差分を整理した時は `doc/15_設計差分棚卸しと段階実装計画.md` を更新する
-- CI/CD, container, compose, deploy, rollback, smoke test を変える時は `doc/16_パイプライン・コンテナデプロイ仕様書.md` と `doc/17_パイプライン・コンテナデプロイ手順書.md` を更新し、必要に応じて `doc/11_運用・監視・セキュリティ・テスト設計書.md` も見直す
-- 将来の `C# Native Client` と共有する契約を壊す変更は避け、必要時は `doc/10_CSharpネイティブクライアント連携設計書.md` を確認する
+- API, DTO, SSE の変更時は `docs/02_API仕様書.md` を更新する
+- 画面遷移, UI状態, プレイヤー挙動の変更時は `docs/03_Web画面設計書.md` を更新する
+- DB, `config.json`, asset path, cache policy の変更時は `docs/04_データ構造設計書.md` を更新する
+- Tune, Queue, fallback, 先読み制御の変更時は `docs/05_プレイアウト・キュー制御設計書.md` と必要に応じて `docs/11_運用・監視・セキュリティ・テスト設計書.md` を更新する
+- LLM, TTS, 読み辞書, persona, speech directive の変更時は `docs/06_LLM台本生成設計書.md`, `docs/07_Provider連携設計書.md`, `docs/08_日本語パーソナリティ・TTS・読み辞書設計書.md` を見直す
+- MusicGen worker の API やジョブ制御を変える時は `docs/09_MusicGen連携設計書.md` を更新する
+- レター状態や放送採用フローの変更時は `docs/12_レター機能設計書.md` を更新する
+- 局管理、番組テンプレート、編成ルール、preview、queue 計画入力を変える時は `docs/13_局管理・番組編成制御設計書.md` を更新する
+- レビュー指摘の対応順や再試験計画を変える時は `docs/14_レビュー対応・再試験計画.md` を更新する
+- 残タスク、実装状況、設計差分を整理した時は `docs/15_設計差分棚卸しと段階実装計画.md` を更新する
+- CI/CD, container, compose, deploy, rollback, smoke test を変える時は `docs/16_パイプライン・コンテナデプロイ仕様書.md` と `docs/17_パイプライン・コンテナデプロイ手順書.md` を更新し、必要に応じて `docs/11_運用・監視・セキュリティ・テスト設計書.md` も見直す
+- 将来の `C# Native Client` と共有する契約を壊す変更は避け、必要時は `docs/10_CSharpネイティブクライアント連携設計書.md` を確認する
 
 ## 実装境界
 
@@ -66,7 +66,7 @@
 - `workers/musicgen` は高遅延な音楽生成を非同期ジョブとして担当する
 - `infra/compose` はローカル起動と依存サービス定義を担当する
 - `infra/containers`, `.gitlab-ci.yml`, `scripts/ci` は CI/CD とデプロイ導線を担当する
-- `doc` は設計正本として扱う
+- `docs` は設計正本として扱う
 
 推奨構成がまだ未作成でも、基本的には以下を維持します。
 
@@ -75,7 +75,7 @@
 /web
 /workers/musicgen
 /infra/compose
-/doc
+/docs
 ```
 
 ## 守るべき実装ルール
@@ -92,7 +92,7 @@
 ## 作業管理とエージェント運用
 
 作業状態、担当主体、優先度、完了確認は GitLab Project Issue / Label / Issue Board を正本とし、`.gitlab/WORK_MANAGEMENT.md` に従います。
-`doc/` は製品仕様と実装順の正本であり、Issue は作業範囲、完了条件、検証結果、残課題を追跡する単位です。
+`docs/` は製品仕様と実装順の正本であり、Issue は作業範囲、完了条件、検証結果、残課題を追跡する単位です。
 
 Codex は原則としてメインエージェントが Issue の確認、実装統合、最終検証、GitLab の完了更新まで担当します。
 専門領域の手順は固定サブエージェントではなく `.agents/skills` の project skill を使います。
@@ -108,7 +108,7 @@ Codex は原則としてメインエージェントが Issue の確認、実装�
 
 - `seedshift-radio-architecture`: 設計書の読み分け、責務境界、API first の確認用
 - `seedshift-radio-agent-maintenance`: `.codex`, `.agents`, `AGENTS.md`, ローカル skill の保守用
-- `seedshift-radio-backlog-implementation`: `doc/15` を起点にした残タスク実装と設計書更新用
+- `seedshift-radio-backlog-implementation`: `docs/15` を起点にした残タスク実装と設計書更新用
 - `seedshift-radio-broadcast-quality`: 日本語台本、TTS、読み辞書、レター安全性、縮退品質の確認用
 - `seedshift-radio-letter-workflow`: レター投稿、採用、返信、放送反映の状態遷移確認用
 - `seedshift-radio-ops-deploy`: GitLab CI/CD, Podman Compose, deploy, rollback, smoke test の運用変更用

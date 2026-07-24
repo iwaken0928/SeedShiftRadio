@@ -437,11 +437,11 @@ pipeline-docs-check:
   extends: .test-job
   stage: docs-check
   script:
-    - test -f doc/16_パイプライン・コンテナデプロイ仕様書.md
-    - test -f doc/17_パイプライン・コンテナデプロイ手順書.md
-    - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" doc/16_パイプライン・コンテナデプロイ仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/04_データ構造設計書.md
-    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" doc/17_パイプライン・コンテナデプロイ手順書.md
-    - rg -n "api-contract|apiContractTest|openapi.sha256" doc/02_API仕様書.md doc/11_運用・監視・セキュリティ・テスト設計書.md doc/16_パイプライン・コンテナデプロイ仕様書.md doc/17_パイプライン・コンテナデプロイ手順書.md
+    - test -f docs/16_パイプライン・コンテナデプロイ仕様書.md
+    - test -f docs/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" docs/16_パイプライン・コンテナデプロイ仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/04_データ構造設計書.md
+    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" docs/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "api-contract|apiContractTest|openapi.sha256" docs/02_API仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/16_パイプライン・コンテナデプロイ仕様書.md docs/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:
   extends: .test-job

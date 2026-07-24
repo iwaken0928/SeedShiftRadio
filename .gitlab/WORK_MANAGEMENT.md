@@ -3,7 +3,7 @@
 ## 正本と対象
 
 日々の作業状態は GitLab Project Issue / Label / Issue Board を正本とする。
-製品仕様と実装順は引き続き `doc/`、特に `doc/15_設計差分棚卸しと段階実装計画.md` を正本とする。
+製品仕様と実装順は引き続き `docs/`、特に `docs/15_設計差分棚卸しと段階実装計画.md` を正本とする。
 Issue は設計書を複製する場所ではなく、作業範囲、完了条件、検証結果、残課題を追跡する単位として扱う。
 
 GitLab CE でも運用できるよう、Epic、Roadmap、custom status には依存しない。
@@ -60,7 +60,7 @@ Open 列は triage、Closed 列は完了履歴として使う。
 
 ## Issue 化の単位
 
-`doc/15` の未実装 ID を原則一つの Issue にする。
+`docs/15` の未実装 ID を原則一つの Issue にする。
 同じ migration や API contract を不可分に変更する場合だけ、複数 ID を一つへまとめる。
 Issue title は `[P0-01] LLM adapter を追加する` のように設計書 ID を先頭へ置く。
 

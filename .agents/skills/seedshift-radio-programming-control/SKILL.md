@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-programming-control
-description: Use when working on SeedShiftRadio station administration, programming policies, program templates, program rules, preview resolution, queue planning inputs, or template validation. This skill helps keep programming control aligned with `doc/02`, `doc/04`, `doc/05`, and `doc/13`.
+description: Use when working on SeedShiftRadio station administration, programming policies, program templates, program rules, preview resolution, queue planning inputs, or template validation. This skill helps keep programming control aligned with `docs/02`, `docs/04`, `docs/05`, and `docs/13`.
 ---
 
 # SeedShiftRadio Programming Control
@@ -15,10 +15,10 @@ description: Use when working on SeedShiftRadio station administration, programm
 
 ## 最初に見るドキュメント
 
-- 編成 API 契約: `doc/02_API仕様書.md`
-- DB と version 管理: `doc/04_データ構造設計書.md`
-- queue 接続と fallback: `doc/05_プレイアウト・キュー制御設計書.md`
-- 局管理と番組編成: `doc/13_局管理・番組編成制御設計書.md`
+- 編成 API 契約: `docs/02_API仕様書.md`
+- DB と version 管理: `docs/04_データ構造設計書.md`
+- queue 接続と fallback: `docs/05_プレイアウト・キュー制御設計書.md`
+- 局管理と番組編成: `docs/13_局管理・番組編成制御設計書.md`
 
 ## 現物確認の起点
 
@@ -45,6 +45,6 @@ description: Use when working on SeedShiftRadio station administration, programm
 
 ## 完了前チェック
 
-- `doc/02_API仕様書.md`, `doc/04_データ構造設計書.md`, `doc/05_プレイアウト・キュー制御設計書.md`, `doc/13_局管理・番組編成制御設計書.md` のどれを更新すべきか確認したか
+- `docs/02_API仕様書.md`, `docs/04_データ構造設計書.md`, `docs/05_プレイアウト・キュー制御設計書.md`, `docs/13_局管理・番組編成制御設計書.md` のどれを更新すべきか確認したか
 - 保存時バリデーション、Preview、version 固定、fallback の test を押さえたか
 - Queue 補充や ProgramBlock 解決への影響を見たか

@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-provider-runtime
-description: Use when working on SeedShiftRadio provider abstraction, settings APIs, connection tests, health checks, generated assets, JobRunr jobs, or MusicGen worker integration. This skill helps keep LLM, TTS, and MusicGen runtime behavior aligned with `doc/04`, `doc/07`, `doc/09`, and `doc/11`.
+description: Use when working on SeedShiftRadio provider abstraction, settings APIs, connection tests, health checks, generated assets, JobRunr jobs, or MusicGen worker integration. This skill helps keep LLM, TTS, and MusicGen runtime behavior aligned with `docs/04`, `docs/07`, `docs/09`, and `docs/11`.
 ---
 
 # SeedShiftRadio Provider Runtime
@@ -14,10 +14,10 @@ description: Use when working on SeedShiftRadio provider abstraction, settings A
 
 ## 最初に見るドキュメント
 
-- 設定と asset メタ: `doc/04_データ構造設計書.md`
-- Provider 抽象と health: `doc/07_Provider連携設計書.md`
-- MusicGen worker 契約: `doc/09_MusicGen連携設計書.md`
-- 監視とテスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
+- 設定と asset メタ: `docs/04_データ構造設計書.md`
+- Provider 抽象と health: `docs/07_Provider連携設計書.md`
+- MusicGen worker 契約: `docs/09_MusicGen連携設計書.md`
+- 監視とテスト: `docs/11_運用・監視・セキュリティ・テスト設計書.md`
 
 ## 現物確認の起点
 
@@ -44,6 +44,6 @@ description: Use when working on SeedShiftRadio provider abstraction, settings A
 
 ## 完了前チェック
 
-- `doc/04_データ構造設計書.md`, `doc/07_Provider連携設計書.md`, `doc/09_MusicGen連携設計書.md`, `doc/11_運用・監視・セキュリティ・テスト設計書.md` を必要に応じて更新したか
+- `docs/04_データ構造設計書.md`, `docs/07_Provider連携設計書.md`, `docs/09_MusicGen連携設計書.md`, `docs/11_運用・監視・セキュリティ・テスト設計書.md` を必要に応じて更新したか
 - settings 楽観ロック、疎通確認、health 状態分類、asset 配信、fallback の test を押さえたか
 - ライセンスや運用台帳へ追記が必要か確認したか

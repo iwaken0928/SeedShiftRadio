@@ -1,6 +1,6 @@
 ---
 name: seedshift-radio-broadcast-quality
-description: Use when working on SeedShiftRadio Japanese script generation, persona behavior, speech directives, TTS normalization, pronunciation hints, reading dictionaries, subtitles, letter safety, or degraded playback quality. This skill helps keep generated broadcast content natural in Japanese, safe to use with untrusted letter input, and consistent with the LLM, TTS, and operational quality documents under /doc.
+description: Use when working on SeedShiftRadio Japanese script generation, persona behavior, speech directives, TTS normalization, pronunciation hints, reading dictionaries, subtitles, letter safety, or degraded playback quality. This skill helps keep generated broadcast content natural in Japanese, safe to use with untrusted letter input, and consistent with the LLM, TTS, and operational quality documents under /docs.
 ---
 
 # SeedShiftRadio Broadcast Quality
@@ -14,11 +14,11 @@ description: Use when working on SeedShiftRadio Japanese script generation, pers
 
 ## 最初に見るドキュメント
 
-- LLM 台本生成: `doc/06_LLM台本生成設計書.md`
-- Provider 抽象: `doc/07_Provider連携設計書.md`
-- 日本語品質, TTS, 読み辞書: `doc/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
-- 運用, セキュリティ, テスト: `doc/11_運用・監視・セキュリティ・テスト設計書.md`
-- レター状態と放送反映: `doc/12_レター機能設計書.md`
+- LLM 台本生成: `docs/06_LLM台本生成設計書.md`
+- Provider 抽象: `docs/07_Provider連携設計書.md`
+- 日本語品質, TTS, 読み辞書: `docs/08_日本語パーソナリティ・TTS・読み辞書設計書.md`
+- 運用, セキュリティ, テスト: `docs/11_運用・監視・セキュリティ・テスト設計書.md`
+- レター状態と放送反映: `docs/12_レター機能設計書.md`
 
 ## ワークフロー
 

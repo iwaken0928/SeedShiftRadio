@@ -1234,7 +1234,7 @@ function SettingsSection({ title, description, children }: { title: string; desc
   return (
     <Card className="p-4">
       <div className="mb-4 space-y-1">
-        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{title}</div>
+        <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{title}</h3>
         <p className="text-sm leading-6 text-slate-600">{description}</p>
       </div>
       {children}

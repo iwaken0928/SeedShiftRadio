@@ -31,12 +31,12 @@ test("motion: reduced motion and mobile interaction targets stay usable", async 
 
   await expect(hero).toHaveClass(/motion-enter/);
   await expect(queue).not.toHaveClass(/motion-enter/);
-  await expect(page.getByRole("link", { name: "Radio", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("link", { name: "ラジオ", exact: true })).toHaveAttribute("aria-current", "page");
 
   const reducedAnimationName = await hero.evaluate((element) => getComputedStyle(element).animationName);
   expect(reducedAnimationName).toBe("surface-fade-in");
 
-  const navBox = await page.getByRole("link", { name: "Radio", exact: true }).boundingBox();
+  const navBox = await page.getByRole("link", { name: "ラジオ", exact: true }).boundingBox();
   const headerBox = await page.locator("header").boundingBox();
   expect(navBox?.height).toBeGreaterThanOrEqual(44);
   expect(headerBox?.height).toBeLessThanOrEqual(200);

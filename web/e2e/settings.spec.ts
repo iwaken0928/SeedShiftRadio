@@ -44,7 +44,7 @@ test("settings: category navigation separates each responsibility", async ({ pag
   await expect(overviewPanel.getByRole("link", { name: /システム/ })).toHaveAttribute("href", "/settings/system");
   await expect(overviewPanel.getByRole("link", { name: /AI・音声接続/ })).toHaveAttribute("href", "/settings/providers");
   await expect(overviewPanel.getByRole("link", { name: /再生・生成/ })).toHaveAttribute("href", "/settings/playout");
-  await expect(overviewPanel.getByRole("link", { name: /局/ })).toHaveAttribute("href", "/settings/stations");
+  await expect(overviewPanel.locator('a[href="/settings/stations"]')).toContainText("局");
   await expect(overviewPanel.getByRole("link", { name: /番組編成/ })).toHaveAttribute("href", "/settings/programming");
 
   await page.goto(appUrl("/settings/system"));
@@ -134,7 +134,7 @@ test("settings: station create draft -> save and select new station", async ({ p
   await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-dawn");
   await expect(stationPanel.locator("#station-id")).toHaveValue("station-dawn");
   await expect(stationPanel.locator("#station-id")).not.toBeEditable();
-  await expect(stationPanel.locator("#programming-horizon")).toHaveValue("30");
+  await expect(stationPanel.locator("#programming-horizon")).toHaveCount(0);
   await expect(stationPanel).toContainText("局を作成しました。");
 });
 
@@ -184,7 +184,7 @@ test("settings: station duplicate draft strips station policy and can be closed"
     defaultProgramTemplateId: null,
   });
   await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-night-clone");
-  await expect(stationPanel.locator("#programming-horizon")).toHaveValue("30");
+  await expect(stationPanel.locator("#programming-horizon")).toHaveCount(0);
   await expect(stationPanel).toContainText("局を作成しました。");
 });
 

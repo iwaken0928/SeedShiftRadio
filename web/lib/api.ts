@@ -34,13 +34,18 @@ import { getApiBaseUrl } from "@/lib/env";
 export class ApiRequestError extends Error {
   status: number;
   code: string | null;
+  field: string | null;
   fieldErrors: Record<string, string>;
 
-  constructor(message: string, options: { status: number; code?: string | null; fieldErrors?: Record<string, string> }) {
+  constructor(
+    message: string,
+    options: { status: number; code?: string | null; field?: string | null; fieldErrors?: Record<string, string> },
+  ) {
     super(message);
     this.name = "ApiRequestError";
     this.status = options.status;
     this.code = options.code ?? null;
+    this.field = options.field ?? null;
     this.fieldErrors = options.fieldErrors ?? {};
   }
 }
@@ -68,6 +73,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
     throw new ApiRequestError(payload.message || `Request failed: ${response.status}`, {
       status: response.status,
       code: payload.code,
+      field: payload.field,
       fieldErrors: payload.fieldErrors,
     });
   }
@@ -121,6 +127,7 @@ async function readApiError(response: Response) {
               ? payload.error
               : response.statusText || `Request failed: ${response.status}`,
         code: typeof payload.code === "string" ? payload.code : null,
+        field: extractField((payload as { details?: unknown }).details),
         fieldErrors: extractFieldErrors((payload as { details?: unknown }).details),
       };
     }
@@ -131,8 +138,18 @@ async function readApiError(response: Response) {
   return {
     message: response.statusText || `Request failed: ${response.status}`,
     code: null,
+    field: null,
     fieldErrors: {},
   };
+}
+
+function extractField(details: unknown) {
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return null;
+  }
+  return typeof (details as { field?: unknown }).field === "string"
+    ? (details as { field: string }).field
+    : null;
 }
 
 function extractFieldErrors(details: unknown) {

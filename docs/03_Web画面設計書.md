@@ -139,7 +139,10 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `/settings` の初期一画面実装は廃止し、`system`, `providers`, `playout`, `stations`, `programming` の 5 カテゴリーへ分割する
 - `PUT /api/settings` の契約は分割後も共通とし、`system`, `providers`, `playout` は取得済み設定全体を draft として保持しつつ、現在のカテゴリーに属する項目だけを表示して一括保存する
 - `stations` と `programming` は PostgreSQL を正本とする既存の Station / Programming API を使い、`/api/settings` の保存操作とは分離する
-- `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を編集できるようにする
+- `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `adapter`, model / profile を編集できるようにする
+- LLM は `adapter` を `OLLAMA` / `OPENAI_COMPATIBLE` から選び、`defaultModelProfileId` を実際のモデル名として入力する。接続確認で取得した model 一覧は入力候補として表示し、指定モデルが Provider に存在しない場合は `DEGRADED` と修正理由を表示する
+- production の Server は host network で動作するため、Ollama / ACE-Step が同一サーバー上にある場合は `127.0.0.1:11434` / `127.0.0.1:8001` を入力できる補助を出す。画面を開いた端末から見た URL ではなく、SeedShiftRadio Server から見た接続先であることを明示する
+- URL、adapter、model / profile の保存前検証は内部 JSON path をそのまま表示せず、対象 Provider と修正例を日本語で示す
 - TTS provider は `VOICEVOX` と `IRODORI_OPENAI_TTS` の default/fallback 切替を扱えるようにする。Irodori の `apiKeyRef` は `env:` / `file:` 参照のみ表示・編集し、bearer token の実値は扱わない
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
 - 管理 session がない場合は Settings / Monitor 導線を非表示にし、`/settings`、`/monitor` を直接開いた時は `/admin/login` へ遷移する
@@ -168,7 +171,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
-- worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
+- worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `selectedModel`, `selectedModelAvailable`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
 - Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する。upstream の chunk-level SSE 対応と現行 SeedShiftRadio adapter の有効化状態は分けて表示する
 - `providerHealth.message`, `baseUrl`, `provider_job.externalRef`, audit `summary` は分類済みの短い表示に限り、秘密値や本文らしい key-value / credential URL は Web 側でも `[redacted]` に置き換える
 

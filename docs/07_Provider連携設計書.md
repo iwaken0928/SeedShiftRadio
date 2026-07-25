@@ -195,6 +195,7 @@ stale job は条件付き更新で `FAILED`、`error_code=PROVIDER_INTERRUPTED`�
 
 機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。参照先が未設定、空、読み取り不能の場合、接続テストと実行経路は `PROVIDER_AUTH_FAILED` として扱い、health endpoint が匿名で成功しても `UP` にしない。
 LLM の `defaultModelProfileId` は model 名として使い、`modelProfiles` の存在を要求しない。LLM endpoint の `timeoutMs` を省略する場合は 20000 ms を既定とする。
+LLM の接続確認では `OLLAMA` は `GET /api/tags`、`OPENAI_COMPATIBLE` は `GET /v1/models` から model 一覧を取得し、`providerHealth.metadata.models`, `selectedModel`, `selectedModelAvailable` に短い値だけを返す。接続自体が成功しても指定 model が一覧に存在しない場合は `DEGRADED` とし、台本生成前に設定不備を発見できるようにする。model 一覧取得だけが失敗した場合は `modelsStatus=UNAVAILABLE` とし、health endpoint の結果まで直ちに `DOWN` へ落とさない。
 
 Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になり、script、TTS、MusicGen が cache-first 再利用へ接続済みである。MusicGen では station `preGeneration.preferCacheReuse=false` の場合に reusable asset が存在しても worker submit を優先する。
 

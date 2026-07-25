@@ -69,6 +69,40 @@ test("settings: category navigation separates each responsibility", async ({ pag
   await expect(page.getByRole("heading", { name: "編成結果を確認" })).toBeVisible();
 });
 
+test("settings: Ollama connection method and model are editable with understandable URL validation", async ({ page }) => {
+  const state = createSettingsState();
+  const settingsUpdateRequests: RequestCapture[] = [];
+  await installSettingsRoutes(page, state, { settingsUpdateRequests });
+  await page.goto(appUrl("/settings/providers"));
+
+  await expect(page.locator("#llm-ollama-adapter")).toHaveValue("OLLAMA");
+  await expect(page.locator("#llm-ollama-defaultModel")).toHaveValue("qwen3:8b");
+
+  await page.locator("#llm-ollama-baseUrl").fill("http://192..168.0.30:11434");
+  await page.getByRole("button", { name: "このカテゴリーの変更を保存", exact: true }).click();
+  await expect(page.getByText("LLM「ollama」の接続先 URL が正しくありません。")).toBeVisible();
+  expect(settingsUpdateRequests).toHaveLength(0);
+
+  await page.locator("#llm-ollama-baseUrl").fill("http://127.0.0.1:11434");
+  await page.locator("#llm-ollama-defaultModel").fill("gemma3:4b");
+  await page.getByRole("button", { name: "このカテゴリーの変更を保存", exact: true }).click();
+
+  await expect.poll(() => settingsUpdateRequests.length).toBe(1);
+  await expect(settingsUpdateRequests[0]?.body).toMatchObject({
+    providers: {
+      llm: {
+        providers: {
+          ollama: {
+            baseUrl: "http://127.0.0.1:11434",
+            adapter: "OLLAMA",
+            defaultModelProfileId: "gemma3:4b",
+          },
+        },
+      },
+    },
+  });
+});
+
 test("settings: existing station programming policy save", async ({ page }) => {
   const state = createSettingsState();
   const programmingUpdateRequests: RequestCapture[] = [];
@@ -460,6 +494,7 @@ async function installSettingsRoutes(
   page: Page,
   state: ReturnType<typeof createSettingsState>,
   captures: {
+    settingsUpdateRequests?: RequestCapture[];
     stationCreateRequests?: RequestCapture[];
     programmingUpdateRequests?: RequestCapture[];
     previewRequests?: RequestCapture[];
@@ -470,6 +505,18 @@ async function installSettingsRoutes(
   },
 ) {
   await page.route(apiUrl("/api/settings"), async (route) => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      captures.settingsUpdateRequests?.push({ body, headers: route.request().headers() });
+      state.settings = {
+        ...state.settings,
+        ...body,
+        version: Number(body.version ?? state.settings.version) + 1,
+        updatedAt: "2026-04-25T00:00:00Z",
+      };
+      await fulfillJson(route, state.settings);
+      return;
+    }
     await fulfillJson(route, state.settings);
   });
 

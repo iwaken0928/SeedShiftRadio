@@ -326,6 +326,8 @@ export function buildSettingsResponse(overrides: Record<string, unknown> = {}) {
             healthPath: "/api/tags",
             timeoutMs: 5000,
             capabilities: ["SCRIPT"],
+            adapter: "OLLAMA",
+            defaultModelProfileId: "qwen3:8b",
           },
         },
       },

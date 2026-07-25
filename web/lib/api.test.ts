@@ -89,6 +89,7 @@ describe("api helpers", () => {
           code: "VALIDATION_ERROR",
           message: "入力値を確認してください。",
           details: {
+            field: "providers.llm.ollama.baseUrl",
             fieldErrors: {
               "slots[0].slotId": "slotId が重複しています。",
               fallbackTemplateId: "fallbackTemplateId が循環しています。",
@@ -108,6 +109,7 @@ describe("api helpers", () => {
       message: "入力値を確認してください。",
       status: 400,
       code: "VALIDATION_ERROR",
+      field: "providers.llm.ollama.baseUrl",
       fieldErrors: {
         "slots[0].slotId": "slotId が重複しています。",
         fallbackTemplateId: "fallbackTemplateId が循環しています。",

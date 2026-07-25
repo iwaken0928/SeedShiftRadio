@@ -148,16 +148,21 @@ public class ProviderHealthService {
 			HttpResponse<Void> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
 			long responseTimeMs = elapsedMillis(startedAt);
 			if (response.statusCode() >= 200 && response.statusCode() < 300) {
+				Map<String, Object> metadata = enrichProviderMetadata(providerType, provider);
+				boolean selectedModelUnavailable = providerType == ProviderType.LLM
+						&& Boolean.FALSE.equals(metadata.get("selectedModelAvailable"));
 				return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
 						provider.providerGroupKey(),
 						provider.providerKey(),
-						"UP",
+						selectedModelUnavailable ? "DEGRADED" : "UP",
 						checkedAt,
 						responseTimeMs,
-						"接続成功",
+						selectedModelUnavailable
+								? "接続できましたが、指定した LLM モデル " + provider.defaultModelProfileId() + " が見つかりません。"
+								: "接続成功",
 						provider.capabilities(),
 						provider.baseUrl(),
-						enrichProviderMetadata(providerType, provider)));
+						metadata));
 			}
 			return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
 					provider.providerGroupKey(),
@@ -184,6 +189,9 @@ public class ProviderHealthService {
 	}
 
 	private Map<String, Object> enrichProviderMetadata(ProviderType providerType, ProviderRegistry.ResolvedProvider provider) {
+		if (providerType == ProviderType.LLM) {
+			return enrichLlmProviderMetadata(provider);
+		}
 		if (providerType == ProviderType.TTS) {
 			return enrichTtsProviderMetadata(provider);
 		}
@@ -227,6 +235,43 @@ public class ProviderHealthService {
 		metadata.put("adapterStreamingEnabled", false);
 		metadata.put("voiceRefStatus", "VOICE_PROFILE_REQUIRED");
 		readIrodoriModels(provider, metadata);
+		return metadata;
+	}
+
+	private Map<String, Object> enrichLlmProviderMetadata(ProviderRegistry.ResolvedProvider provider) {
+		Map<String, Object> metadata = new LinkedHashMap<>();
+		String adapter = provider.adapter() == null || provider.adapter().isBlank()
+				? "UNKNOWN"
+				: provider.adapter();
+		metadata.put("adapter", adapter);
+		if (provider.defaultModelProfileId() != null && !provider.defaultModelProfileId().isBlank()) {
+			metadata.put("selectedModel", provider.defaultModelProfileId());
+		}
+		try {
+			JsonNode response = sendJsonProbe(provider, "OLLAMA".equals(adapter) ? "/api/tags" : "/v1/models");
+			List<String> models = new ArrayList<>();
+			JsonNode modelNodes = "OLLAMA".equals(adapter) ? response.path("models") : response.path("data");
+			if (modelNodes.isArray()) {
+				for (JsonNode modelNode : modelNodes) {
+					String model = textOrNull(modelNode.path("name"));
+					if (model == null) {
+						model = textOrNull(modelNode.path("model"));
+					}
+					if (model == null) {
+						model = textOrNull(modelNode.path("id"));
+					}
+					if (model != null && !model.isBlank()) {
+						models.add(model);
+					}
+				}
+			}
+			metadata.put("models", List.copyOf(models));
+			if (provider.defaultModelProfileId() != null && !provider.defaultModelProfileId().isBlank()) {
+				metadata.put("selectedModelAvailable", models.contains(provider.defaultModelProfileId()));
+			}
+		} catch (RuntimeException exception) {
+			metadata.put("modelsStatus", "UNAVAILABLE");
+		}
 		return metadata;
 	}
 

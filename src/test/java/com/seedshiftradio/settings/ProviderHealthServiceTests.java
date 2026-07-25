@@ -36,6 +36,9 @@ class ProviderHealthServiceTests {
 		httpServer = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		httpServer.createContext("/up", new FixedResponseHandler(200, "ok"));
 		httpServer.createContext("/error", new FixedResponseHandler(503, "error"));
+		httpServer.createContext("/api/tags", new FixedResponseHandler(
+				200,
+				"{\"models\":[{\"name\":\"qwen3:8b\"},{\"model\":\"gemma3:4b\"}]}"));
 		httpServer.createContext("/v1/stats", new FixedResponseHandler(
 				200,
 				"{\"data\":{\"queue_size\":4,\"avg_job_seconds\":12.5,\"jobs\":{\"queued\":1,\"running\":2}}}"));
@@ -55,7 +58,15 @@ class ProviderHealthServiceTests {
 				SettingsDocument.CacheSettings.defaults(),
 				SettingsDocument.ProgrammingSettings.defaults(),
 				new SettingsDocument.ProviderCatalog(
-						new SettingsDocument.ProviderGroup("ollama", List.of(), Map.of("ollama", new SettingsDocument.ProviderEndpoint(baseUrl, "/up", 1_000, List.of("SCRIPT_GEN")))),
+						new SettingsDocument.ProviderGroup("ollama", List.of(), Map.of("ollama", new SettingsDocument.ProviderEndpoint(
+								baseUrl,
+								"/up",
+								1_000,
+								List.of("SCRIPT_GEN"),
+								"OLLAMA",
+								null,
+								"qwen3:8b",
+								Map.of()))),
 						new SettingsDocument.ProviderGroup("voicevox", List.of(), Map.of("voicevox", new SettingsDocument.ProviderEndpoint(baseUrl, "/error", 1_000, List.of("TTS_GEN")))),
 						new SettingsDocument.ProviderGroup(
 								"ace-step-primary",
@@ -95,6 +106,8 @@ class ProviderHealthServiceTests {
 		List<RadioEventRecord> events = replayAfter("0");
 
 		assertEquals("UP", response.get("llm").status());
+		assertEquals(List.of("qwen3:8b", "gemma3:4b"), response.get("llm").metadata().get("models"));
+		assertEquals(true, response.get("llm").metadata().get("selectedModelAvailable"));
 		assertEquals("DEGRADED", response.get("tts").status());
 		assertEquals("VOICEVOX", response.get("tts").metadata().get("adapter"));
 		assertEquals(false, response.get("tts").metadata().get("streamingSupported"));
@@ -105,6 +118,51 @@ class ProviderHealthServiceTests {
 		assertEquals(1, events.size());
 		assertEquals("provider.health.changed", events.getFirst().eventType());
 		assertEquals(response, events.getFirst().payload());
+	}
+
+	@Test
+	void refreshHealthReportsConfiguredLlmModelAsDegradedWhenItIsNotInstalled() {
+		SettingsDocument settings = SettingsDocument.defaults();
+		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort();
+		SettingsDocument.ProviderEndpoint endpoint = new SettingsDocument.ProviderEndpoint(
+				baseUrl,
+				"/up",
+				1_000,
+				List.of("SCRIPT_GEN"),
+				"OLLAMA",
+				null,
+				"missing-model:latest",
+				Map.of());
+		SettingsDocument configured = new SettingsDocument(
+				settings.version(),
+				settings.schemaVersion(),
+				settings.updatedAt(),
+				settings.server(),
+				settings.paths(),
+				settings.playout(),
+				settings.cache(),
+				settings.programming(),
+				new SettingsDocument.ProviderCatalog(
+						new SettingsDocument.ProviderGroup("ollama", List.of(), Map.of("ollama", endpoint)),
+						settings.providers().tts(),
+						settings.providers().musicGen()),
+				settings.security(),
+				settings.features()).normalize();
+		ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+		RadioSettingsStore store = new RadioSettingsStore(
+				objectMapper,
+				new RadioConfigProperties(tempDir.resolve("missing-llm-model-config.json").toString()));
+		store.save(configured);
+		ProviderHealthService service = new ProviderHealthService(
+				new ProviderRegistry(store),
+				new StreamEventService(),
+				objectMapper);
+
+		SettingsDtos.ProviderHealthPayload health = service.refreshHealth().get("llm");
+
+		assertEquals("DEGRADED", health.status());
+		assertEquals(false, health.metadata().get("selectedModelAvailable"));
+		assertEquals("接続できましたが、指定した LLM モデル missing-model:latest が見つかりません。", health.message());
 	}
 
 	@Test

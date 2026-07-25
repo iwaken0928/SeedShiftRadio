@@ -84,6 +84,7 @@ const PROVIDER_LABELS: Record<keyof ProviderCatalog, string> = {
 };
 const PROGRAMMING_STATE_OPTIONS = ["UP", "DEGRADED", "DOWN", "UNKNOWN"] as const;
 const PROVIDER_ADAPTER_OPTIONS = ["MUSICGEN_WORKER", "ACE_STEP"] as const;
+const LLM_PROVIDER_ADAPTER_OPTIONS = ["OLLAMA", "OPENAI_COMPATIBLE"] as const;
 type ProviderEndpointField = "baseUrl" | "healthPath" | "timeoutMs" | "capabilities" | "adapter" | "apiKeyRef" | "defaultModelProfileId";
 type ProviderEndpointValue = string | number | string[] | null;
 const SELECT_CLASS_NAME =
@@ -116,6 +117,7 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
   const setSelectedStationId = useUiStore((state) => state.setSelectedStationId);
   const [draft, setDraft] = useState<SettingsUpdateRequest | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [saveValidationError, setSaveValidationError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -153,6 +155,7 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
     mutationFn: updateSettings,
     onMutate: () => {
       setSaveNotice(null);
+      setSaveValidationError(null);
       setImportError(null);
     },
     onSuccess: (saved) => {
@@ -422,6 +425,7 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
     setSaveNotice("未保存の変更を破棄しました。");
     setImportNotice(null);
     setImportError(null);
+    setSaveValidationError(null);
   };
 
   const updateDraft = (updater: (current: SettingsUpdateRequest) => SettingsUpdateRequest) => {
@@ -429,6 +433,21 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
     setSaveNotice(null);
     setImportNotice(null);
     setImportError(null);
+    setSaveValidationError(null);
+  };
+
+  const saveCurrentCategory = () => {
+    if (!draft) {
+      return;
+    }
+    if (page === "providers") {
+      const validationErrors = validateProviderCatalog(draft.providers);
+      if (validationErrors.length > 0) {
+        setSaveValidationError(validationErrors.join(" "));
+        return;
+      }
+    }
+    saveMutation.mutate(draft);
   };
 
   const exportSettings = () => {
@@ -667,7 +686,7 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
                 <Button tone="ghost" onClick={resetDraft} disabled={!isDirty || saveMutation.isPending}>
                   未保存の変更を破棄
                 </Button>
-                <Button tone="primary" onClick={() => draft && saveMutation.mutate(draft)} disabled={!draft || !isDirty || saveMutation.isPending}>
+                <Button tone="primary" onClick={saveCurrentCategory} disabled={!draft || !isDirty || saveMutation.isPending}>
                   {saveMutation.isPending ? "保存中..." : "このカテゴリーの変更を保存"}
                 </Button>
               </div>
@@ -691,7 +710,10 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
               {saveNotice ? <InlineNotice tone="accent" message={saveNotice} /> : null}
               {importNotice ? <InlineNotice tone="accent" message={importNotice} /> : null}
               {importError ? <InlineNotice tone="danger" message={importError} /> : null}
-              {saveMutation.error instanceof Error ? <InlineNotice tone="danger" message={formatSafeDisplayText(saveMutation.error.message)} /> : null}
+              {saveValidationError ? <InlineNotice tone="danger" message={saveValidationError} /> : null}
+              {saveMutation.error instanceof Error ? (
+                <InlineNotice tone="danger" message={getSettingsSaveErrorMessage(saveMutation.error, page)} />
+              ) : null}
               {bindHostWarning ? (
                 <InlineNotice
                   tone="warning"
@@ -920,7 +942,10 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
               ) : null}
 
               {page === "providers" ? (
-              <SettingsSection title="Provider の接続先と切替順" description="台本生成、音声合成、音楽生成ごとに、最初に使う接続先と障害時に試す接続先を指定します。Provider の追加・削除はこの画面では行いません。">
+              <SettingsSection
+                title="Provider の接続先と切替順"
+                description="台本生成、音声合成、音楽生成ごとに接続先を指定します。SeedShiftRadio Server と Ollama / ACE-Step が同じ 192.168.0.30 上で動く標準構成では、Server から見た接続先として 127.0.0.1 を使用できます。"
+              >
                 <div className="space-y-4">
                   {PROVIDER_GROUPS.map((groupKey) => (
                     <ProviderGroupEditor
@@ -1256,18 +1281,35 @@ function TextField({
   label,
   value,
   placeholder,
+  description,
+  suggestions,
   onChange,
 }: {
   id: string;
   label: string;
   value: string;
   placeholder?: string;
+  description?: string;
+  suggestions?: readonly string[];
   onChange: (value: string) => void;
 }) {
+  const listId = suggestions?.length ? `${id}-suggestions` : undefined;
   return (
     <div>
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} value={value} placeholder={placeholder} onChange={(event) => onChange(event.currentTarget.value)} />
+      <Input
+        id={id}
+        list={listId}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+      {listId ? (
+        <datalist id={listId}>
+          {suggestions?.map((suggestion) => <option key={suggestion} value={suggestion} />)}
+        </datalist>
+      ) : null}
+      {description ? <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p> : null}
     </div>
   );
 }
@@ -1471,6 +1513,8 @@ function ProviderGroupEditor({
         {providerKeys.map((providerKey) => {
           const endpoint = group.providers[providerKey];
           const profileEntries = Object.entries(endpoint.modelProfiles ?? {});
+          const sameHostPreset = getSameHostProviderPreset(groupKey, providerKey, endpoint);
+          const detectedModels = getDetectedProviderModels(health, providerKey);
           return (
             <div key={providerKey} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -1478,6 +1522,22 @@ function ProviderGroupEditor({
                 {providerKey === group.defaultProvider ? <Badge tone="success">最優先</Badge> : null}
                 {group.fallbackProviders.includes(providerKey) ? <Badge tone="warning">障害時に使用</Badge> : null}
                 {groupKey === "musicGen" ? <Badge tone="accent">{endpoint.adapter ?? "MUSICGEN_WORKER"}</Badge> : null}
+                {sameHostPreset ? (
+                  <Button
+                    type="button"
+                    tone="ghost"
+                    onClick={() => {
+                      onEndpointChange(providerKey, "baseUrl", sameHostPreset.baseUrl);
+                      onEndpointChange(providerKey, "healthPath", sameHostPreset.healthPath);
+                      onEndpointChange(providerKey, "adapter", sameHostPreset.adapter);
+                      if (!endpoint.defaultModelProfileId && sameHostPreset.defaultModelProfileId) {
+                        onEndpointChange(providerKey, "defaultModelProfileId", sameHostPreset.defaultModelProfileId);
+                      }
+                    }}
+                  >
+                    同一サーバーの既定値を入力
+                  </Button>
+                ) : null}
               </div>
               <div className="mt-3 grid gap-4 md:grid-cols-2">
                 <TextField
@@ -1506,6 +1566,30 @@ function ProviderGroupEditor({
                   placeholder="MUSIC_GEN, ACE_STEP, JAPANESE_LYRICS"
                   onChange={(value) => onEndpointChange(providerKey, "capabilities", splitCsv(value))}
                 />
+                {groupKey === "llm" ? (
+                  <>
+                    <SelectField
+                      id={`${groupKey}-${providerKey}-adapter`}
+                      label="LLM 接続方式"
+                      value={endpoint.adapter ?? inferLlmAdapter(providerKey, endpoint)}
+                      options={LLM_PROVIDER_ADAPTER_OPTIONS}
+                      onChange={(value) => onEndpointChange(providerKey, "adapter", value)}
+                    />
+                    <TextField
+                      id={`${groupKey}-${providerKey}-defaultModel`}
+                      label="台本生成に使うモデル名"
+                      value={endpoint.defaultModelProfileId ?? ""}
+                      placeholder="qwen3:8b"
+                      suggestions={detectedModels}
+                      description={
+                        detectedModels.length > 0
+                          ? "接続確認で検出したモデルから選択するか、Ollama に登録済みのモデル名を入力します。"
+                          : "Ollama の `ollama list` に表示されるモデル名を指定します。接続確認後は検出候補から選べます。"
+                      }
+                      onChange={(value) => onEndpointChange(providerKey, "defaultModelProfileId", value.trim() ? value : null)}
+                    />
+                  </>
+                ) : null}
                 {groupKey === "musicGen" ? (
                   <>
                     <SelectField
@@ -1584,6 +1668,7 @@ function ConnectionResultCard({ label, health }: { label: string; health: Provid
         <Badge tone={health.status === "UP" ? "success" : health.status === "DEGRADED" ? "warning" : "danger"}>{health.status}</Badge>
       </div>
       <div className="mt-2 text-sm leading-6 text-slate-600">{formatSafeDisplayText(health.message)}</div>
+      {health.baseUrl ? <div className="mt-1 break-all text-xs text-slate-500">接続先: {health.baseUrl}</div> : null}
       <div className="mt-3 grid gap-3 text-sm text-slate-500 md:grid-cols-2">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Provider</div>
@@ -1661,29 +1746,32 @@ function createDraft(settings: SettingsResponse): SettingsUpdateRequest {
 
 function cloneProviders(providers: ProviderCatalog): ProviderCatalog {
   return {
-    llm: cloneProviderGroup(providers.llm),
-    tts: cloneProviderGroup(providers.tts),
-    musicGen: cloneProviderGroup(providers.musicGen),
+    llm: cloneProviderGroup("llm", providers.llm),
+    tts: cloneProviderGroup("tts", providers.tts),
+    musicGen: cloneProviderGroup("musicGen", providers.musicGen),
   };
 }
 
-function cloneProviderGroup(group: ProviderGroup): ProviderGroup {
+function cloneProviderGroup(groupKey: keyof ProviderCatalog, group: ProviderGroup): ProviderGroup {
   return {
     defaultProvider: group.defaultProvider,
     fallbackProviders: [...group.fallbackProviders],
     providers: Object.fromEntries(
-      Object.entries(group.providers).map(([providerKey, endpoint]) => [providerKey, cloneProviderEndpoint(endpoint)]),
+      Object.entries(group.providers).map(([providerKey, endpoint]) => [
+        providerKey,
+        cloneProviderEndpoint(groupKey, providerKey, endpoint),
+      ]),
     ),
   };
 }
 
-function cloneProviderEndpoint(endpoint: ProviderEndpoint): ProviderEndpoint {
+function cloneProviderEndpoint(groupKey: keyof ProviderCatalog, providerKey: string, endpoint: ProviderEndpoint): ProviderEndpoint {
   return {
     baseUrl: endpoint.baseUrl,
     healthPath: endpoint.healthPath,
     timeoutMs: endpoint.timeoutMs,
     capabilities: [...endpoint.capabilities],
-    adapter: endpoint.adapter,
+    adapter: groupKey === "llm" ? (endpoint.adapter ?? inferLlmAdapter(providerKey, endpoint)) : endpoint.adapter,
     apiKeyRef: endpoint.apiKeyRef ?? null,
     defaultModelProfileId: endpoint.defaultModelProfileId ?? null,
     modelProfiles: Object.fromEntries(
@@ -3327,6 +3415,119 @@ function getProgramTemplateSaveErrorMessage(error: unknown, mode: "create" | "up
     }
   }
   return error instanceof Error ? formatSafeDisplayText(error.message) : null;
+}
+
+function getSettingsSaveErrorMessage(error: Error, page: SettingsPage) {
+  if (!(error instanceof ApiRequestError)) {
+    return formatSafeDisplayText(error.message);
+  }
+  if (error.status === 409) {
+    return "別の操作で設定が更新されました。画面を再読み込みし、最新の内容を確認してからもう一度保存してください。";
+  }
+  if (page !== "providers") {
+    return formatSafeDisplayText(error.message);
+  }
+  const field = error.field ?? "";
+  const target = describeProviderField(field);
+  if (field.endsWith(".baseUrl")) {
+    return `${target}の接続先 URL が正しくありません。例: Ollama は http://127.0.0.1:11434、ACE-Step は http://127.0.0.1:8001 です。`;
+  }
+  if (field.endsWith(".adapter")) {
+    return `${target}の接続方式を選択してください。Ollama は OLLAMA、ACE-Step は ACE_STEP を指定します。`;
+  }
+  if (field.endsWith(".defaultModelProfileId")) {
+    return `${target}で使用するモデルを指定してください。LLM は Ollama のモデル名、ACE-Step は画面に表示された生成プロファイル ID を指定します。`;
+  }
+  if (field.endsWith(".apiKeyRef")) {
+    return `${target}の API キーは秘密値そのものではなく、env:ACESTEP_API_KEY のような参照先を指定してください。`;
+  }
+  return "Provider 設定を保存できませんでした。接続先 URL、接続方式、モデル名、API キーの参照先を確認してください。";
+}
+
+export function validateProviderCatalog(providers: ProviderCatalog) {
+  const errors: string[] = [];
+  for (const groupKey of PROVIDER_GROUPS) {
+    for (const [providerKey, endpoint] of Object.entries(providers[groupKey].providers)) {
+      const target = `${PROVIDER_LABELS[groupKey]}「${providerKey}」`;
+      if (!isValidProviderBaseUrl(endpoint.baseUrl)) {
+        errors.push(`${target}の接続先 URL が正しくありません。`);
+      }
+      if (groupKey === "llm") {
+        if (!LLM_PROVIDER_ADAPTER_OPTIONS.includes(endpoint.adapter as (typeof LLM_PROVIDER_ADAPTER_OPTIONS)[number])) {
+          errors.push(`${target}の LLM 接続方式を選択してください。`);
+        }
+        if (!endpoint.defaultModelProfileId?.trim()) {
+          errors.push(`${target}の台本生成モデル名を指定してください。`);
+        }
+      }
+      if (
+        groupKey === "musicGen"
+        && endpoint.defaultModelProfileId
+        && !Object.prototype.hasOwnProperty.call(endpoint.modelProfiles ?? {}, endpoint.defaultModelProfileId)
+      ) {
+        errors.push(`${target}の既定生成プロファイルは、利用可能な生成プロファイルから選択してください。`);
+      }
+    }
+  }
+  return errors;
+}
+
+function isValidProviderBaseUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) {
+      return false;
+    }
+    return !url.hostname.startsWith(".") && !url.hostname.endsWith(".") && !url.hostname.includes("..");
+  } catch {
+    return false;
+  }
+}
+
+function describeProviderField(field: string) {
+  const match = /^providers\.(llm|tts|musicGen)\.([^.]+)/.exec(field);
+  if (!match) {
+    return "Provider ";
+  }
+  const groupKey = match[1] as keyof ProviderCatalog;
+  return `${PROVIDER_LABELS[groupKey]}「${match[2]}」`;
+}
+
+export function inferLlmAdapter(providerKey: string, endpoint: ProviderEndpoint) {
+  if (endpoint.adapter === "OLLAMA" || endpoint.adapter === "OPENAI_COMPATIBLE") {
+    return endpoint.adapter;
+  }
+  const providerHint = `${providerKey} ${endpoint.baseUrl} ${endpoint.healthPath}`.toLowerCase();
+  return providerHint.includes("ollama") || providerHint.includes("11434") || providerHint.includes("/api/tags")
+    ? "OLLAMA"
+    : "OPENAI_COMPATIBLE";
+}
+
+function getSameHostProviderPreset(groupKey: keyof ProviderCatalog, providerKey: string, endpoint: ProviderEndpoint) {
+  if (groupKey === "llm" && inferLlmAdapter(providerKey, endpoint) === "OLLAMA") {
+    return {
+      baseUrl: "http://127.0.0.1:11434",
+      healthPath: "/api/tags",
+      adapter: "OLLAMA",
+      defaultModelProfileId: "qwen3:8b",
+    };
+  }
+  if (groupKey === "musicGen" && (endpoint.adapter === "ACE_STEP" || providerKey.toLowerCase().includes("ace"))) {
+    return {
+      baseUrl: "http://127.0.0.1:8001",
+      healthPath: "/health",
+      adapter: "ACE_STEP",
+      defaultModelProfileId: "ace-ja-fast",
+    };
+  }
+  return null;
+}
+
+function getDetectedProviderModels(health: ProviderHealthPayload | undefined, providerKey: string) {
+  if (!health || health.providerKey !== providerKey || !health.metadata || !Array.isArray(health.metadata.models)) {
+    return [];
+  }
+  return health.metadata.models.filter((model): model is string => typeof model === "string");
 }
 
 function getApiFieldErrorMessages(error: unknown) {

@@ -89,7 +89,27 @@ type ProviderEndpointValue = string | number | string[] | null;
 const SELECT_CLASS_NAME =
   "field-control min-h-11 w-full rounded-2xl border border-slate-300 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none";
 
-export function SettingsDashboard() {
+export type SettingsPage = "system" | "providers" | "playout" | "stations" | "programming";
+
+const SETTINGS_PAGE_COPY: Record<Exclude<SettingsPage, "stations" | "programming">, { eyebrow: string; title: string; description: string }> = {
+  system: {
+    eyebrow: "System",
+    title: "システム設定",
+    description: "Server の待受先、データ保存先、管理認証、設定ファイルの入出力を管理します。ネットワーク公開範囲と秘密値の参照方法を確認してから保存してください。",
+  },
+  providers: {
+    eyebrow: "AI Providers",
+    title: "AI・音声接続",
+    description: "台本生成、音声合成、音楽生成で使う Provider の接続先、既定 Provider、障害時の切替順を管理します。接続確認は保存済みの内容に対して実行されます。",
+  },
+  playout: {
+    eyebrow: "Playout",
+    title: "再生・生成設定",
+    description: "途切れにくい放送を行うためのキュー先読み、生成量、キャッシュ保持、全局共通の編成既定値を管理します。変更は次の番組から反映されます。",
+  },
+};
+
+export function SettingsDashboard({ page }: { page: SettingsPage }) {
   const queryClient = useQueryClient();
   const hasAdminToken = true;
   const selectedStationId = useUiStore((state) => state.selectedStationId);
@@ -615,8 +635,8 @@ export function SettingsDashboard() {
           <Card>
             <SectionHeader
               eyebrow="Settings"
-              title="Admin token required"
-              description="`/settings` は管理トークン前提の画面です。公開 UI には表示せず、直接アクセスされた場合だけ案内を出します。"
+              title="管理者ログインが必要です"
+              description="設定画面は管理者だけが利用できます。公開画面からは設定内容や管理操作を表示しません。"
             />
             <EmptyState
               title="設定画面は管理トークンが必要です"
@@ -630,22 +650,25 @@ export function SettingsDashboard() {
 
   return (
     <PanelGrid>
-      <PanelColumn className="xl:col-span-7">
+      <PanelColumn className={page === "providers" || page === "programming" ? "xl:col-span-7" : "xl:col-span-12"}>
+        {page === "system" || page === "providers" || page === "playout" ? (
         <Card>
           <SectionHeader
-            eyebrow="Settings"
-            title="Runtime configuration"
-            description="設計書どおりの `/api/settings` 契約に合わせて、runtime 設定を一括編集できる画面です。playout と programming の変更は、実行中 block ではなく次の番組から反映されます。"
+            eyebrow={SETTINGS_PAGE_COPY[page].eyebrow}
+            title={SETTINGS_PAGE_COPY[page].title}
+            description={SETTINGS_PAGE_COPY[page].description}
             action={
               <div className="flex flex-wrap items-center gap-2">
-                <Button tone="secondary" onClick={() => connectionsMutation.mutate()} disabled={connectionsMutation.isPending}>
-                  {connectionsMutation.isPending ? "Testing..." : "Test Connections"}
-                </Button>
+                {page === "providers" ? (
+                  <Button tone="secondary" onClick={() => connectionsMutation.mutate()} disabled={connectionsMutation.isPending}>
+                    {connectionsMutation.isPending ? "接続を確認中..." : "保存済み設定で接続を確認"}
+                  </Button>
+                ) : null}
                 <Button tone="ghost" onClick={resetDraft} disabled={!isDirty || saveMutation.isPending}>
-                  Reset
+                  未保存の変更を破棄
                 </Button>
                 <Button tone="primary" onClick={() => draft && saveMutation.mutate(draft)} disabled={!draft || !isDirty || saveMutation.isPending}>
-                  {saveMutation.isPending ? "Saving..." : "Save Settings"}
+                  {saveMutation.isPending ? "保存中..." : "このカテゴリーの変更を保存"}
                 </Button>
               </div>
             }
@@ -654,16 +677,15 @@ export function SettingsDashboard() {
           {settingsQuery.data && draft ? (
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-4">
-                <Metric label="Version" value={settingsQuery.data.version} />
-                <Metric label="Schema" value={settingsQuery.data.schemaVersion} />
-                <Metric label="Bind" value={`${draft.server.bindHost}:${draft.server.port}`} tone={bindHostWarning ? "warning" : "default"} />
-                <Metric label="Updated" value={formatTimestamp(settingsQuery.data.updatedAt)} />
+                <Metric label="設定バージョン" value={settingsQuery.data.version} />
+                <Metric label="形式バージョン" value={settingsQuery.data.schemaVersion} />
+                <Metric label="待受先" value={`${draft.server.bindHost}:${draft.server.port}`} tone={bindHostWarning ? "warning" : "default"} />
+                <Metric label="最終更新" value={formatTimestamp(settingsQuery.data.updatedAt)} />
               </div>
-              <Metric label="Config Path" value={settingsQuery.data.configPath} />
-
+              <Metric label="設定ファイル" value={settingsQuery.data.configPath} />
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "Unsaved changes" : "Saved state"}</Badge>
-                <Badge tone="accent">Playout / Programming は次の番組から反映</Badge>
+                <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "未保存の変更があります" : "保存済みです"}</Badge>
+                {page === "playout" ? <Badge tone="accent">再生・編成の変更は次の番組から反映</Badge> : null}
               </div>
 
               {saveNotice ? <InlineNotice tone="accent" message={saveNotice} /> : null}
@@ -677,193 +699,200 @@ export function SettingsDashboard() {
                 />
               ) : null}
 
+              {page === "system" ? (
               <SettingsSection
-                title="Server / Paths"
-                description="bind host の既定は `127.0.0.1` です。musicLibrary は dataRoot 配下に置く必要があります。"
+                title="Server と保存先"
+                description="Server を待ち受けるアドレスとポート、生成物とローカル音源を保存する場所を指定します。通常は待受アドレスを 127.0.0.1 のまま使用してください。"
               >
                 <div className="grid gap-4 md:grid-cols-2">
                   <TextField
                     id="bindHost"
-                    label="Bind Host"
+                    label="待受アドレス"
                     value={draft.server.bindHost}
                     onChange={(value) => updateDraft((current) => ({ ...current, server: { ...current.server, bindHost: value } }))}
                   />
                   <NumberField
                     id="serverPort"
-                    label="Port"
+                    label="待受ポート"
                     value={draft.server.port}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, server: { ...current.server, port: value } }))}
                   />
                   <TextField
                     id="dataRoot"
-                    label="Data Root"
+                    label="データ保存先"
                     value={draft.paths.dataRoot}
                     onChange={(value) => updateDraft((current) => ({ ...current, paths: { ...current.paths, dataRoot: value } }))}
                   />
                   <TextField
                     id="musicLibrary"
-                    label="Music Library"
+                    label="ローカル音源フォルダー"
                     value={draft.paths.musicLibrary}
                     onChange={(value) => updateDraft((current) => ({ ...current, paths: { ...current.paths, musicLibrary: value } }))}
                   />
                 </div>
               </SettingsSection>
+              ) : null}
 
+              {page === "playout" ? (
               <SettingsSection
-                title="Playout"
-                description="queue warmup/refill の上限と ahead count を編集します。番組の途中ではなく、次の block から反映される前提です。"
+                title="キューと先読み"
+                description="放送を途切れさせないため、再生可能な項目を何件・何分先まで準備するかを指定します。値を増やすと安定しやすくなりますが、生成処理と保存容量の負荷も増えます。"
               >
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   <NumberField
                     id="targetReadyCount"
-                    label="Target Ready Count"
+                    label="目標の再生準備済み件数"
                     value={draft.playout.targetReadyCount}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, targetReadyCount: value } }))}
                   />
                   <NumberField
                     id="minimumReadyCount"
-                    label="Minimum Ready Count"
+                    label="最低限の再生準備済み件数"
                     value={draft.playout.minimumReadyCount}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, minimumReadyCount: value } }))}
                   />
                   <NumberField
                     id="minReadyDurationMs"
-                    label="Min Ready Duration (ms)"
+                    label="最低限準備する再生時間（ミリ秒）"
                     value={draft.playout.minReadyDurationMs}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, minReadyDurationMs: value } }))}
                   />
                   <NumberField
                     id="maxPreparedDurationMs"
-                    label="Max Prepared Duration (ms)"
+                    label="準備してよい最大時間（ミリ秒）"
                     value={draft.playout.maxPreparedDurationMs}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, maxPreparedDurationMs: value } }))}
                   />
                   <NumberField
                     id="maxPreparedBlocks"
-                    label="Max Prepared Blocks"
+                    label="準備してよい最大番組数"
                     value={draft.playout.maxPreparedBlocks}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, maxPreparedBlocks: value } }))}
                   />
                   <NumberField
                     id="scriptAheadCount"
-                    label="Script Ahead Count"
+                    label="先に生成する台本数"
                     value={draft.playout.scriptAheadCount}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, scriptAheadCount: value } }))}
                   />
                   <NumberField
                     id="ttsAheadCount"
-                    label="TTS Ahead Count"
+                    label="先に生成する音声数"
                     value={draft.playout.ttsAheadCount}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, ttsAheadCount: value } }))}
                   />
                   <NumberField
                     id="musicAheadCount"
-                    label="Music Ahead Count"
+                    label="先に生成する楽曲数"
                     value={draft.playout.musicAheadCount}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, playout: { ...current.playout, musicAheadCount: value } }))}
                   />
                   <CheckboxField
                     id="idlePrefetchEnabled"
-                    label="Idle Prefetch Enabled"
+                    label="停止中も先読みする"
                     checked={draft.playout.idlePrefetchEnabled}
-                    description="待機中にも先読みを許可します。"
+                    description="放送を開始していない時も、次に必要な台本・音声・楽曲を準備します。"
                     onChange={(checked) => updateDraft((current) => ({ ...current, playout: { ...current.playout, idlePrefetchEnabled: checked } }))}
                   />
                 </div>
               </SettingsSection>
+              ) : null}
 
-              <SettingsSection title="Cache" description="script / TTS / music の保持量、日数、再利用範囲をまとめて調整します。">
+              {page === "playout" ? (
+              <SettingsSection title="生成物のキャッシュ" description="生成済みの台本、音声、音楽を保持する上限、保存日数、再利用してよい範囲を指定します。容量を抑える場合は保持上限と保存日数を小さくしてください。">
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   <NumberField
                     id="scriptMaxBytes"
-                    label="Script Max Bytes"
+                    label="台本の最大保存容量（バイト）"
                     value={draft.cache.scriptMaxBytes}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, scriptMaxBytes: value } }))}
                   />
                   <NumberField
                     id="ttsMaxBytes"
-                    label="TTS Max Bytes"
+                    label="音声の最大保存容量（バイト）"
                     value={draft.cache.ttsMaxBytes}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, ttsMaxBytes: value } }))}
                   />
                   <NumberField
                     id="musicMaxBytes"
-                    label="Music Max Bytes"
+                    label="音楽の最大保存容量（バイト）"
                     value={draft.cache.musicMaxBytes}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, musicMaxBytes: value } }))}
                   />
                   <NumberField
                     id="scriptRetentionDays"
-                    label="Script Retention Days"
+                    label="台本の保存日数"
                     value={draft.cache.scriptRetentionDays}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, scriptRetentionDays: value } }))}
                   />
                   <NumberField
                     id="ttsRetentionDays"
-                    label="TTS Retention Days"
+                    label="音声の保存日数"
                     value={draft.cache.ttsRetentionDays}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, ttsRetentionDays: value } }))}
                   />
                   <NumberField
                     id="musicRetentionDays"
-                    label="Music Retention Days"
+                    label="音楽の保存日数"
                     value={draft.cache.musicRetentionDays}
                     min={0}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, musicRetentionDays: value } }))}
                   />
                   <SelectField
                     id="scriptReuseScope"
-                    label="Script Reuse Scope"
+                    label="台本を再利用できる範囲"
                     value={draft.cache.scriptReuseScope}
                     options={REUSE_SCOPE_OPTIONS}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, scriptReuseScope: value } }))}
                   />
                   <SelectField
                     id="ttsReuseScope"
-                    label="TTS Reuse Scope"
+                    label="音声を再利用できる範囲"
                     value={draft.cache.ttsReuseScope}
                     options={REUSE_SCOPE_OPTIONS}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, ttsReuseScope: value } }))}
                   />
                   <SelectField
                     id="musicReuseScope"
-                    label="Music Reuse Scope"
+                    label="音楽を再利用できる範囲"
                     value={draft.cache.musicReuseScope}
                     options={REUSE_SCOPE_OPTIONS}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, musicReuseScope: value } }))}
                   />
                   <NumberField
                     id="cleanupBatchSize"
-                    label="Cleanup Batch Size"
+                    label="1 回に削除する最大件数"
                     value={draft.cache.cleanupBatchSize}
                     min={1}
                     onChange={(value) => updateDraft((current) => ({ ...current, cache: { ...current.cache, cleanupBatchSize: value } }))}
                   />
                 </div>
               </SettingsSection>
+              ) : null}
 
+              {page === "playout" ? (
               <SettingsSection
-                title="Programming"
-                description="planning の既定値と fallback の既定を編集します。station ごとの個別 profile と合わせて使う土台設定です。"
+                title="全局共通の編成既定値"
+                description="局ごとの編成ポリシーが未設定または解決できない場合に使う、計画時間と最終的な代替動作を指定します。通常の局別設定は「番組編成」で行います。"
               >
                 <div className="grid gap-4 md:grid-cols-2">
                   <NumberField
                     id="defaultPlanningHorizonMinutes"
-                    label="Default Planning Horizon (min)"
+                    label="既定の編成計画時間（分）"
                     value={draft.programming.defaultPlanningHorizonMinutes}
                     min={1}
                     onChange={(value) =>
@@ -875,21 +904,23 @@ export function SettingsDashboard() {
                   />
                   <TextField
                     id="seedImportRef"
-                    label="Seed Import Ref"
+                    label="初期編成データの参照先"
                     value={draft.programming.seedImportRef}
                     onChange={(value) => updateDraft((current) => ({ ...current, programming: { ...current.programming, seedImportRef: value } }))}
                   />
                   <CheckboxField
                     id="legacyRatioFallback"
-                    label="Legacy Ratio Fallback"
+                    label="固定比率の最終代替を許可する"
                     checked={draft.programming.legacyRatioFallback}
-                    description="設計上の最終 fallback を許可します。"
+                    description="番組テンプレートを解決できない場合に、固定比率による従来方式で放送を継続します。"
                     onChange={(checked) => updateDraft((current) => ({ ...current, programming: { ...current.programming, legacyRatioFallback: checked } }))}
                   />
                 </div>
               </SettingsSection>
+              ) : null}
 
-              <SettingsSection title="Providers" description="default / fallback の切替と、現在登録されている endpoint / capability を編集します。provider key の追加・削除はまだ対象外です。">
+              {page === "providers" ? (
+              <SettingsSection title="Provider の接続先と切替順" description="台本生成、音声合成、音楽生成ごとに、最初に使う接続先と障害時に試す接続先を指定します。Provider の追加・削除はこの画面では行いません。">
                 <div className="space-y-4">
                   {PROVIDER_GROUPS.map((groupKey) => (
                     <ProviderGroupEditor
@@ -948,12 +979,14 @@ export function SettingsDashboard() {
                   ))}
                 </div>
               </SettingsSection>
+              ) : null}
 
-              <SettingsSection title="Security / Features" description="秘密値そのものではなく参照先を保持します。placeholder 配信の有効化もここで管理します。">
+              {page === "system" ? (
+              <SettingsSection title="管理認証と縮退配信" description="管理 API が参照するトークンの保管場所と、生成物が間に合わない場合に代替音声を配信するかを指定します。秘密値そのものは入力しないでください。">
                 <div className="grid gap-4 md:grid-cols-2">
                   <TextField
                     id="adminTokenRef"
-                    label="Admin Token Ref"
+                    label="管理トークンの参照先"
                     value={draft.security.adminTokenRef ?? ""}
                     placeholder="env:SEEDSHIFT_ADMIN_TOKEN"
                     onChange={(value) =>
@@ -965,9 +998,9 @@ export function SettingsDashboard() {
                   />
                   <CheckboxField
                     id="placeholderEnabled"
-                    label="Streaming Placeholder Enabled"
+                    label="代替音声の配信を許可する"
                     checked={draft.features.streaming.placeholderEnabled}
-                    description="asset が見つからない時に placeholder を返します。"
+                    description="再生する生成物が見つからない場合に、無音停止を避けるための代替音声を返します。"
                     onChange={(checked) =>
                       updateDraft((current) => ({
                         ...current,
@@ -980,25 +1013,27 @@ export function SettingsDashboard() {
                   />
                 </div>
               </SettingsSection>
+              ) : null}
 
+              {page === "system" ? (
               <SettingsSection
-                title="Import / Export"
-                description="Export は保存リクエストと同じ形式の JSON を作成します。Import はすぐ保存せず draft に読み込み、Save Settings で既存の `/api/settings` 検証を通します。"
+                title="設定ファイルの入出力"
+                description="現在の入力内容を JSON ファイルへ書き出したり、JSON ファイルを未保存の入力内容として読み込んだりできます。読み込んだだけでは Server の設定は変わりません。内容を確認してから保存してください。"
               >
                 <div className="space-y-3">
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" tone="ghost" onClick={exportSettings} disabled={!draft}>
-                      Export JSON
+                      JSON を書き出す
                     </Button>
                     <Button type="button" tone="secondary" onClick={() => importInputRef.current?.click()} disabled={!settingsQuery.data}>
-                      Import JSON
+                      JSON を読み込む
                     </Button>
                     <input
                       ref={importInputRef}
                       type="file"
                       accept="application/json,.json"
                       className="hidden"
-                      aria-label="Import settings JSON"
+                    aria-label="設定 JSON を読み込む"
                       onChange={(event) => {
                         void importSettings(event.currentTarget.files?.[0]);
                         event.currentTarget.value = "";
@@ -1007,10 +1042,11 @@ export function SettingsDashboard() {
                   </div>
                   <InlineNotice
                     tone="warning"
-                    message="Import JSON 内の `updatedAt` や `configPath` は無視されます。`apiKeyRef` と `adminTokenRef` は `env:` または `file:` 参照だけ受け付けます。"
+                    message="JSON 内の更新日時と設定ファイルの場所は読み込みません。API キーと管理トークンには、env: で始まる環境変数参照または file: で始まるファイル参照だけを指定できます。"
                   />
                 </div>
               </SettingsSection>
+              ) : null}
             </div>
           ) : (
             <EmptyState
@@ -1019,8 +1055,11 @@ export function SettingsDashboard() {
             />
           )}
         </Card>
+        ) : null}
 
+        {page === "stations" || page === "programming" ? (
         <StationOverviewCard
+          mode={page === "stations" ? "station" : "programming"}
           stations={stationsQuery.data ?? []}
           isCreatingStation={stationEditorMode === "create"}
           selectedStationId={selectedStationId}
@@ -1087,7 +1126,9 @@ export function SettingsDashboard() {
             }
           }}
         />
+        ) : null}
 
+        {page === "programming" ? (
         <ProgramTemplateCard
           stations={stationsQuery.data ?? []}
           templates={templatesQuery.data ?? []}
@@ -1138,22 +1179,25 @@ export function SettingsDashboard() {
             }
           }}
         />
+        ) : null}
       </PanelColumn>
 
+      {page === "providers" || page === "programming" ? (
       <PanelColumn className="xl:col-span-5">
+        {page === "providers" ? (
         <Card>
           <SectionHeader
-            eyebrow="Health"
-            title="Provider connection test"
-            description="`/api/settings/test-connections` は保存済み設定に対して実行されます。未保存変更がある場合は、先に保存してから確認してください。"
+            eyebrow="Connection Test"
+            title="接続確認の結果"
+            description="接続確認は保存済みの設定を使います。入力中の変更がある場合は、先に左側の保存ボタンで保存してください。"
           />
           <div className="space-y-3">
-            <Metric label="Checked At" value={connectionsMutation.data?.checkedAt ?? "未実行"} tone={connectionsMutation.data ? "success" : "default"} />
+            <Metric label="確認日時" value={connectionsMutation.data?.checkedAt ?? "未実行"} tone={connectionsMutation.data ? "success" : "default"} />
             {connectionsMutation.data ? (
               <ConnectionResults response={connectionsMutation.data} />
             ) : (
               <EmptyState
-                title="接続テストはまだです"
+                title="接続確認はまだ実行されていません"
                 description={
                   connectionsMutation.error instanceof Error
                     ? formatSafeDisplayText(connectionsMutation.error.message)
@@ -1163,7 +1207,9 @@ export function SettingsDashboard() {
             )}
           </div>
         </Card>
+        ) : null}
 
+        {page === "programming" ? (
         <ProgrammingPreviewCard
           stations={stationsQuery.data ?? []}
           selectedStationId={selectedStationId}
@@ -1177,7 +1223,9 @@ export function SettingsDashboard() {
           onPreviewDraftChange={setPreviewDraft}
           onPreview={() => previewMutation.mutate()}
         />
+        ) : null}
       </PanelColumn>
+      ) : null}
     </PanelGrid>
   );
 }
@@ -1348,7 +1396,7 @@ function SegmentCheckboxes({
   selected: readonly string[];
   onChange: (value: (typeof SEGMENT_TYPE_OPTIONS)[number], checked: boolean) => void;
 }) {
-  return <CheckboxGroup title="Eligible Segments" idPrefix={idPrefix} options={SEGMENT_TYPE_OPTIONS} selected={selected} onChange={onChange} />;
+  return <CheckboxGroup title="この構成枠で使用できるセグメント" idPrefix={idPrefix} options={SEGMENT_TYPE_OPTIONS} selected={selected} onChange={onChange} />;
 }
 
 function ProviderGroupEditor({
@@ -1378,7 +1426,7 @@ function ProviderGroupEditor({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <Label htmlFor={`${groupKey}-default`}>Default Provider</Label>
+          <Label htmlFor={`${groupKey}-default`}>最初に使用する Provider</Label>
           <select
             id={`${groupKey}-default`}
             className={SELECT_CLASS_NAME}
@@ -1394,7 +1442,7 @@ function ProviderGroupEditor({
         </div>
 
         <div>
-          <Label>Fallback Providers</Label>
+          <Label>障害時に切り替える Provider</Label>
           <div className="space-y-2">
             {providerKeys.filter((providerKey) => providerKey !== group.defaultProvider).length > 0 ? (
               providerKeys
@@ -1412,7 +1460,7 @@ function ProviderGroupEditor({
                 ))
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 px-4 py-3 text-sm text-slate-500">
-                追加の fallback provider はまだありません。
+                切替候補にできる別の Provider は登録されていません。
               </div>
             )}
           </div>
@@ -1427,33 +1475,33 @@ function ProviderGroupEditor({
             <div key={providerKey} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="font-semibold text-slate-950">{providerKey}</div>
-                {providerKey === group.defaultProvider ? <Badge tone="success">default</Badge> : null}
-                {group.fallbackProviders.includes(providerKey) ? <Badge tone="warning">fallback</Badge> : null}
+                {providerKey === group.defaultProvider ? <Badge tone="success">最優先</Badge> : null}
+                {group.fallbackProviders.includes(providerKey) ? <Badge tone="warning">障害時に使用</Badge> : null}
                 {groupKey === "musicGen" ? <Badge tone="accent">{endpoint.adapter ?? "MUSICGEN_WORKER"}</Badge> : null}
               </div>
               <div className="mt-3 grid gap-4 md:grid-cols-2">
                 <TextField
                   id={`${groupKey}-${providerKey}-baseUrl`}
-                  label="Base URL"
+                  label="接続先 URL"
                   value={endpoint.baseUrl}
                   onChange={(value) => onEndpointChange(providerKey, "baseUrl", value)}
                 />
                 <TextField
                   id={`${groupKey}-${providerKey}-healthPath`}
-                  label="Health Path"
+                  label="死活確認パス"
                   value={endpoint.healthPath}
                   onChange={(value) => onEndpointChange(providerKey, "healthPath", value)}
                 />
                 <NumberField
                   id={`${groupKey}-${providerKey}-timeoutMs`}
-                  label="Timeout (ms)"
+                  label="タイムアウト（ミリ秒）"
                   value={endpoint.timeoutMs}
                   min={100}
                   onChange={(value) => onEndpointChange(providerKey, "timeoutMs", value)}
                 />
                 <TextField
                   id={`${groupKey}-${providerKey}-capabilities`}
-                  label="Capabilities"
+                  label="利用できる機能"
                   value={endpoint.capabilities.join(", ")}
                   placeholder="MUSIC_GEN, ACE_STEP, JAPANESE_LYRICS"
                   onChange={(value) => onEndpointChange(providerKey, "capabilities", splitCsv(value))}
@@ -1462,27 +1510,27 @@ function ProviderGroupEditor({
                   <>
                     <SelectField
                       id={`${groupKey}-${providerKey}-adapter`}
-                      label="Adapter"
+                      label="接続方式"
                       value={endpoint.adapter ?? "MUSICGEN_WORKER"}
                       options={PROVIDER_ADAPTER_OPTIONS}
                       onChange={(value) => onEndpointChange(providerKey, "adapter", value)}
                     />
                     <TextField
                       id={`${groupKey}-${providerKey}-apiKeyRef`}
-                      label="API Key Ref"
+                      label="API キーの参照先"
                       value={endpoint.apiKeyRef ?? ""}
                       placeholder="env:ACESTEP_API_KEY"
                       onChange={(value) => onEndpointChange(providerKey, "apiKeyRef", value.trim() ? value : null)}
                     />
                     <TextField
                       id={`${groupKey}-${providerKey}-defaultProfile`}
-                      label="Default Profile"
+                      label="既定の生成プロファイル"
                       value={endpoint.defaultModelProfileId ?? ""}
                       placeholder="ace-ja-fast"
                       onChange={(value) => onEndpointChange(providerKey, "defaultModelProfileId", value.trim() ? value : null)}
                     />
                     <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-sm leading-6 text-slate-600 md:col-span-2">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Model Profiles</div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">利用可能な生成プロファイル</div>
                       {profileEntries.length > 0 ? (
                         <div className="grid gap-2 lg:grid-cols-2">
                           {profileEntries.map(([profileId, profile]) => (
@@ -1502,7 +1550,7 @@ function ProviderGroupEditor({
                           ))}
                         </div>
                       ) : (
-                        <div>profile metadata は保存済み設定にありません。</div>
+                        <div>保存済み設定に生成プロファイル情報がありません。</div>
                       )}
                     </div>
                   </>
@@ -1785,6 +1833,7 @@ type PreviewDraft = {
 };
 
 function StationOverviewCard({
+  mode,
   stations,
   isCreatingStation,
   selectedStationId,
@@ -1812,6 +1861,7 @@ function StationOverviewCard({
   onResetProgramming,
   onSaveProgramming,
 }: {
+  mode: "station" | "programming";
   stations: StationSummary[];
   isCreatingStation: boolean;
   selectedStationId: string | null;
@@ -1844,35 +1894,41 @@ function StationOverviewCard({
   return (
     <Card className="mt-4">
       <SectionHeader
-        eyebrow="Stations"
-        title="Station overview"
-        description="局情報と station ごとの編成 profile を settings 画面から参照します。"
+        eyebrow={mode === "station" ? "Stations" : "Station Policy"}
+        title={mode === "station" ? "局の管理" : "局ごとの番組編成ポリシー"}
+        description={
+          mode === "station"
+            ? "放送局の基本情報を管理します。局名、周波数、番組で使う人格と音声、有効状態を確認して保存してください。"
+            : "対象の局を選び、その局で使う番組テンプレート、先行生成、再放送、構成比率、時間帯ルールを管理します。"
+        }
         action={
+          mode === "station" ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" tone="secondary" onClick={onStartCreateStation}>
-              New Station
+              新しい局を作成
             </Button>
             <Button type="button" tone="ghost" onClick={onDuplicateStation} disabled={!station}>
-              Duplicate Current
+              選択中の局を複製
             </Button>
             {isCreatingStation ? (
               <Button type="button" tone="ghost" onClick={onCancelCreateStation}>
-                Close Draft
+                作成を中止
               </Button>
             ) : null}
           </div>
+          ) : null
         }
       />
       <div className="space-y-4">
         <div>
-          <Label htmlFor="settings-station-select">Station</Label>
+          <Label htmlFor="settings-station-select">対象の局</Label>
           <select
             id="settings-station-select"
             className={SELECT_CLASS_NAME}
             value={isCreatingStation ? "" : (selectedStationId ?? "")}
             onChange={(event) => onSelectStation(event.currentTarget.value || null)}
           >
-            {isCreatingStation ? <option value="">Draft new station</option> : null}
+            {isCreatingStation ? <option value="">新しい局の入力内容</option> : null}
             {stations.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name} ({entry.frequencyMHz} MHz)
@@ -1882,7 +1938,7 @@ function StationOverviewCard({
         </div>
 
         {!stations.length && !isCreatingStation ? (
-          <EmptyState title="局がまだありません" description="`New Station` から最初の局を作成できます。" />
+          <EmptyState title="局がまだありません" description="「新しい局を作成」から最初の局を登録できます。" />
         ) : stationMetrics ? (
           <div className="space-y-4">
             {isCreatingStation ? (
@@ -1892,11 +1948,13 @@ function StationOverviewCard({
               />
             ) : null}
             <div className="space-y-4">
+              {mode === "station" ? (
+              <>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Genre" value={stationMetrics.genre || "-"} />
-                <Metric label="Frequency" value={`${stationMetrics.frequencyMHz} MHz`} />
-                <Metric label="Persona" value={stationMetrics.languagePersonaId || "-"} />
-                <Metric label="Voice" value={stationMetrics.defaultVoiceProfileId || "-"} />
+                <Metric label="ジャンル" value={stationMetrics.genre || "-"} />
+                <Metric label="周波数" value={`${stationMetrics.frequencyMHz} MHz`} />
+                <Metric label="人格" value={stationMetrics.languagePersonaId || "-"} />
+                <Metric label="音声" value={stationMetrics.defaultVoiceProfileId || "-"} />
               </div>
               <StationBasicInfoEditor
                 draft={stationDraft}
@@ -1909,62 +1967,22 @@ function StationOverviewCard({
                 onReset={onResetStation}
                 onSave={onSaveStation}
               />
-              {isCreatingStation ? (
+              </>
+              ) : null}
+              {mode === "programming" && isCreatingStation ? (
                 <EmptyState
-                  title="Programming policy は作成後に設定します"
-                  description="station 作成/複製では局基本情報だけを保存します。defaultTemplateId や rules は保存後に station ごとの policy editor で調整してください。"
+                  title="局を保存してから番組編成を設定します"
+                  description="局の基本情報を「局」カテゴリーで保存した後、この画面で番組編成ポリシーを指定してください。"
                 />
-              ) : station ? (
+              ) : mode === "programming" && station ? (
                 <>
                   <KeyValueGrid
-                    title="Programming policy"
+                    title="現在の編成ポリシー"
                     entries={[
-                      ["Enabled", programming?.enabled ? "true" : "false"],
-                      ["Default Template", programming?.defaultTemplateId ?? station.programming.defaultTemplateId ?? "-"],
-                      ["Fallback", programming?.fallbackStrategy ?? station.programming.fallbackStrategy],
-                      ["Planning Horizon", `${programming?.planningHorizonMinutes ?? station.programming.planningHorizonMinutes} min`],
-                    ]}
-                  />
-                  <KeyValueGrid
-                    title="Pre-generation"
-                    entries={[
-                      ["Mode", programming?.preGeneration.mode ?? station.programming.preGeneration.mode],
-                      ["Max Prepared Minutes", programming?.preGeneration.maxPreparedMinutes ?? station.programming.preGeneration.maxPreparedMinutes],
-                      ["Max Prepared Blocks", programming?.preGeneration.maxPreparedBlocks ?? station.programming.preGeneration.maxPreparedBlocks],
-                      ["Prefer Cache Reuse", String(programming?.preGeneration.preferCacheReuse ?? station.programming.preGeneration.preferCacheReuse)],
-                    ]}
-                  />
-                  <KeyValueGrid
-                    title="Replay"
-                    entries={[
-                      ["Intensity", programming?.replay.intensity ?? station.programming.replay.intensity],
-                      [
-                        "Eligible Segments",
-                        formatSegmentTypes(programming?.replay.eligibleSegmentTypes ?? station.programming.replay.eligibleSegmentTypes),
-                      ],
-                      ["Cooldown", `${programming?.replay.cooldownHours ?? station.programming.replay.cooldownHours} h`],
-                      ["Max Share", `${programming?.replay.maxReplaySharePercent ?? station.programming.replay.maxReplaySharePercent}%`],
-                    ]}
-                  />
-                  <KeyValueGrid
-                    title="Composition"
-                    entries={[
-                      [
-                        "Target Shares",
-                        formatShareMap(programming?.composition.targetSegmentShares ?? station.programming.composition.targetSegmentShares),
-                      ],
-                      [
-                        "Max Consecutive Talk",
-                        programming?.composition.maxConsecutiveTalkSegments ?? station.programming.composition.maxConsecutiveTalkSegments,
-                      ],
-                      [
-                        "Music Break Interval",
-                        `${programming?.composition.musicBreakIntervalMinutes ?? station.programming.composition.musicBreakIntervalMinutes} min`,
-                      ],
-                      [
-                        "Letter Boost Threshold",
-                        programming?.composition.letterPriorityBoostThreshold ?? station.programming.composition.letterPriorityBoostThreshold,
-                      ],
+                      ["自動編成", programming?.enabled ? "有効" : "無効"],
+                      ["既定テンプレート", programming?.defaultTemplateId ?? station.programming.defaultTemplateId ?? "未設定"],
+                      ["代替方式", programming?.fallbackStrategy ?? station.programming.fallbackStrategy],
+                      ["計画時間", `${programming?.planningHorizonMinutes ?? station.programming.planningHorizonMinutes} 分`],
                     ]}
                   />
                   <StationProgrammingPolicyEditor
@@ -1980,32 +1998,42 @@ function StationOverviewCard({
                     onSave={onSaveProgramming}
                   />
                   <div className="space-y-2">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Rules</div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">保存済みの時間帯ルール</div>
                     {programming?.rules.length ? (
                       programming.rules.map((rule) => (
                         <div key={rule.id} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge tone="accent">Priority {rule.priority}</Badge>
+                            <Badge tone="accent">優先度 {rule.priority}</Badge>
                             <Badge tone="default">{rule.templateId}</Badge>
                           </div>
                           <div className="mt-2 text-sm text-slate-600">
-                            {rule.days.join(", ")} / {rule.startTime}-{rule.endTime} / minimum letters {rule.minimumPendingLetters}
+                            {rule.days.join(", ")} / {rule.startTime}-{rule.endTime} / 最低レター数 {rule.minimumPendingLetters}
                           </div>
                           <div className="mt-1 text-xs text-slate-500">
-                            required states: {rule.requiredProviderStates.length ? rule.requiredProviderStates.join(", ") : "none"}
+                            必要な Provider 状態: {rule.requiredProviderStates.length ? rule.requiredProviderStates.join(", ") : "指定なし"}
                           </div>
                         </div>
                       ))
                     ) : (
-                      <EmptyState title="Programming rule はまだありません" description="自動番組生成ルールが未設定の場合は fallback で運用されます。" />
+                      <EmptyState title="時間帯ルールはまだありません" description="ルールがない場合は、既定テンプレートと最終的な代替設定を使って放送を継続します。" />
                     )}
                   </div>
                 </>
               ) : null}
+              {mode === "station" ? (
+              <>
+              {isCreatingStation ? (
+                <EmptyState
+                  title="番組編成は局を保存した後に設定します"
+                  description="局の作成と複製では基本情報だけを保存します。保存後に「番組編成」カテゴリーで既定テンプレートと時間帯ルールを指定してください。"
+                />
+              ) : null}
+              </>
+              ) : null}
             </div>
           </div>
         ) : (
-          <EmptyState title="局詳細を取得できません" description="station を選択するか、`New Station` から新規局ドラフトを作成してください。" />
+          <EmptyState title="局詳細を取得できません" description="対象の局を選択するか、「新しい局を作成」から局の入力を始めてください。" />
         )}
       </div>
     </Card>
@@ -2034,7 +2062,7 @@ function StationBasicInfoEditor({
   onSave: () => void;
 }) {
   if (!draft) {
-    return <EmptyState title="局基本情報を読み込み中です" description="station detail を取得すると編集できます。" />;
+    return <EmptyState title="局基本情報を読み込み中です" description="局の詳細を取得すると編集できます。" />;
   }
 
   const validationMessages = [
@@ -2052,25 +2080,25 @@ function StationBasicInfoEditor({
 
   return (
     <SettingsSection
-      title="Station Basic Info"
+      title="局の基本情報"
       description={
         mode === "create"
-          ? "局ID、局名、周波数、ジャンル、人格ID、音声ID、有効状態を指定して新しい局を作成します。programming policy は作成後に設定します。"
-          : "局名、周波数、ジャンル、人格ID、音声ID、有効状態を編集します。番組編成の有効化と既定テンプレートは下の policy editor で管理します。"
+          ? "局 ID、局名、周波数、ジャンル、番組で使う人格と音声、有効状態を指定します。番組編成は局を作成した後に設定します。"
+          : "局名、周波数、ジャンル、番組で使う人格と音声、有効状態を編集します。番組編成の有効化と既定テンプレートは「番組編成」で管理します。"
       }
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "Unsaved station changes" : "Station saved"}</Badge>
-          <Badge tone="accent">{mode === "create" ? "new station draft" : `station version ${draft.version}`}</Badge>
+          <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "局に未保存の変更があります" : "局は保存済みです"}</Badge>
+          <Badge tone="accent">{mode === "create" ? "新しい局" : `局バージョン ${draft.version}`}</Badge>
           {mode === "create" ? (
-            <Badge tone="warning">programming policy は保存後に設定</Badge>
+            <Badge tone="warning">番組編成は保存後に設定</Badge>
           ) : null}
           <Button type="button" tone="ghost" onClick={onReset} disabled={!isDirty || isSaving}>
-            {mode === "create" ? "Reset Draft" : "Reset Station"}
+            {mode === "create" ? "入力を初期状態へ戻す" : "未保存の変更を破棄"}
           </Button>
           <Button type="button" tone="primary" onClick={onSave} disabled={!isDirty || isSaving || validationMessages.length > 0}>
-            {isSaving ? (mode === "create" ? "Creating station..." : "Saving station...") : mode === "create" ? "Create Station" : "Save Station"}
+            {isSaving ? (mode === "create" ? "局を作成中..." : "局を保存中...") : mode === "create" ? "局を作成" : "局を保存"}
           </Button>
         </div>
 
@@ -2082,7 +2110,7 @@ function StationBasicInfoEditor({
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <div>
-            <Label htmlFor="station-id">Station ID</Label>
+            <Label htmlFor="station-id">局 ID</Label>
             <Input
               id="station-id"
               value={draft.id}
@@ -2096,13 +2124,13 @@ function StationBasicInfoEditor({
           </div>
           <TextField
             id="station-name"
-            label="Station Name"
+            label="局名"
             value={draft.name}
             onChange={(value) => updateDraft((current) => ({ ...current, name: value }))}
           />
           <NumberField
             id="station-frequency"
-            label="Frequency (MHz)"
+            label="周波数（MHz）"
             value={draft.frequencyMHz}
             min={0.1}
             step={0.1}
@@ -2110,25 +2138,25 @@ function StationBasicInfoEditor({
           />
           <TextField
             id="station-genre"
-            label="Genre"
+            label="ジャンル"
             value={draft.genre}
             onChange={(value) => updateDraft((current) => ({ ...current, genre: value }))}
           />
           <TextField
             id="station-persona"
-            label="Persona ID"
+            label="人格 ID"
             value={draft.languagePersonaId}
             onChange={(value) => updateDraft((current) => ({ ...current, languagePersonaId: value }))}
           />
           <TextField
             id="station-voice"
-            label="Voice Profile ID"
+            label="音声プロファイル ID"
             value={draft.defaultVoiceProfileId}
             onChange={(value) => updateDraft((current) => ({ ...current, defaultVoiceProfileId: value }))}
           />
           <CheckboxField
             id="station-active"
-            label="Station Active"
+            label="この局を利用可能にする"
             checked={draft.isActive}
             description="無効にすると局一覧では非公開扱いにできます。削除は行いません。"
             onChange={(checked) => updateDraft((current) => ({ ...current, isActive: checked }))}
@@ -2171,7 +2199,7 @@ function StationProgrammingPolicyEditor({
   onSave: () => void;
 }) {
   if (!draft) {
-    return <EmptyState title="番組編成ポリシーを読み込み中です" description="保存済み policy を取得すると編集できます。" />;
+    return <EmptyState title="番組編成ポリシーを読み込み中です" description="保存済みの編成設定を取得すると編集できます。" />;
   }
 
   const usableTemplates = templates.filter((template) => isTemplateUsableForStation(template, stationId));
@@ -2231,18 +2259,18 @@ function StationProgrammingPolicyEditor({
 
   return (
     <SettingsSection
-      title="Station Programming Editor"
-      description="局ごとの番組編成 policy を編集します。ProgramTemplate 自体の版は変えず、保存後は次の番組 block から反映されます。"
+      title="局別の番組編成"
+      description="この局の既定テンプレート、先行生成、再放送、構成比率、時間帯ルールを編集します。保存した変更は、放送中の番組ではなく次の番組から反映されます。"
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "Unsaved programming changes" : "Programming saved"}</Badge>
-          <Badge tone="accent">current version {draft.version}</Badge>
+          <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "編成に未保存の変更があります" : "編成は保存済みです"}</Badge>
+          <Badge tone="accent">現在のバージョン {draft.version}</Badge>
           <Button type="button" tone="ghost" onClick={onReset} disabled={!isDirty || isSaving}>
-            Reset Policy
+            未保存の変更を破棄
           </Button>
           <Button type="button" tone="primary" onClick={onSave} disabled={!isDirty || isSaving || validationMessages.length > 0}>
-            {isSaving ? "Saving policy..." : "Save Policy"}
+            {isSaving ? "編成を保存中..." : "番組編成を保存"}
           </Button>
         </div>
 
@@ -2255,9 +2283,9 @@ function StationProgrammingPolicyEditor({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <CheckboxField
             id="programming-enabled"
-            label="Programming Enabled"
+            label="この局で自動編成を使用する"
             checked={draft.enabled}
-            description="無効にすると legacy fallback 中心で運用します。"
+            description="無効にした場合は、局別テンプレートではなく固定比率の代替方式を中心に放送します。"
             onChange={(checked) => updateDraft((current) => ({ ...current, enabled: checked }))}
           />
           <div>
@@ -2281,44 +2309,44 @@ function StationProgrammingPolicyEditor({
           </div>
           <SelectField
             id="programming-fallback-strategy"
-            label="Fallback Strategy"
+            label="最終的な代替方式"
             value={draft.fallbackStrategy}
             options={FALLBACK_STRATEGY_OPTIONS}
             onChange={(value) => updateDraft((current) => ({ ...current, fallbackStrategy: value }))}
           />
           <NumberField
             id="programming-horizon"
-            label="Planning Horizon (min)"
+            label="編成を計画する時間（分）"
             value={draft.planningHorizonMinutes}
             min={1}
             onChange={(value) => updateDraft((current) => ({ ...current, planningHorizonMinutes: value }))}
           />
           <SelectField
             id="pre-generation-mode"
-            label="Pre-generation Mode"
+            label="先行生成モード"
             value={draft.preGeneration.mode}
             options={PRE_GENERATION_MODE_OPTIONS}
             onChange={(value) => updateDraft((current) => ({ ...current, preGeneration: { ...current.preGeneration, mode: value } }))}
           />
           <NumberField
             id="pre-generation-max-minutes"
-            label="Max Prepared Minutes"
+            label="先に準備する最大時間（分）"
             value={draft.preGeneration.maxPreparedMinutes}
             min={0}
             onChange={(value) => updateDraft((current) => ({ ...current, preGeneration: { ...current.preGeneration, maxPreparedMinutes: value } }))}
           />
           <NumberField
             id="pre-generation-max-blocks"
-            label="Max Prepared Blocks"
+            label="先に準備する最大番組数"
             value={draft.preGeneration.maxPreparedBlocks}
             min={0}
             onChange={(value) => updateDraft((current) => ({ ...current, preGeneration: { ...current.preGeneration, maxPreparedBlocks: value } }))}
           />
           <CheckboxField
             id="pre-generation-cache-reuse"
-            label="Prefer Cache Reuse"
+            label="生成済みキャッシュを優先する"
             checked={draft.preGeneration.preferCacheReuse}
-            description="先行生成時に cache を優先します。"
+            description="同じ条件で利用できる生成物がある場合は、新しく生成せず再利用します。"
             onChange={(checked) => updateDraft((current) => ({ ...current, preGeneration: { ...current.preGeneration, preferCacheReuse: checked } }))}
           />
         </div>
@@ -2332,7 +2360,7 @@ function StationProgrammingPolicyEditor({
             <div className="space-y-4">
               <SelectField
                 id="replay-intensity"
-                label="Intensity"
+                label="再放送の強度"
                 value={draft.replay.intensity}
                 options={REPLAY_INTENSITY_OPTIONS}
                 onChange={(value) => updateDraft((current) => ({ ...current, replay: { ...current.replay, intensity: value } }))}
@@ -2353,28 +2381,28 @@ function StationProgrammingPolicyEditor({
               <div className="grid gap-4 md:grid-cols-2">
                 <NumberField
                   id="replay-min-age"
-                  label="Minimum Asset Age (h)"
+                  label="再放送まで空ける最低時間"
                   value={draft.replay.minimumAssetAgeHours}
                   min={0}
                   onChange={(value) => updateDraft((current) => ({ ...current, replay: { ...current.replay, minimumAssetAgeHours: value } }))}
                 />
                 <NumberField
                   id="replay-cooldown"
-                  label="Cooldown (h)"
+                  label="同じ内容を再利用しない時間"
                   value={draft.replay.cooldownHours}
                   min={0}
                   onChange={(value) => updateDraft((current) => ({ ...current, replay: { ...current.replay, cooldownHours: value } }))}
                 />
                 <NumberField
                   id="replay-max-share"
-                  label="Max Replay Share (%)"
+                  label="番組内の最大再放送比率（%）"
                   value={draft.replay.maxReplaySharePercent}
                   min={0}
                   onChange={(value) => updateDraft((current) => ({ ...current, replay: { ...current.replay, maxReplaySharePercent: value } }))}
                 />
                 <CheckboxField
                   id="replay-exclude-letter"
-                  label="Exclude Letter Segments"
+                  label="レターを再放送しない"
                   checked={draft.replay.excludeLetterSegments}
                   description="レター本文を再放送対象にしません。"
                   onChange={(checked) => updateDraft((current) => ({ ...current, replay: { ...current.replay, excludeLetterSegments: checked } }))}
@@ -2416,7 +2444,7 @@ function StationProgrammingPolicyEditor({
               <div className="grid gap-4 md:grid-cols-2">
                 <NumberField
                   id="composition-max-talk"
-                  label="Max Consecutive Talk"
+                  label="トークの最大連続数"
                   value={draft.composition.maxConsecutiveTalkSegments}
                   min={1}
                   onChange={(value) =>
@@ -2425,7 +2453,7 @@ function StationProgrammingPolicyEditor({
                 />
                 <NumberField
                   id="composition-music-interval"
-                  label="Music Break Interval (min)"
+                  label="音楽を挟む間隔（分）"
                   value={draft.composition.musicBreakIntervalMinutes}
                   min={1}
                   onChange={(value) =>
@@ -2434,7 +2462,7 @@ function StationProgrammingPolicyEditor({
                 />
                 <NumberField
                   id="composition-letter-boost"
-                  label="Letter Boost Threshold"
+                  label="レターを優先する未採用件数"
                   value={draft.composition.letterPriorityBoostThreshold}
                   min={0}
                   onChange={(value) =>
@@ -2443,9 +2471,9 @@ function StationProgrammingPolicyEditor({
                 />
                 <CheckboxField
                   id="composition-retiming"
-                  label="Allow Soft Fallback Retiming"
+                  label="代替時の尺調整を許可する"
                   checked={draft.composition.allowSoftFallbackRetiming}
-                  description="SOFT slot の尺調整を許可します。"
+                  description="SOFT の構成枠を代替する際に、番組全体へ合わせて長さを調整します。"
                   onChange={(checked) =>
                     updateDraft((current) => ({ ...current, composition: { ...current.composition, allowSoftFallbackRetiming: checked } }))
                   }
@@ -2474,7 +2502,7 @@ function StationProgrammingPolicyEditor({
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <NumberField
                     id={`rule-${index}-priority`}
-                    label="Priority"
+                    label="優先度"
                     value={rule.priority}
                     min={0}
                     onChange={(value) => updateRule(index, (current) => ({ ...current, priority: value }))}
@@ -2523,21 +2551,21 @@ function StationProgrammingPolicyEditor({
                   </div>
                   <NumberField
                     id={`rule-${index}-letters`}
-                    label="Minimum Pending Letters"
+                    label="必要な未採用レター数"
                     value={rule.minimumPendingLetters}
                     min={0}
                     onChange={(value) => updateRule(index, (current) => ({ ...current, minimumPendingLetters: value }))}
                   />
                 </div>
                 <CheckboxGroup
-                  title="Days"
+                  title="適用する曜日"
                   idPrefix={`rule-${index}-day`}
                   options={DAY_OPTIONS}
                   selected={rule.days}
                   onChange={(value, checked) => updateRule(index, (current) => ({ ...current, days: toggleStringList(current.days, value, checked) }))}
                 />
                 <CheckboxGroup
-                  title="Required Provider States"
+                  title="必要な Provider 状態"
                   idPrefix={`rule-${index}-provider`}
                   options={REQUIRED_PROVIDER_STATE_OPTIONS}
                   selected={rule.requiredProviderStates}
@@ -2551,7 +2579,7 @@ function StationProgrammingPolicyEditor({
               </div>
             ))
           ) : (
-            <EmptyState title="Rule はまだありません" description="enabled=true で保存する場合は rule を追加してください。" />
+            <EmptyState title="時間帯ルールはまだありません" description="自動編成を有効にする場合は、少なくとも 1 件の時間帯ルールを追加してください。" />
           )}
         </div>
       </div>
@@ -2663,19 +2691,19 @@ function ProgramTemplateCard({
     <Card className="mt-4">
       <SectionHeader
         eyebrow="Templates"
-        title="Program templates"
-        description="ProgramTemplate の作成・複製・編集を行います。Preview は保存済みデータに加えて関連する未保存 draft も評価でき、保存した変更は実行中 block ではなく次の番組から反映されます。"
+        title="番組テンプレート"
+        description="番組の長さ、構成枠、必須条件と代替条件を定義します。保存前の入力内容は右側の編成確認でも評価でき、保存した変更は次の番組から反映されます。"
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" tone="secondary" onClick={onStartCreateTemplate}>
-              New Template
+              新しいテンプレート
             </Button>
             <Button type="button" tone="ghost" onClick={onDuplicateTemplate} disabled={!template}>
-              Duplicate Current
+              選択中のテンプレートを複製
             </Button>
             {isCreatingTemplate ? (
               <Button type="button" tone="ghost" onClick={onCancelCreateTemplate}>
-                Close Draft
+                作成を中止
               </Button>
             ) : null}
           </div>
@@ -2683,14 +2711,14 @@ function ProgramTemplateCard({
       />
       <div className="space-y-4">
         <div>
-          <Label htmlFor="program-template-select">Template</Label>
+          <Label htmlFor="program-template-select">対象のテンプレート</Label>
           <select
             id="program-template-select"
             className={SELECT_CLASS_NAME}
             value={isCreatingTemplate ? "" : (selectedTemplateId ?? "")}
             onChange={(event) => onSelectTemplate(event.currentTarget.value || null)}
           >
-            {isCreatingTemplate ? <option value="">Draft new template</option> : null}
+            {isCreatingTemplate ? <option value="">新しいテンプレートの入力内容</option> : null}
             {templates.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name} ({entry.scope})
@@ -2700,7 +2728,7 @@ function ProgramTemplateCard({
         </div>
 
         {!templates.length && !isCreatingTemplate ? (
-          <EmptyState title="Program Template はまだありません" description="`New Template` から最初の template を作成できます。" />
+          <EmptyState title="番組テンプレートはまだありません" description="「新しいテンプレート」から最初の番組構成を作成できます。" />
         ) : (
           <>
             <div className="grid gap-3">
@@ -2738,31 +2766,31 @@ function ProgramTemplateCard({
                 ) : null}
 
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <Metric label="Scope" value={draft.scope} />
-                  <Metric label="Station" value={draft.scope === "STATION" ? draft.stationId ?? "-" : "GLOBAL"} />
-                  <Metric label="Version" value={isCreatingTemplate ? "new draft" : `v${draft.version}`} tone="accent" />
-                  <Metric label="Slots" value={draft.slots.length} />
+                  <Metric label="適用範囲" value={draft.scope} />
+                  <Metric label="対象局" value={draft.scope === "STATION" ? draft.stationId ?? "-" : "全局共通"} />
+                  <Metric label="バージョン" value={isCreatingTemplate ? "新規" : `v${draft.version}`} tone="accent" />
+                  <Metric label="構成枠の数" value={draft.slots.length} />
                 </div>
 
                 <SettingsSection
-                  title="Template Editor"
-                  description="Template 本体を編集します。scope / station / fallback の整合は保存前に確認し、必要に応じて未保存 draft を含めた Preview で結果を確認できます。"
+                  title="テンプレートの基本情報"
+                  description="テンプレート名、適用範囲、番組の目標時間、利用できない場合の代替先を指定します。保存前に編成確認で結果を確認できます。"
                 >
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "Unsaved template changes" : "Template saved"}</Badge>
-                      <Badge tone="accent">{isCreatingTemplate ? "new template draft" : `template version ${draft.version}`}</Badge>
+                      <Badge tone={isDirty ? "warning" : "success"}>{isDirty ? "テンプレートに未保存の変更があります" : "テンプレートは保存済みです"}</Badge>
+                      <Badge tone="accent">{isCreatingTemplate ? "新しいテンプレート" : `テンプレートバージョン ${draft.version}`}</Badge>
                       <Button type="button" tone="ghost" onClick={onReset} disabled={!isDirty || isSaving}>
-                        {isCreatingTemplate ? "Reset Draft" : "Reset Template"}
+                        未保存の変更を破棄
                       </Button>
                       <Button type="button" tone="primary" onClick={onSave} disabled={!isDirty || isSaving || validationMessages.length > 0}>
                         {isSaving
                           ? isCreatingTemplate
-                            ? "Creating template..."
-                            : "Saving template..."
+                            ? "テンプレートを作成中..."
+                            : "テンプレートを保存中..."
                           : isCreatingTemplate
-                            ? "Create Template"
-                            : "Save Template"}
+                            ? "テンプレートを作成"
+                            : "テンプレートを保存"}
                       </Button>
                     </div>
 
@@ -2776,12 +2804,12 @@ function ProgramTemplateCard({
                     ))}
                     <InlineNotice
                       tone="warning"
-                      message="Template 変更は次の ProgramBlock から反映されます。Programming Preview では、関連する未保存 policy / template draft を保存せずに評価できます。"
+                      message="テンプレートの変更は次の番組から反映されます。右側の編成確認では、未保存の編成ポリシーとテンプレートを保存せずに評価できます。"
                     />
 
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <div>
-                        <Label htmlFor="template-id">Template ID</Label>
+                        <Label htmlFor="template-id">テンプレート ID</Label>
                         <Input
                           id="template-id"
                           value={draft.id}
@@ -2795,13 +2823,13 @@ function ProgramTemplateCard({
                       </div>
                       <TextField
                         id="template-name"
-                        label="Template Name"
+                        label="テンプレート名"
                         value={draft.name}
                         onChange={(value) => updateDraft((current) => ({ ...current, name: value }))}
                       />
                       <SelectField
                         id="template-scope"
-                        label="Scope"
+                        label="適用範囲"
                         value={draft.scope}
                         options={TEMPLATE_SCOPE_OPTIONS}
                         onChange={(value) =>
@@ -2814,7 +2842,7 @@ function ProgramTemplateCard({
                       />
                       {draft.scope === "STATION" ? (
                         <div>
-                          <Label htmlFor="template-station">Station</Label>
+                          <Label htmlFor="template-station">対象局</Label>
                           <select
                             id="template-station"
                             className={SELECT_CLASS_NAME}
@@ -2824,7 +2852,7 @@ function ProgramTemplateCard({
                               updateDraft((current) => ({ ...current, stationId: value }));
                             }}
                           >
-                            <option value="">Select station</option>
+                            <option value="">局を選択してください</option>
                             {stations.map((station) => (
                               <option key={station.id} value={station.id}>
                                 {station.name} ({station.id})
@@ -2833,24 +2861,24 @@ function ProgramTemplateCard({
                           </select>
                         </div>
                       ) : (
-                        <Metric label="Station Scope" value="GLOBAL template" />
+                        <Metric label="対象局" value="全局共通テンプレート" />
                       )}
                       <NumberField
                         id="template-duration"
-                        label="Target Duration (min)"
+                        label="番組の目標時間（分）"
                         value={draft.targetDurationMinutes}
                         min={1}
                         onChange={(value) => updateDraft((current) => ({ ...current, targetDurationMinutes: value }))}
                       />
                       <NumberField
                         id="template-horizon"
-                        label="Planning Horizon (min)"
+                        label="編成を計画する時間（分）"
                         value={draft.planningHorizonMinutes}
                         min={1}
                         onChange={(value) => updateDraft((current) => ({ ...current, planningHorizonMinutes: value }))}
                       />
                       <div>
-                        <Label htmlFor="template-fallback">Fallback Template</Label>
+                        <Label htmlFor="template-fallback">利用できない場合の代替テンプレート</Label>
                         <select
                           id="template-fallback"
                           className={SELECT_CLASS_NAME}
@@ -2860,7 +2888,7 @@ function ProgramTemplateCard({
                             updateDraft((current) => ({ ...current, fallbackTemplateId: value }));
                           }}
                         >
-                          <option value="">No fallback template</option>
+                          <option value="">代替テンプレートを指定しない</option>
                           {fallbackOptions.map((entry) => (
                             <option key={entry.id} value={entry.id}>
                               {entry.name} ({entry.id})
@@ -2870,15 +2898,15 @@ function ProgramTemplateCard({
                       </div>
                       <CheckboxField
                         id="template-active"
-                        label="Template Active"
+                        label="このテンプレートを利用可能にする"
                         checked={draft.isActive}
-                        description="無効にすると template resolver の候補から外します。"
+                        description="無効にすると、新しい番組の編成候補から除外します。放送中の番組は変更しません。"
                         onChange={(checked) => updateDraft((current) => ({ ...current, isActive: checked }))}
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="template-editorial-policy">Editorial Policy (JSON object)</Label>
+                      <Label htmlFor="template-editorial-policy">編集方針（JSON オブジェクト）</Label>
                       <Textarea
                         id="template-editorial-policy"
                         rows={8}
@@ -2893,17 +2921,17 @@ function ProgramTemplateCard({
                 </SettingsSection>
 
                 <SettingsSection
-                  title="Slot Editor"
-                  description="slot の順序がそのまま保存順になります。HARD は強く守る構成、SOFT は fallback と尺調整を許す構成として扱います。"
+                  title="番組内の構成枠"
+                  description="上から順に番組で使用します。HARD は必ず守る構成、SOFT は Provider 状態などに応じて代替や尺調整を許す構成です。"
                 >
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone="accent">slot order = save order</Badge>
-                        <Badge tone="warning">HARD / SOFT は runtime と preview の見え方が完全一致ではありません</Badge>
+                        <Badge tone="accent">表示順で保存</Badge>
+                        <Badge tone="warning">HARD は必須、SOFT は代替可能</Badge>
                       </div>
                       <Button type="button" tone="ghost" onClick={addSlot}>
-                        Add Slot
+                        構成枠を追加
                       </Button>
                     </div>
                     {draft.slots.length ? (
@@ -2911,39 +2939,39 @@ function ProgramTemplateCard({
                         <div key={`${slot.slotId || "slot"}-${index}`} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
                           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge tone="accent">Slot {index + 1}</Badge>
+                              <Badge tone="accent">構成枠 {index + 1}</Badge>
                               <Badge tone="default">{slot.role}</Badge>
                               <Badge tone={slot.constraintMode === "HARD" ? "danger" : "accent"}>{slot.constraintMode}</Badge>
                             </div>
                             <Button type="button" tone="danger" onClick={() => removeSlot(index)}>
-                              Remove
+                              削除
                             </Button>
                           </div>
 
                           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                             <TextField
                               id={`template-slot-id-${index}`}
-                              label="Slot ID"
+                              label="構成枠 ID"
                               value={slot.slotId}
                               onChange={(value) => updateSlot(index, (current) => ({ ...current, slotId: value }))}
                             />
                             <SelectField
                               id={`template-slot-role-${index}`}
-                              label="Role"
+                              label="番組内の役割"
                               value={slot.role}
                               options={SLOT_ROLE_OPTIONS}
                               onChange={(value) => updateSlot(index, (current) => ({ ...current, role: value as SlotRole }))}
                             />
                             <SelectField
                               id={`template-slot-constraint-${index}`}
-                              label="Constraint"
+                              label="制約の強さ"
                               value={slot.constraintMode}
                               options={CONSTRAINT_MODE_OPTIONS}
                               onChange={(value) => updateSlot(index, (current) => ({ ...current, constraintMode: value as ConstraintMode }))}
                             />
                             <NumberField
                               id={`template-slot-duration-${index}`}
-                              label="Target Duration (ms)"
+                              label="目標時間（ミリ秒）"
                               value={slot.targetDurationMs}
                               min={1000}
                               step={1000}
@@ -2966,7 +2994,7 @@ function ProgramTemplateCard({
                             </div>
                             <div>
                               <CheckboxGroup
-                                title="Fallback Segments"
+                                title="生成できない場合の代替候補"
                                 idPrefix={`template-slot-fallback-${index}`}
                                 options={SEGMENT_TYPE_OPTIONS}
                                 selected={slot.fallbackSegmentTypes}
@@ -2981,7 +3009,7 @@ function ProgramTemplateCard({
                           </div>
 
                           <div className="mt-4">
-                            <Label htmlFor={`template-slot-policy-${index}`}>Slot Policy (JSON object)</Label>
+                            <Label htmlFor={`template-slot-policy-${index}`}>構成枠の追加方針（JSON オブジェクト）</Label>
                             <Textarea
                               id={`template-slot-policy-${index}`}
                               rows={6}
@@ -2995,25 +3023,25 @@ function ProgramTemplateCard({
                         </div>
                       ))
                     ) : (
-                      <EmptyState title="slot はまだありません" description="保存するには `Add Slot` から少なくとも 1 件追加してください。" />
+                      <EmptyState title="構成枠はまだありません" description="保存するには「構成枠を追加」から少なくとも 1 件追加してください。" />
                     )}
                   </div>
                 </SettingsSection>
 
                 {!isCreatingTemplate && template ? (
                   <KeyValueGrid
-                    title="Saved Template Facts"
+                    title="保存済みテンプレートの情報"
                     entries={[
-                      ["Scope", template.scope],
-                      ["Station", template.stationId ?? "GLOBAL"],
-                      ["Fallback", template.fallbackTemplateId ?? "-"],
-                      ["Saved Slots", template.slots.length],
+                      ["適用範囲", template.scope],
+                      ["対象局", template.stationId ?? "全局共通"],
+                      ["代替テンプレート", template.fallbackTemplateId ?? "未指定"],
+                      ["保存済み構成枠", template.slots.length],
                     ]}
                   />
                 ) : null}
               </div>
             ) : (
-              <EmptyState title="テンプレート詳細を取得できません" description="template を選択するか、`New Template` から新規 draft を作成してください。" />
+              <EmptyState title="テンプレート詳細を取得できません" description="対象のテンプレートを選択するか、「新しいテンプレート」から入力を始めてください。" />
             )}
           </>
         )}
@@ -3051,11 +3079,11 @@ function ProgrammingPreviewCard({
     <Card className="mt-4">
       <SectionHeader
         eyebrow="Preview"
-        title="Programming preview"
-        description="station, pending letters, provider state を指定し、必要に応じて未保存の policy / template draft を含めて preview API の結果を確認します。"
+        title="編成結果を確認"
+        description="対象局、未採用レター数、Provider 状態を指定し、保存前の編成ポリシーとテンプレートを含めて、次の番組がどのように組まれるかを確認します。確認だけでは保存や放送への反映を行いません。"
       />
       {!stations.length ? (
-        <EmptyState title="Preview 対象の station がありません" description="局を追加すると preview を試せます。" />
+        <EmptyState title="確認対象の局がありません" description="「局」カテゴリーで局を追加すると編成結果を確認できます。" />
       ) : (
         <div className="space-y-4">
           {previewUsesPolicyDraft || previewTemplateDraftId ? (
@@ -3063,15 +3091,15 @@ function ProgrammingPreviewCard({
               tone="accent"
               message={
                 previewUsesPolicyDraft && previewTemplateDraftId
-                  ? `未保存の station programming draft と template draft (${previewTemplateDraftId}) を含めて preview します。保存しない限り DB には反映されません。`
+                  ? `未保存の局別編成とテンプレート（${previewTemplateDraftId}）を含めて確認します。この操作だけでは保存されません。`
                   : previewUsesPolicyDraft
-                    ? "未保存の station programming draft を含めて preview します。保存しない限り DB には反映されません。"
-                    : `未保存の template draft (${previewTemplateDraftId}) を含めて preview します。保存しない限り DB には反映されません。`
+                    ? "未保存の局別編成を含めて確認します。この操作だけでは保存されません。"
+                    : `未保存のテンプレート（${previewTemplateDraftId}）を含めて確認します。この操作だけでは保存されません。`
               }
             />
           ) : null}
           <div>
-            <Label htmlFor="preview-station-select">Station</Label>
+            <Label htmlFor="preview-station-select">対象局</Label>
             <select
               id="preview-station-select"
               className={SELECT_CLASS_NAME}
@@ -3087,7 +3115,7 @@ function ProgrammingPreviewCard({
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <Label htmlFor="preview-at">At</Label>
+              <Label htmlFor="preview-at">番組を開始する日時</Label>
               <Input
                 id="preview-at"
                 type="datetime-local"
@@ -3103,7 +3131,7 @@ function ProgrammingPreviewCard({
             </div>
             <NumberField
               id="preview-pending-letters"
-              label="Pending Letters"
+              label="未採用レター数"
               value={previewDraft.pendingLetterCount}
               min={0}
               onChange={(value) =>
@@ -3142,19 +3170,19 @@ function ProgrammingPreviewCard({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button tone="primary" disabled={!selectedStationId || previewPending} onClick={onPreview}>
-              {previewPending ? "Previewing..." : "Run Preview"}
+              {previewPending ? "編成を確認中..." : "この条件で編成を確認"}
             </Button>
-            {previewUsesPolicyDraft ? <Badge tone="accent">using programming draft</Badge> : null}
-            {previewTemplateDraftId ? <Badge tone="accent">using template draft {previewTemplateDraftId}</Badge> : null}
+            {previewUsesPolicyDraft ? <Badge tone="accent">未保存の局別編成を使用</Badge> : null}
+            {previewTemplateDraftId ? <Badge tone="accent">未保存のテンプレート {previewTemplateDraftId} を使用</Badge> : null}
           </div>
           {previewResult ? (
             <div className="space-y-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="text-lg font-semibold text-slate-950">{previewResult.program.title}</div>
                 {previewResult.selectedTemplateId ? <Badge tone="default">{previewResult.selectedTemplateId}</Badge> : null}
-                {previewResult.fallbackApplied ? <Badge tone="warning">fallback applied</Badge> : <Badge tone="success">template resolved</Badge>}
+                {previewResult.fallbackApplied ? <Badge tone="warning">代替構成を使用</Badge> : <Badge tone="success">テンプレートを解決済み</Badge>}
               </div>
-              <div className="text-sm text-slate-600">planned duration: {formatDurationMs(previewResult.program.plannedDurationMs)}</div>
+              <div className="text-sm text-slate-600">予定時間: {formatDurationMs(previewResult.program.plannedDurationMs)}</div>
               <div className="space-y-2">
                 {previewResult.slots.map((slot) => (
                   <div key={slot.slotId} className="rounded-2xl bg-white px-4 py-3">
@@ -3163,13 +3191,13 @@ function ProgrammingPreviewCard({
                       <Badge tone="default">{slot.role}</Badge>
                       <Badge tone={slot.constraintMode === "HARD" ? "danger" : "accent"}>{slot.constraintMode}</Badge>
                     </div>
-                    <div className="mt-1 text-sm text-slate-600">target duration: {formatDurationMs(slot.targetDurationMs)}</div>
+                    <div className="mt-1 text-sm text-slate-600">目標時間: {formatDurationMs(slot.targetDurationMs)}</div>
                   </div>
                 ))}
               </div>
               {previewResult.validationWarnings.length ? (
                 <div className="space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Validation warnings</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">編成上の注意</div>
                   {previewResult.validationWarnings.map((warning) => (
                     <InlineNotice key={warning.code} tone="warning" message={`${warning.code}: ${warning.message}`} />
                   ))}
@@ -3177,9 +3205,9 @@ function ProgrammingPreviewCard({
               ) : null}
             </div>
           ) : previewError instanceof Error ? (
-            <EmptyState title="Preview を取得できません" description={previewError.message} />
+            <EmptyState title="編成結果を取得できません" description={previewError.message} />
           ) : (
-            <EmptyState title="Preview はまだ未実行です" description="station と provider state を指定すると結果をここに表示します。" />
+            <EmptyState title="編成結果はまだ確認していません" description="対象局と Provider 状態を指定して確認を実行すると、次の番組候補をここに表示します。" />
           )}
         </div>
       )}

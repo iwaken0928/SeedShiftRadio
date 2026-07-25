@@ -10,13 +10,13 @@ import { useAdminSession } from "@/lib/admin-session";
 import { useUiStore } from "@/stores/ui-store";
 
 const publicNavItems = [
-  { href: "/", label: "Radio" },
-  { href: "/letters", label: "Letters" },
+  { href: "/", label: "ラジオ" },
+  { href: "/letters", label: "レター" },
 ];
 
 const adminNavItems = [
-  { href: "/settings", label: "Settings" },
-  { href: "/monitor", label: "Monitor" },
+  { href: "/settings", label: "設定" },
+  { href: "/monitor", label: "監視" },
 ];
 
 export function AppFrame({ children }: PropsWithChildren) {
@@ -66,7 +66,7 @@ export function AppFrame({ children }: PropsWithChildren) {
             </div>
             <nav aria-label="主要ナビゲーション" className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:justify-center lg:pb-0">
               {navItems.map((item) => {
-                const active = pathname === item.href;
+                const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(`${item.href}/`));
                 return (
                   <Link
                     key={item.href}

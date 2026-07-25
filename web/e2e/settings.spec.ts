@@ -34,20 +34,55 @@ test.beforeEach(async ({ page }) => {
   await mockUnavailableStream(page);
 });
 
+test("settings: category navigation separates each responsibility", async ({ page }) => {
+  const state = createSettingsState();
+  await installSettingsRoutes(page, state, {});
+
+  await page.goto(appUrl("/settings"));
+  await expect(page.getByRole("heading", { name: "設定する内容を選んでください" })).toBeVisible();
+  const overviewPanel = panelByHeading(page, "設定する内容を選んでください");
+  await expect(overviewPanel.getByRole("link", { name: /システム/ })).toHaveAttribute("href", "/settings/system");
+  await expect(overviewPanel.getByRole("link", { name: /AI・音声接続/ })).toHaveAttribute("href", "/settings/providers");
+  await expect(overviewPanel.getByRole("link", { name: /再生・生成/ })).toHaveAttribute("href", "/settings/playout");
+  await expect(overviewPanel.getByRole("link", { name: /局/ })).toHaveAttribute("href", "/settings/stations");
+  await expect(overviewPanel.getByRole("link", { name: /番組編成/ })).toHaveAttribute("href", "/settings/programming");
+
+  await page.goto(appUrl("/settings/system"));
+  await expect(page.getByRole("heading", { name: "システム設定" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "局の管理" })).toHaveCount(0);
+
+  await page.goto(appUrl("/settings/providers"));
+  await expect(page.getByRole("heading", { name: "AI・音声接続", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "接続確認の結果" })).toBeVisible();
+
+  await page.goto(appUrl("/settings/playout"));
+  await expect(page.getByRole("heading", { name: "再生・生成設定" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "キューと先読み" })).toBeVisible();
+
+  await page.goto(appUrl("/settings/stations"));
+  await expect(page.getByRole("heading", { name: "局の管理" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "番組テンプレート" })).toHaveCount(0);
+
+  await page.goto(appUrl("/settings/programming"));
+  await expect(page.getByRole("heading", { name: "局ごとの番組編成ポリシー" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "番組テンプレート" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "編成結果を確認" })).toBeVisible();
+});
+
 test("settings: existing station programming policy save", async ({ page }) => {
   const state = createSettingsState();
   const programmingUpdateRequests: RequestCapture[] = [];
 
   await installSettingsRoutes(page, state, { programmingUpdateRequests });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/programming"));
 
-  const stationPanel = panelByHeading(page, "Station overview");
+  const stationPanel = panelByHeading(page, "局ごとの番組編成ポリシー");
 
   await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-night");
   await expect(stationPanel.locator("#programming-horizon")).toBeVisible();
 
   await stationPanel.locator("#programming-horizon").fill("45");
-  await stationPanel.getByRole("button", { name: "Save Policy", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "番組編成を保存", exact: true }).click();
 
   await expect.poll(() => programmingUpdateRequests.length).toBe(1);
   expectBrowserAdminHeaders(programmingUpdateRequests[0]?.headers);
@@ -64,11 +99,11 @@ test("settings: station create draft -> save and select new station", async ({ p
   const stationCreateRequests: RequestCapture[] = [];
 
   await installSettingsRoutes(page, state, { stationCreateRequests });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/stations"));
 
-  const stationPanel = panelByHeading(page, "Station overview");
+  const stationPanel = panelByHeading(page, "局の管理");
 
-  await stationPanel.getByRole("button", { name: "New Station", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "新しい局を作成", exact: true }).click();
 
   await expect(stationPanel.locator("#settings-station-select")).toHaveValue("");
   await expect(stationPanel.locator("#station-id")).toBeEditable();
@@ -80,7 +115,7 @@ test("settings: station create draft -> save and select new station", async ({ p
   await stationPanel.locator("#station-genre").fill("Morning Talk");
   await stationPanel.locator("#station-persona").fill("persona-dawn");
   await stationPanel.locator("#station-voice").fill("voice-dawn");
-  await stationPanel.getByRole("button", { name: "Create Station", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "局を作成", exact: true }).click();
 
   await expect.poll(() => stationCreateRequests.length).toBe(1);
   expectBrowserAdminHeaders(stationCreateRequests[0]?.headers);
@@ -108,11 +143,11 @@ test("settings: station duplicate draft strips station policy and can be closed"
   const stationCreateRequests: RequestCapture[] = [];
 
   await installSettingsRoutes(page, state, { stationCreateRequests });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/stations"));
 
-  const stationPanel = panelByHeading(page, "Station overview");
+  const stationPanel = panelByHeading(page, "局の管理");
 
-  await stationPanel.getByRole("button", { name: "Duplicate Current", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "選択中の局を複製", exact: true }).click();
 
   await expect(stationPanel.locator("#settings-station-select")).toHaveValue("");
   await expect(stationPanel.locator("#station-id")).toHaveValue("station-night-copy");
@@ -125,14 +160,14 @@ test("settings: station duplicate draft strips station policy and can be closed"
     expect(dialog.message()).toContain("未保存の station 変更を破棄します。station draft のクローズを続行しますか？");
     await dialog.accept();
   });
-  await stationPanel.getByRole("button", { name: "Close Draft", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "作成を中止", exact: true }).click();
   await expect(stationPanel.locator("#settings-station-select")).toHaveValue("station-night");
   await expect(stationPanel.locator("#station-id")).toHaveValue("station-night");
 
-  await stationPanel.getByRole("button", { name: "Duplicate Current", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "選択中の局を複製", exact: true }).click();
   await stationPanel.locator("#station-id").fill("station-night-clone");
   await stationPanel.locator("#station-name").fill("Nocturne FM Clone");
-  await stationPanel.getByRole("button", { name: "Create Station", exact: true }).click();
+  await stationPanel.getByRole("button", { name: "局を作成", exact: true }).click();
 
   await expect.poll(() => stationCreateRequests.length).toBe(1);
   expectBrowserAdminHeaders(stationCreateRequests[0]?.headers);
@@ -158,25 +193,25 @@ test("settings: preview uses unsaved programming and template drafts", async ({ 
   const previewRequests: RequestCapture[] = [];
 
   await installSettingsRoutes(page, state, { previewRequests });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/programming"));
 
-  const stationPanel = panelByHeading(page, "Station overview");
-  const templatePanel = panelByHeading(page, "Program templates");
-  const previewPanel = panelByHeading(page, "Programming preview");
+  const stationPanel = panelByHeading(page, "局ごとの番組編成ポリシー");
+  const templatePanel = panelByHeading(page, "番組テンプレート");
+  const previewPanel = panelByHeading(page, "編成結果を確認");
 
   await stationPanel.locator("#programming-default-template").selectOption("tmpl-global-fallback");
   await templatePanel.locator("#program-template-select").selectOption("tmpl-global-fallback");
   await templatePanel.locator("#template-name").fill("Global Fallback Draft");
-  await templatePanel.getByRole("button", { name: "Add Slot", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "構成枠を追加", exact: true }).click();
   await templatePanel.locator("#template-slot-id-1").fill("draft-letter");
   await templatePanel.locator("#template-slot-role-1").selectOption("LETTER");
   await templatePanel.locator("#template-slot-duration-1").fill("90000");
 
-  await expect(previewPanel).toContainText("using programming draft");
-  await expect(previewPanel).toContainText("using template draft tmpl-global-fallback");
+  await expect(previewPanel).toContainText("未保存の局別編成を使用");
+  await expect(previewPanel).toContainText("未保存のテンプレート tmpl-global-fallback を使用");
 
   await previewPanel.locator("#preview-pending-letters").fill("2");
-  await previewPanel.getByRole("button", { name: "Run Preview", exact: true }).click();
+  await previewPanel.getByRole("button", { name: "この条件で編成を確認", exact: true }).click();
 
   await expect.poll(() => previewRequests.length).toBe(1);
   expectBrowserAdminHeaders(previewRequests[0]?.headers);
@@ -202,15 +237,15 @@ test("settings: ProgramTemplate blank create -> save and select new template", a
   const templateCreateRequests: RequestCapture[] = [];
 
   await installSettingsRoutes(page, state, { templateCreateRequests });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/programming"));
 
-  const stationPanel = panelByHeading(page, "Station overview");
-  const templatePanel = panelByHeading(page, "Program templates");
-  const createButton = templatePanel.getByRole("button", { name: "Create Template", exact: true });
+  const stationPanel = panelByHeading(page, "局ごとの番組編成ポリシー");
+  const templatePanel = panelByHeading(page, "番組テンプレート");
+  const createButton = templatePanel.getByRole("button", { name: "テンプレートを作成", exact: true });
 
   await expect(templatePanel.locator("#program-template-select")).toHaveValue("tmpl-night");
 
-  await templatePanel.getByRole("button", { name: "New Template", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "新しいテンプレート", exact: true }).click();
 
   await expect(templatePanel.locator("#program-template-select")).toHaveValue("");
   await expect(templatePanel.locator("#template-id")).toHaveValue("");
@@ -264,7 +299,7 @@ test("settings: ProgramTemplate blank create -> save and select new template", a
   await expect(templatePanel.locator("#template-id")).toHaveValue("tmpl-night-blank");
   await expect(templatePanel.locator("#template-id")).not.toBeEditable();
   await expect(templatePanel.locator("#template-name")).toHaveValue("Night Blank");
-  await expect(templatePanel.getByRole("button", { name: "Save Template", exact: true })).toBeVisible();
+  await expect(templatePanel.getByRole("button", { name: "テンプレートを保存", exact: true })).toBeVisible();
   await expect(stationPanel.locator("#programming-default-template option[value='tmpl-night-blank']")).toContainText("Night Blank");
   await expect(templatePanel).toContainText("ProgramTemplate を作成しました。");
 });
@@ -288,14 +323,14 @@ test("settings: ProgramTemplate create shows safe conflict message on 409", asyn
       },
     },
   });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/programming"));
 
-  const templatePanel = panelByHeading(page, "Program templates");
+  const templatePanel = panelByHeading(page, "番組テンプレート");
 
-  await templatePanel.getByRole("button", { name: "New Template", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "新しいテンプレート", exact: true }).click();
   await templatePanel.locator("#template-id").fill("tmpl-night-secret");
   await templatePanel.locator("#template-name").fill("Night Secret");
-  await templatePanel.getByRole("button", { name: "Create Template", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "テンプレートを作成", exact: true }).click();
 
   await expect.poll(() => templateCreateRequests.length).toBe(1);
   await expect(templatePanel).toContainText(
@@ -313,22 +348,22 @@ test("settings: ProgramTemplate duplicate draft -> update existing", async ({ pa
   const templateUpdateRequests: RequestCapture[] = [];
 
   await installSettingsRoutes(page, state, { templateUpdateRequests });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/programming"));
 
-  const templatePanel = panelByHeading(page, "Program templates");
+  const templatePanel = panelByHeading(page, "番組テンプレート");
 
-  await templatePanel.getByRole("button", { name: "Duplicate Current", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "選択中のテンプレートを複製", exact: true }).click();
   await expect(templatePanel.locator("#template-id")).toHaveValue("tmpl-night-copy");
   await expect(templatePanel.locator("#template-name")).toHaveValue("Night Talk Copy");
-  await templatePanel.getByRole("button", { name: "Close Draft", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "作成を中止", exact: true }).click();
 
   await expect(templatePanel.locator("#program-template-select")).toHaveValue("tmpl-night");
   await templatePanel.locator("#template-name").fill("Night Talk Updated");
-  await templatePanel.getByRole("button", { name: "Add Slot", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "構成枠を追加", exact: true }).click();
   await templatePanel.locator("#template-slot-id-1").fill("letter-main");
   await templatePanel.locator("#template-slot-role-1").selectOption("LETTER");
   await templatePanel.locator("#template-slot-duration-1").fill("120000");
-  await templatePanel.getByRole("button", { name: "Save Template", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "テンプレートを保存", exact: true }).click();
 
   await expect.poll(() => templateUpdateRequests.length).toBe(1);
   expectBrowserAdminHeaders(templateUpdateRequests[0]?.headers);
@@ -362,12 +397,12 @@ test("settings: ProgramTemplate update shows safe validation message on 400", as
       },
     },
   });
-  await page.goto(appUrl("/settings"));
+  await page.goto(appUrl("/settings/programming"));
 
-  const templatePanel = panelByHeading(page, "Program templates");
+  const templatePanel = panelByHeading(page, "番組テンプレート");
 
   await templatePanel.locator("#template-name").fill("Night Talk Validation");
-  await templatePanel.getByRole("button", { name: "Save Template", exact: true }).click();
+  await templatePanel.getByRole("button", { name: "テンプレートを保存", exact: true }).click();
 
   await expect.poll(() => templateUpdateRequests.length).toBe(1);
   await expect(templatePanel).toContainText(

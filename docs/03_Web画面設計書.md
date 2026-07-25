@@ -18,7 +18,12 @@
 |---|---|---|
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
-| `/settings` | 設定画面 | Provider 設定、局管理、Voice Profile 管理、番組管理、先行生成・再放送・キャッシュ設定、接続テスト |
+| `/settings` | 設定入口 | 設定カテゴリーの説明と選択 |
+| `/settings/system` | システム設定 | Server 待受、保存先、管理認証、縮退配信、設定 JSON の入出力 |
+| `/settings/providers` | AI・音声接続 | LLM / TTS / MusicGen の接続先、優先順、接続確認 |
+| `/settings/playout` | 再生・生成設定 | queue 先読み、生成量、cache、全局共通の編成既定値 |
+| `/settings/stations` | 局管理 | 局の作成、複製、基本情報、人格・音声、有効状態 |
+| `/settings/programming` | 番組編成 | 局別ポリシー、ProgramTemplate、ProgramRule、Programming Preview |
 | `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
 
 ## 4. レイアウト方針
@@ -87,22 +92,22 @@
 
 ## 7. 設定画面
 
-### 7.1 セクション
+### 7.1 情報設計
 
-- LLM
-- TTS
-- Voice Profiles
-- MusicGen
-- Stations
-- Program Templates
-- Programming Rules
-- Programming Preview
-- Pre-generation / Replay
-- Paths
-- Cache
-- Security
-- Import / Export
-- Connection Test
+`/settings` は編集項目を並べず、設定カテゴリーの役割と影響範囲を説明する入口とする。
+編集画面は Server の保存境界と運用上の判断単位に合わせて分割し、別の責務の設定を同じ長大な画面へ混在させない。
+
+| カテゴリー | Route | 主な設定 |
+|---|---|---|
+| システム | `/settings/system` | `server`, `paths`, `security`, `features`, Import / Export |
+| AI・音声接続 | `/settings/providers` | LLM, TTS, MusicGen の `providers` と Connection Test |
+| 再生・生成 | `/settings/playout` | `playout`, `cache`, 全局共通の `programming` 既定値 |
+| 局 | `/settings/stations` | Station の作成、複製、基本情報、人格、音声、有効状態 |
+| 番組編成 | `/settings/programming` | StationProgrammingPolicy, ProgramTemplate, ProgramRule, Programming Preview |
+
+各編集画面の先頭にはカテゴリー名、設定の目的、反映タイミングを日本語で記載する。
+カテゴリー navigation には項目名だけでなく、利用者が「何を決めるページか」を判断できる 1 文の説明を常時表示する。
+API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベル、空状態、保存状態、注意文は日本語を正本とする。
 
 ### 7.2 操作ルール
 
@@ -110,7 +115,7 @@
 - 危険な項目は `localhost 以外へ bind` などの注意表示を出す
 - API キー自体は平文表示せず、参照先のみ表示する
 - 番組テンプレート編集では `HARD` / `SOFT` の違いを明示し、dirty/reset/save、create/duplicate を持つ editor を提供する
-- `Programming Preview` は保存済み `ProgramTemplate` / `StationProgrammingPolicy` に加えて、現在の `/settings` で編集中の未保存 draft を request payload として含めて実行できる。draft preview は DB 保存や実行中 block への反映を行わない
+- `Programming Preview` は保存済み `ProgramTemplate` / `StationProgrammingPolicy` に加えて、現在の `/settings/programming` で編集中の未保存 draft を request payload として含めて実行できる。draft preview は DB 保存や実行中 block への反映を行わない
 - ProgramTemplate editor の `editorialPolicy` / `slotPolicy` は JSON object editor とし、`scope` と `stationId` の整合、`slotId` 一意性、`candidateSegmentTypes` 必須、`targetDurationMs` 下限を UI でも確認する
 - ProgramTemplate 保存で `400` や `409` が返った時は create/edit draft を保持したまま、server message と field error を表示して修正継続できるようにする
 - ProgramTemplate の create / update が `400` または `409` を返した場合、`/settings` は safe metadata ルールに沿って message / field error を表示し、draft は保持したまま修正や再試行を続けられるようにする
@@ -131,7 +136,9 @@
 
 ### 7.3 初期実装範囲
 
-- 第一段の `/settings` は `server`, `paths`, `playout`, `cache`, `programming`, `providers`, `security`, `features` を 1 画面で一括編集する
+- `/settings` の初期一画面実装は廃止し、`system`, `providers`, `playout`, `stations`, `programming` の 5 カテゴリーへ分割する
+- `PUT /api/settings` の契約は分割後も共通とし、`system`, `providers`, `playout` は取得済み設定全体を draft として保持しつつ、現在のカテゴリーに属する項目だけを表示して一括保存する
+- `stations` と `programming` は PostgreSQL を正本とする既存の Station / Programming API を使い、`/api/settings` の保存操作とは分離する
 - `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を編集できるようにする
 - TTS provider は `VOICEVOX` と `IRODORI_OPENAI_TTS` の default/fallback 切替を扱えるようにする。Irodori の `apiKeyRef` は `env:` / `file:` 参照のみ表示・編集し、bearer token の実値は扱わない
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する

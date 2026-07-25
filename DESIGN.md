@@ -209,6 +209,9 @@ SeedShiftRadio の視覚テーマは「深夜の個人ラジオブース」と�
 公開画面は余白を広くし、1 カード 1 目的とする。
 管理画面は余白を少し詰めてもよいが、editor、health、preview、danger zone を同じカードへ混在させない。
 設定画面の説明文は常時表示する要点と、必要時に開く補足へ分ける。
+管理設定は 1 ページへ全項目を縦積みせず、`システム`, `AI・音声接続`, `再生・生成`, `局`, `番組編成` のカテゴリー単位で route を分ける。
+各カテゴリー navigation は名称だけの tab にせず、設定対象を説明する短文を含む最小 92px の選択カードとする。
+設定入口では編集フォームを表示せず、5 カテゴリーの役割、変更時の影響、次に進む導線を示す。
 
 ## Elevation & Depth
 
@@ -263,6 +266,8 @@ motion は 160〜240ms の ease-out を基準とする。
 公開 navigation は `Radio`, `Letters`、管理 navigation は `Settings`, `Monitor` とし、権限がない時は管理項目を表示しない。
 active nav は dark surface、inactive は白系 surface と border で表す。
 active 状態は色だけでなく `aria-current="page"` でも伝える。
+日本語 UI では主要 navigation を `ラジオ`, `レター`, `設定`, `監視` と表示する。
+`/settings/*` の子 route でも上位の `設定` を active とし、設定カテゴリー navigation では現在の子 route だけを active にする。
 
 ### Card
 
@@ -296,6 +301,9 @@ input、select、textarea は同じ border、radius、focus ring を使う。
 help text は field の直下、error は help text と置き換えるか隣接させる。
 JSON editor と長い設定群は通常フォームと視覚的に分け、等幅 font を使用する。
 未保存、保存中、保存成功、競合、validation error を card 上部の同じ位置に出す。
+管理画面の操作名、入力ラベル、空状態、注意文は日本語で記載する。
+API 契約上の enum、ID、Provider key は原値を表示してよいが、意味を説明する日本語見出しや補足を隣接させる。
+カテゴリーの保存ボタンは `このカテゴリーの変更を保存` のように保存範囲を明示し、Provider 接続確認は保存済み設定を使うことをボタンと説明文の両方で伝える。
 
 ### Radio and audio
 

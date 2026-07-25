@@ -12,5 +12,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
 }
 
 function sanitizeReturnTo(value?: string) {
-  return value === "/monitor" || value === "/letters" ? value : "/settings";
+  const allowedSettingsPages = new Set([
+    "/settings",
+    "/settings/system",
+    "/settings/providers",
+    "/settings/playout",
+    "/settings/stations",
+    "/settings/programming",
+  ]);
+  return value === "/monitor" || value === "/letters" || (value ? allowedSettingsPages.has(value) : false) ? value! : "/settings";
 }

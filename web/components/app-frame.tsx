@@ -15,7 +15,7 @@ const publicNavItems = [
 ];
 
 const adminNavItems = [
-  { href: "/settings", label: "設定" },
+  { href: "/settings", label: "管理" },
   { href: "/monitor", label: "監視" },
 ];
 

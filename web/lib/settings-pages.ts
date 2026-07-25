@@ -1,5 +1,10 @@
 export const SETTINGS_PAGES = [
   {
+    href: "/settings",
+    label: "ダッシュボード",
+    description: "システム全体、Provider、生成処理、局別データ量を確認します。",
+  },
+  {
     href: "/settings/system",
     label: "システム",
     description: "待受アドレス、保存先、管理認証、設定ファイルを管理します。",
@@ -23,5 +28,10 @@ export const SETTINGS_PAGES = [
     href: "/settings/programming",
     label: "番組編成",
     description: "局別ポリシー、番組テンプレート、時間帯ルールを管理し、編成を確認します。",
+  },
+  {
+    href: "/settings/content",
+    label: "コンテンツ",
+    description: "局別の番組・音声・曲データ量を確認し、事前生成を依頼します。",
   },
 ] as const;

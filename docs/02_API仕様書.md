@@ -35,6 +35,9 @@
 | `POST` | `/api/letters/{id}/reply` | `ADMIN` |
 | `POST` | `/api/letters/{id}/status` | `ADMIN` |
 | `POST` | `/api/letters/public/history` | `PUBLIC` |
+| `GET` | `/api/management/dashboard` | `ADMIN` |
+| `GET` | `/api/management/stations/{stationId}/content` | `ADMIN` |
+| `POST` | `/api/management/stations/{stationId}/pre-generations` | `ADMIN` |
 | `GET` | `/api/monitor/assets/consistency` | `ADMIN` |
 | `GET` | `/api/monitor/summary` | `ADMIN` |
 | `GET` | `/api/play-history` | `ADMIN` |
@@ -446,6 +449,9 @@
 | `GET` | `/api/settings` | 設定取得 |
 | `PUT` | `/api/settings` | 設定更新 |
 | `POST` | `/api/settings/test-connections` | Provider 接続テスト |
+| `GET` | `/api/management/dashboard` | 管理トップ向けの全体状況と局別コンテンツ集約 |
+| `GET` | `/api/management/stations/{stationId}/content` | 指定局の番組・台本・音声・曲 asset 保有量 |
+| `POST` | `/api/management/stations/{stationId}/pre-generations` | オフエア事前生成 request 受付 |
 | `GET` | `/api/health` | ヘルス参照 |
 | `GET` | `/api/monitor/summary` | 監視サマリ参照 |
 | `GET` | `/api/monitor/assets/consistency` | generated asset 整合性検査 |
@@ -1320,6 +1326,36 @@ Response:
 - `issues` は最大 100 件のサンプルとし、超過時は `issuesTruncated=true` を返す
 - raw metadata、prompt、lyrics、letter body、radioName、API key、管理トークンは返さない
 
+### 6.16 Management Dashboard / Pre-generation
+
+`GET /api/management/dashboard` は管理画面トップ向けの集約 API とする。
+既存 `MonitorSummaryResponse` を `system` として再利用し、局数、有効局数、番組テンプレート数、局別 `StationContentInventory`、直近 10 件の `PreGenerationResponse` を返す。
+局別 asset 数量は `generated_asset.queue_item_id -> queue_item.program_block_id -> program_block.station_id` をたどり、payload を保持する `byte_size > 0` の record を `SCRIPT`, `AUDIO`, `MUSIC` ごとに集計する。prompt、lyrics、台本本文、レター本文、radioName、秘密値は返さない。
+
+`GET /api/management/stations/{stationId}/content` は 1 局分の `StationContentInventory` を返す。
+`programCount` は局の全 `program_block`、`preGeneratedProgramCount` は `playout_session.purpose=PRE_GENERATION` の block、`generatedAssetCount` / `generatedAssetBytes` と種別別件数はその block から生成された asset を表す。
+
+`POST /api/management/stations/{stationId}/pre-generations` は次の request を受け付け、`202 Accepted` で `PreGenerationResponse` を返す。
+
+```json
+{
+  "programTemplateId": "tmpl-night-regular",
+  "targetProgramCount": 2,
+  "includeSpeech": true,
+  "includeMusic": true
+}
+```
+
+- `programTemplateId` は省略可能。省略時は局の保存済み `StationProgrammingPolicy` と現在時刻からテンプレートを解決する
+- 指定時は有効な `GLOBAL` または同一局の `STATION` scope template だけを許可する
+- `targetProgramCount` は 1 から 10
+- `includeSpeech=false` と `includeMusic=false` の同時指定は Server が `400 VALIDATION_ERROR` で拒否し、Web UI でも送信前に防止する
+- Server は `playout_session.purpose=PRE_GENERATION` のオフエアセッションを新規作成し、ライブの最新 session、radio status、現在番組、再生 queue を変更しない
+- script / TTS は JobRunr の事前生成 job 内で materialize し、`MUSIC_AI` は既存 `GenerateMusicJob` へ非同期投入する
+- `PreGenerationRequestStatus` は `QUEUED`, `RUNNING`, `MATERIALIZED`, `FAILED`。`MATERIALIZED` は番組 block と queue item の作成、および必要な MusicGen job 投入が完了した状態で、全 MusicGen job の成功を意味しない
+- MusicGen の成否は既存 `provider_job`, `/api/monitor/summary`, 局別 asset 集計で確認する
+- `errorCode` は分類済みの `PRE_GENERATION_FAILED` だけを返し、例外本文や生成入力は返さない
+
 ## 7. SSE仕様
 
 Endpoint:
@@ -1375,7 +1411,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - 管理 API は `components.securitySchemes.adminToken` と operation 単位の `security` で `X-Admin-Token` 必須を表す
 - DTO は Server / Client 両方で再利用しやすいよう JSON naming を固定する
 - `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
-- 現在の OpenAPI snapshot SHA-256 は `8333bf786572b86bf5709b6274e83b23df67fea4852fb1d1fbfe3206bcdfd012` とする
+- 現在の OpenAPI snapshot SHA-256 は `3e7971b919477a4f9e7099577b53a91ea75e4d498d9897ff46f3afa48efca84f` とする
 - 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
 - GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

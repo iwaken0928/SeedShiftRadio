@@ -18,12 +18,13 @@
 |---|---|---|
 | `/` | ラジオ画面 | 局選択、再生、字幕、キュー表示 |
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
-| `/settings` | 設定入口 | 設定カテゴリーの説明と選択 |
+| `/settings` | 管理ダッシュボード | システム全体、Provider、queue、生成 job、局別コンテンツ保有量の把握 |
 | `/settings/system` | システム設定 | Server 待受、保存先、管理認証、縮退配信、設定 JSON の入出力 |
 | `/settings/providers` | AI・音声接続 | LLM / TTS / MusicGen の接続先、優先順、接続確認 |
 | `/settings/playout` | 再生・生成設定 | queue 先読み、生成量、cache、全局共通の編成既定値 |
 | `/settings/stations` | 局管理 | 局の作成、複製、基本情報、人格・音声、有効状態 |
 | `/settings/programming` | 番組編成 | 局別ポリシー、ProgramTemplate、ProgramRule、Programming Preview |
+| `/settings/content` | コンテンツ管理 | 局別の番組・台本・音声・曲 asset 台帳とオフエア事前生成 |
 | `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
 
 ## 4. レイアウト方針
@@ -94,7 +95,9 @@
 
 ### 7.1 情報設計
 
-`/settings` は編集項目を並べず、設定カテゴリーの役割と影響範囲を説明する入口とする。
+`/settings` は管理画面のトップとして、編集項目ではなくシステム全体の状態を表示する。
+`GET /api/management/dashboard` を 15 秒間隔で再取得し、放送状態、Provider health、READY buffer、実行中 job、直近 error、generated asset cache、局別コンテンツ保有量を一画面で把握できるようにする。
+詳細な設定変更はカテゴリー別画面へ、局別データの確認と事前生成は `/settings/content` へ遷移させる。
 編集画面は Server の保存境界と運用上の判断単位に合わせて分割し、別の責務の設定を同じ長大な画面へ混在させない。
 
 | カテゴリー | Route | 主な設定 |
@@ -104,6 +107,7 @@
 | 再生・生成 | `/settings/playout` | `playout`, `cache`, 全局共通の `programming` 既定値 |
 | 局 | `/settings/stations` | Station の作成、複製、基本情報、人格、音声、有効状態 |
 | 番組編成 | `/settings/programming` | StationProgrammingPolicy, ProgramTemplate, ProgramRule, Programming Preview |
+| コンテンツ | `/settings/content` | StationContentInventory, PreGenerationRequest, 事前生成状況 |
 
 各編集画面の先頭にはカテゴリー名、設定の目的、反映タイミングを日本語で記載する。
 カテゴリー navigation には項目名だけでなく、利用者が「何を決めるページか」を判断できる 1 文の説明を常時表示する。
@@ -133,10 +137,14 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `Voice Profiles` では `scope`, `stationId`, `engineType`, `providerKey`, `speakerKey`, `styleKey`, `speed`, `pitch`, `playbackMode` を表示し、局ごとに別の声を選べるようにする。Irodori-TTS の場合は承認済み `referenceVoiceRef` / `consentPolicyRef` の有無と style preset だけを表示する。参照音声の実ファイル path、個人名、音声本文、raw provider option は表示しない
 - Irodori-TTS の参照音声を扱う UI は初期では管理者が配置した `voices/` の id 選択までに留め、任意 upload は同意・ライセンス台帳と file validation が実装されるまで追加しない
 - 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
+- `/settings/content` は局ごとに `programCount`, `preGeneratedProgramCount`, `scriptAssetCount`, `audioAssetCount`, `musicAssetCount`, `musicAssetBytes`, `generatedAssetBytes` を表形式で表示する
+- 事前生成フォームは局、有効な任意の `ProgramTemplate` または自動選択、1 から 10 の番組数、台本・音声、曲の生成対象を指定できる
+- 事前生成はライブの局切替や再生 queue を変更しないことを操作前に明示し、受付後は `QUEUED`, `RUNNING`, `MATERIALIZED`, `FAILED` を色だけでなく文字でも表示する
+- `MATERIALIZED` は MusicGen 完了ではなく、番組データ作成と非同期 job 投入完了を表す。曲生成の進行・失敗は管理トップまたは `/monitor` で確認する
 
 ### 7.3 初期実装範囲
 
-- `/settings` の初期一画面実装は廃止し、`system`, `providers`, `playout`, `stations`, `programming` の 5 カテゴリーへ分割する
+- `/settings` を管理ダッシュボードとし、編集機能は `system`, `providers`, `playout`, `stations`, `programming`, `content` のカテゴリーへ分割する
 - `PUT /api/settings` の契約は分割後も共通とし、`system`, `providers`, `playout` は取得済み設定全体を draft として保持しつつ、現在のカテゴリーに属する項目だけを表示して一括保存する
 - `stations` と `programming` は PostgreSQL を正本とする既存の Station / Programming API を使い、`/api/settings` の保存操作とは分離する
 - `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `adapter`, model / profile を編集できるようにする
@@ -155,6 +163,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
 - `Voice Profiles` の作成/編集 UI は後続実装対象とする。Irodori 取り込みの第一段では seed / DB migration と既存 station の `defaultVoiceProfileId` 差し替えで、チャンネルごとに別 voice id / style preset を割り当てられる状態を優先する
 - `/letters` の管理 inbox、`/settings`、`/monitor` は公開 UI と分離し、server-side session を確立した利用者だけが表示・操作できるようにする。`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` と legacy browser token 導線は廃止し、公開 build、Cookie、browser storage へ管理 API 用トークンを含めない
+- `/settings/content` も同じ管理 session と CSRF 契約を使い、browser は `X-Admin-Token` を生成しない。`POST /api/management/stations/{stationId}/pre-generations` は同一 origin BFF 経由だけで送る
 
 ## 8. 監視画面
 
@@ -212,6 +221,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `/settings` / `/monitor` の provider health 表示 helper は Vitest で、metadata/message/object fallback に prompt / lyrics / letter body / radioName / secret が混ざっても露出しないことを確認する
 - `/settings` の station 基本情報更新は API client test で、CSRF header、JSON body、URL encode を確認し、browser が `X-Admin-Token` を生成しないことを固定する
 - `/settings` の station programming policy 更新は API client test で、CSRF header、JSON body、URL encode を確認し、管理 token 注入は BFF test で固定する
-- Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID` を mock API / mock stream / audio stub で確認する
+- 管理ダッシュボードは Vitest で byte 表示と管理 API proxy 分類を確認し、`/settings/content` の事前生成 request は API client test で CSRF header、URL encode、JSON body を固定する
+- Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID`、`/settings` の管理カテゴリー遷移、`/settings/content` の台帳表示と事前生成 request を mock API / mock stream / audio stub で確認する
 - E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する
 - Playwright では 390px viewport の header 高さ、44px 以上の navigation target、横 overflow、`aria-current`、reduced motion 時の opacity-only entrance を確認する

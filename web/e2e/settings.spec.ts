@@ -39,13 +39,14 @@ test("settings: category navigation separates each responsibility", async ({ pag
   await installSettingsRoutes(page, state, {});
 
   await page.goto(appUrl("/settings"));
-  await expect(page.getByRole("heading", { name: "設定する内容を選んでください" })).toBeVisible();
-  const overviewPanel = panelByHeading(page, "設定する内容を選んでください");
-  await expect(overviewPanel.getByRole("link", { name: /システム/ })).toHaveAttribute("href", "/settings/system");
-  await expect(overviewPanel.getByRole("link", { name: /AI・音声接続/ })).toHaveAttribute("href", "/settings/providers");
-  await expect(overviewPanel.getByRole("link", { name: /再生・生成/ })).toHaveAttribute("href", "/settings/playout");
-  await expect(overviewPanel.locator('a[href="/settings/stations"]')).toContainText("局");
-  await expect(overviewPanel.getByRole("link", { name: /番組編成/ })).toHaveAttribute("href", "/settings/programming");
+  await expect(page.getByRole("heading", { name: "システム全体の状況" })).toBeVisible();
+  const settingsNavigation = page.getByRole("navigation", { name: "管理カテゴリー" });
+  await expect(settingsNavigation.getByRole("link", { name: /^システム/ })).toHaveAttribute("href", "/settings/system");
+  await expect(settingsNavigation.getByRole("link", { name: /AI・音声接続/ })).toHaveAttribute("href", "/settings/providers");
+  await expect(settingsNavigation.getByRole("link", { name: /再生・生成/ })).toHaveAttribute("href", "/settings/playout");
+  await expect(settingsNavigation.locator('a[href="/settings/stations"]')).toContainText("局");
+  await expect(settingsNavigation.getByRole("link", { name: /番組編成/ })).toHaveAttribute("href", "/settings/programming");
+  await expect(settingsNavigation.getByRole("link", { name: /コンテンツ/ })).toHaveAttribute("href", "/settings/content");
 
   await page.goto(appUrl("/settings/system"));
   await expect(page.getByRole("heading", { name: "システム設定" })).toBeVisible();
@@ -67,6 +68,28 @@ test("settings: category navigation separates each responsibility", async ({ pag
   await expect(page.getByRole("heading", { name: "局ごとの番組編成ポリシー" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "番組テンプレート" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "編成結果を確認" })).toBeVisible();
+});
+
+test("settings: station inventory can request off-air pre-generation", async ({ page }) => {
+  const state = createSettingsState();
+  const preGenerationRequests: RequestCapture[] = [];
+  await installSettingsRoutes(page, state, { preGenerationRequests });
+
+  await page.goto(appUrl("/settings/content"));
+
+  await expect(page.getByRole("heading", { name: "局別コンテンツ管理" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Nocturne FM" })).toBeVisible();
+  await expect(page.getByText("8 件", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "事前生成を開始", exact: true }).click();
+
+  await expect.poll(() => preGenerationRequests.length).toBe(1);
+  await expect(preGenerationRequests[0]?.body).toMatchObject({
+    programTemplateId: null,
+    targetProgramCount: 1,
+    includeSpeech: true,
+    includeMusic: true,
+  });
+  await expect(page.getByRole("status")).toContainText("事前生成を受け付けました");
 });
 
 test("settings: Ollama connection method and model are editable with understandable URL validation", async ({ page }) => {
@@ -490,6 +513,77 @@ function createSettingsState() {
   };
 }
 
+function buildManagementDashboard() {
+  return {
+    system: {
+      sessionId: "session-night-001",
+      stationId: "station-night",
+      state: "PLAYING",
+      bufferReadyCount: 3,
+      queueReadyDurationMs: 180000,
+      pendingLetterCount: 1,
+      degraded: false,
+      providerHealth: {
+        LLM: {
+          providerType: "LLM",
+          providerKey: "ollama",
+          status: "UP",
+          lastCheckedAt: "2026-07-26T00:00:00Z",
+          responseTimeMs: 32,
+          message: "利用できます。",
+          capabilities: ["SCRIPT_GEN"],
+          baseUrl: null,
+        },
+      },
+      cache: {
+        checkedAt: "2026-07-26T00:00:00Z",
+        assetCount: 15,
+        byteSize: 5242880,
+        cacheHitCount: 4,
+        cacheHitRate: 0.25,
+        expiredAssetCount: 0,
+        byType: {},
+      },
+      archive: {
+        eligibleArchiveCount: 0,
+        totalArchiveCount: 0,
+        archiveReplayCount: 0,
+        totalPlaybackCount: 0,
+        archiveReplayRate: 0,
+      },
+      runningJobs: [],
+      recentErrors: [],
+      auditEvents: [],
+      updatedAt: "2026-07-26T00:00:00Z",
+    },
+    stationCount: 1,
+    activeStationCount: 1,
+    programTemplateCount: 2,
+    stations: [
+      {
+        stationId: "station-night",
+        stationName: "Nocturne FM",
+        active: true,
+        programmingEnabled: true,
+        applicableProgramTemplateCount: 2,
+        programCount: 8,
+        preGeneratedProgramCount: 3,
+        generatedAssetCount: 15,
+        generatedAssetBytes: 5242880,
+        scriptAssetCount: 5,
+        audioAssetCount: 6,
+        musicAssetCount: 4,
+        musicAssetBytes: 4194304,
+        latestProgramAt: "2026-07-26T00:00:00Z",
+        latestAssetAt: "2026-07-26T00:00:00Z",
+        latestPreGeneration: null,
+      },
+    ],
+    recentPreGenerations: [],
+    updatedAt: "2026-07-26T00:00:00Z",
+  };
+}
+
 async function installSettingsRoutes(
   page: Page,
   state: ReturnType<typeof createSettingsState>,
@@ -500,10 +594,36 @@ async function installSettingsRoutes(
     previewRequests?: RequestCapture[];
     templateCreateRequests?: RequestCapture[];
     templateUpdateRequests?: RequestCapture[];
+    preGenerationRequests?: RequestCapture[];
     templateCreateFailure?: FailureResponse;
     templateUpdateFailure?: FailureResponse;
   },
 ) {
+  await page.route(apiUrl("/api/management/dashboard"), async (route) => {
+    await fulfillJson(route, buildManagementDashboard());
+  });
+  await page.route(apiRegExp("/api/management/stations/[^/]+/pre-generations$"), async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    captures.preGenerationRequests?.push({ body, headers: route.request().headers() });
+    await fulfillJson(route, {
+      id: "pregen-e2e-001",
+      stationId: "station-night",
+      sessionId: "playout-pregen-e2e-001",
+      programTemplateId: body.programTemplateId ?? null,
+      targetProgramCount: body.targetProgramCount ?? 1,
+      includeSpeech: body.includeSpeech ?? true,
+      includeMusic: body.includeMusic ?? true,
+      status: "QUEUED",
+      materializedProgramCount: 0,
+      materializedSegmentCount: 0,
+      queuedMusicCount: 0,
+      errorCode: null,
+      requestedAt: "2026-07-26T00:00:00Z",
+      startedAt: null,
+      completedAt: null,
+      updatedAt: "2026-07-26T00:00:00Z",
+    }, 202);
+  });
   await page.route(apiUrl("/api/settings"), async (route) => {
     if (route.request().method() === "PUT") {
       const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;

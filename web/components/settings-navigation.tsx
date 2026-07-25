@@ -9,7 +9,7 @@ export function SettingsNavigation() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="設定カテゴリー" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+    <nav aria-label="管理カテゴリー" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {SETTINGS_PAGES.map((item) => {
         const active = pathname === item.href;
         return (

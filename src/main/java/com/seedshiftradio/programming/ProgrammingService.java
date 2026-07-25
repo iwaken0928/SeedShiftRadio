@@ -183,6 +183,43 @@ public class ProgrammingService {
 	}
 
 	@Transactional(readOnly = true)
+	public ResolvedProgramPlan resolvePreGenerationPlan(String stationId, String templateId, OffsetDateTime at) {
+		if (templateId == null || templateId.isBlank()) {
+			return resolveCurrentPlan(stationId, at);
+		}
+		var station = stationRepository.findById(stationId)
+				.orElseThrow(() -> notFound("stationId", stationId));
+		validateTemplateScope(stationId, templateId);
+		ProgramTemplateEntity template = templateRepository.findById(templateId)
+				.orElseThrow(() -> notFound("templateId", templateId));
+		if (!template.isActive()) {
+			throw new ApiException(
+					HttpStatus.CONFLICT,
+					"INVALID_TEMPLATE",
+					"無効な番組テンプレートは事前生成に使用できません。",
+					Map.of("templateId", templateId));
+		}
+		var policy = policyRepository.findByStationId(stationId)
+				.orElseGet(() -> defaultPolicy(stationId, station.getDefaultProgramTemplateId()));
+		long pendingLetters = letterRepository.countByStationIdAndStatusIn(stationId, PENDING_LETTER_STATUSES);
+		List<String> warnings = new ArrayList<>();
+		ResolvedSlotResolution resolvedSlots = resolveSlots(
+				template,
+				ProgrammingSupport.normalizeProviderStates(currentProviderStates()),
+				Math.toIntExact(pendingLetters),
+				ProgrammingPolicyProfileSupport.toCompositionProfile(policy.getCompositionPolicy()),
+				warnings);
+		return new ResolvedProgramPlan(
+				template.getId(),
+				template.getVersion(),
+				template.getName(),
+				template.getTargetDurationMinutes() * 60_000,
+				resolvedSlots.slots(),
+				resolvedSlots.fallbackApplied(),
+				warnings);
+	}
+
+	@Transactional(readOnly = true)
 	public List<ProgramTemplateSummaryResponse> listTemplates() {
 		return templateRepository.findAllByOrderByNameAsc().stream()
 				.map(template -> new ProgramTemplateSummaryResponse(

@@ -367,6 +367,63 @@ export interface MonitorSummary {
   updatedAt: string;
 }
 
+export type PreGenerationRequestStatus = "QUEUED" | "RUNNING" | "MATERIALIZED" | "FAILED";
+
+export interface PreGenerationResponse {
+  id: string;
+  stationId: string;
+  sessionId: string;
+  programTemplateId: string | null;
+  targetProgramCount: number;
+  includeSpeech: boolean;
+  includeMusic: boolean;
+  status: PreGenerationRequestStatus;
+  materializedProgramCount: number;
+  materializedSegmentCount: number;
+  queuedMusicCount: number;
+  errorCode: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+export interface StationContentInventory {
+  stationId: string;
+  stationName: string;
+  active: boolean;
+  programmingEnabled: boolean;
+  applicableProgramTemplateCount: number;
+  programCount: number;
+  preGeneratedProgramCount: number;
+  generatedAssetCount: number;
+  generatedAssetBytes: number;
+  scriptAssetCount: number;
+  audioAssetCount: number;
+  musicAssetCount: number;
+  musicAssetBytes: number;
+  latestProgramAt: string | null;
+  latestAssetAt: string | null;
+  latestPreGeneration: PreGenerationResponse | null;
+}
+
+export interface ManagementDashboardResponse {
+  system: MonitorSummary;
+  stationCount: number;
+  activeStationCount: number;
+  programTemplateCount: number;
+  stations: StationContentInventory[];
+  recentPreGenerations: PreGenerationResponse[];
+  updatedAt: string;
+}
+
+export interface PreGenerationRequest {
+  programTemplateId: string | null;
+  targetProgramCount: number;
+  includeSpeech: boolean;
+  includeMusic: boolean;
+}
+
 export interface ArchiveMetricsSnapshot {
   eligibleArchiveCount: number;
   totalArchiveCount: number;

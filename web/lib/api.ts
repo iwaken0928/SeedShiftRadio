@@ -7,11 +7,14 @@ import {
   type LetterPublicLookupResponse,
   type LetterStatus,
   type LetterSummary,
+  type ManagementDashboardResponse,
   type MonitorSummary,
   type PlaybackEventRequest,
   type ProgramTemplateDetail,
   type ProgramTemplateSummary,
   type ProgramTemplateUpdateRequest,
+  type PreGenerationRequest,
+  type PreGenerationResponse,
   type ProgrammingPreviewRequest,
   type ProgrammingPreviewResponse,
   type StationProgrammingResponse,
@@ -360,6 +363,23 @@ export function getMonitorSummary() {
   return requestJson<MonitorSummary>("/api/monitor/summary", {
     headers: withAdminHeaders(),
   });
+}
+
+export function getManagementDashboard() {
+  return requestJson<ManagementDashboardResponse>("/api/management/dashboard", {
+    headers: withAdminHeaders(),
+  });
+}
+
+export function requestPreGeneration(stationId: string, body: PreGenerationRequest) {
+  return requestJson<PreGenerationResponse>(
+    `/api/management/stations/${encodeURIComponent(stationId)}/pre-generations`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: withAdminHeaders({ "Content-Type": "application/json" }),
+    },
+  );
 }
 
 export function getHealth() {

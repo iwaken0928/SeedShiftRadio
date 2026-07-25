@@ -22,6 +22,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.programming.ProgramTemplateRepository;
+import com.seedshiftradio.radio.ProgramBlockRepository;
+import com.seedshiftradio.settings.GeneratedAssetRepository;
 import com.seedshiftradio.settings.ProviderJobEntity;
 import com.seedshiftradio.settings.ProviderJobRepository;
 import com.seedshiftradio.settings.ProviderJobService;
@@ -46,6 +49,15 @@ class SeedShiftRadioApplicationTests {
 
 	@Autowired
 	JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	ProgramTemplateRepository programTemplateRepository;
+
+	@Autowired
+	ProgramBlockRepository programBlockRepository;
+
+	@Autowired
+	GeneratedAssetRepository generatedAssetRepository;
 
 	@Test
 	void contextLoads() {
@@ -88,11 +100,106 @@ class SeedShiftRadioApplicationTests {
 		assertEquals(ProviderJobStatus.QUEUED, providerJobRepository.findById(queued.getId()).orElseThrow().getStatus());
 	}
 
+	@Test
+	@Transactional
+	void stationContentInventoryQueriesUsePurposeAndOnlyCountStoredPayloads() {
+		jdbcTemplate.update("""
+				insert into station (
+					id, name, frequency_mhz, genre, language_persona_id,
+					default_voice_profile_id, programming_enabled, is_active
+				) values (?, ?, ?, ?, ?, ?, true, true)
+				""",
+				"station-inventory-test",
+				"Inventory Test",
+				91.1,
+				"TEST",
+				"persona-inventory-test",
+				"voice-inventory-test");
+		long templateCountBefore = programTemplateRepository.countActiveApplicableToStation("station-inventory-test");
+		jdbcTemplate.update("""
+				insert into program_template (
+					id, scope, station_id, name, target_duration_minutes,
+					planning_horizon_minutes, is_active
+				) values (?, 'STATION', ?, ?, 10, 30, true)
+				""",
+				"template-inventory-test",
+				"station-inventory-test",
+				"Inventory Template");
+		assertEquals(
+				templateCountBefore + 1,
+				programTemplateRepository.countActiveApplicableToStation("station-inventory-test"));
+
+		jdbcTemplate.update("""
+				insert into playout_session (
+					id, station_id, state, correlation_id, purpose
+				) values (?, ?, 'STOPPED', ?, 'PRE_GENERATION')
+				""",
+				"session-inventory-test",
+				"station-inventory-test",
+				"corr-inventory-test");
+		jdbcTemplate.update("""
+				insert into program_block (
+					id, station_id, session_id, title, status, planned_duration_ms
+				) values (?, ?, ?, ?, 'PLANNED', 60000)
+				""",
+				"block-inventory-test",
+				"station-inventory-test",
+				"session-inventory-test",
+				"Inventory Program");
+		jdbcTemplate.update("""
+				insert into queue_item (
+					id, session_id, sequence_no, segment_type, status,
+					program_block_id, slot_role, title, playback_mode,
+					duration_ms, correlation_id
+				) values (?, ?, 1, 'MUSIC_AI', 'READY', ?, 'MUSIC_BREAK', ?, 'SERVER_AUDIO', 60000, ?)
+				""",
+				"queue-inventory-test",
+				"session-inventory-test",
+				"block-inventory-test",
+				"Inventory Music",
+				"corr-inventory-test");
+		insertGeneratedAsset("asset-inventory-music", "MUSIC", 4096);
+		insertGeneratedAsset("asset-inventory-audio", "AUDIO", 2048);
+		insertGeneratedAsset("asset-inventory-evicted", "MUSIC", 0);
+
+		assertEquals(1L, programBlockRepository.countPreGeneratedByStationId("station-inventory-test"));
+		List<GeneratedAssetRepository.StationAssetStats> stats =
+				generatedAssetRepository.summarizeByStationId("station-inventory-test");
+		assertEquals(2, stats.size());
+		assertEquals(1L, stats.stream()
+				.filter(stat -> "MUSIC".equals(stat.getAssetType()))
+				.findFirst()
+				.orElseThrow()
+				.getAssetCount());
+		assertEquals(4096L, stats.stream()
+				.filter(stat -> "MUSIC".equals(stat.getAssetType()))
+				.findFirst()
+				.orElseThrow()
+				.getByteSize());
+	}
+
 	private void setUpdatedAt(String providerJobId, Instant updatedAt) {
 		assertEquals(1, jdbcTemplate.update(
 				"update provider_job set updated_at = ? where id = ?",
 				Timestamp.from(updatedAt),
 				providerJobId));
+	}
+
+	private void insertGeneratedAsset(String id, String assetType, long byteSize) {
+		jdbcTemplate.update("""
+				insert into generated_asset (
+					id, asset_type, storage_path, content_hash, provider_fingerprint,
+					metadata, queue_item_id, byte_size, reuse_scope, reuse_count,
+					last_accessed_at, archive_eligible
+				) values (?, ?, ?, ?, ?, '{}'::jsonb, ?, ?, 'STATION', 0, now(), false)
+				""",
+				id,
+				assetType,
+				"assets/test/" + id,
+				"hash-" + id,
+				"test-provider",
+				"queue-inventory-test",
+				byteSize);
 	}
 
 }

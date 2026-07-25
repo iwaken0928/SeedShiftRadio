@@ -9,6 +9,7 @@ import {
   listLetters,
   previewProgramming,
   requestJson,
+  requestPreGeneration,
   safeReadError,
   updateProgramTemplate,
   updateStation,
@@ -65,6 +66,34 @@ describe("api helpers", () => {
       method: "POST",
       headers: {
         Accept: "application/json",
+        "X-CSRF-Token": "csrf-from-session",
+      },
+    });
+  });
+
+  it("事前生成 request は管理 BFF へ局 ID と生成範囲を送る", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/auth/session") {
+        return Response.json({ authenticated: true, csrfToken: "csrf-from-session" });
+      }
+      return Response.json({ id: "pregen-1", status: "QUEUED" }, { status: 202 });
+    });
+    const body = {
+      programTemplateId: "tmpl-night",
+      targetProgramCount: 2,
+      includeSpeech: true,
+      includeMusic: true,
+    };
+
+    await requestPreGeneration("station/night", body);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api-proxy/api/management/stations/station%2Fnight/pre-generations", {
+      cache: "no-store",
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
         "X-CSRF-Token": "csrf-from-session",
       },
     });

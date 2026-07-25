@@ -5,6 +5,8 @@ describe("proxy policy", () => {
   it.each([
     ["GET", ["api", "settings"]],
     ["GET", ["api", "monitor", "summary"]],
+    ["GET", ["api", "management", "dashboard"]],
+    ["POST", ["api", "management", "stations", "station-1", "pre-generations"]],
     ["GET", ["api", "play-history"]],
     ["GET", ["api", "play-history", "history-1"]],
     ["GET", ["api", "letters"]],

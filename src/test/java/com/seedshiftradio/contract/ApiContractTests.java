@@ -48,6 +48,8 @@ import com.seedshiftradio.letter.LetterController;
 import com.seedshiftradio.letter.LetterPublicController;
 import com.seedshiftradio.letter.LetterPublicService;
 import com.seedshiftradio.letter.LetterService;
+import com.seedshiftradio.management.ManagementController;
+import com.seedshiftradio.management.ManagementService;
 import com.seedshiftradio.monitor.HealthController;
 import com.seedshiftradio.monitor.HealthService;
 import com.seedshiftradio.monitor.MonitorController;
@@ -103,6 +105,9 @@ class ApiContractTests {
 
 	@MockitoBean
 	LetterService letterService;
+
+	@MockitoBean
+	ManagementService managementService;
 
 	@MockitoBean
 	MonitorService monitorService;
@@ -287,6 +292,7 @@ class ApiContractTests {
 			HealthController.class,
 			LetterController.class,
 			LetterPublicController.class,
+			ManagementController.class,
 			MonitorController.class,
 			PlayHistoryController.class,
 			ProgramTemplateController.class,

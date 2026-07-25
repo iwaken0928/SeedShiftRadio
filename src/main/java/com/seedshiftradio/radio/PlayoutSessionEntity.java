@@ -24,6 +24,9 @@ import lombok.Setter;
 @Table(name = "playout_session")
 public class PlayoutSessionEntity {
 
+	public static final String PURPOSE_LIVE = "LIVE";
+	public static final String PURPOSE_PRE_GENERATION = "PRE_GENERATION";
+
 	@Id
 	private String id;
 
@@ -35,6 +38,9 @@ public class PlayoutSessionEntity {
 
 	@Column(name = "resume_playback", nullable = false)
 	private boolean resumePlayback;
+
+	@Column(nullable = false)
+	private String purpose;
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
@@ -61,11 +67,27 @@ public class PlayoutSessionEntity {
 	@Column(name = "correlation_id", nullable = false)
 	private String correlationId;
 
+	public static PlayoutSessionEntity preGeneration(String id, String stationId, String correlationId) {
+		PlayoutSessionEntity session = new PlayoutSessionEntity();
+		session.setId(id);
+		session.setStationId(stationId);
+		session.setRequestedBy("ADMIN_PRE_GENERATION");
+		session.setResumePlayback(false);
+		session.setPurpose(PURPOSE_PRE_GENERATION);
+		session.setState(PlayoutState.PREPARING);
+		session.setBufferReadyCount(0);
+		session.setCorrelationId(correlationId);
+		return session;
+	}
+
 	@PrePersist
 	void onCreate() {
 		Instant now = Instant.now();
 		if (bufferReadyCount == null) {
 			bufferReadyCount = 0;
+		}
+		if (purpose == null || purpose.isBlank()) {
+			purpose = PURPOSE_LIVE;
 		}
 		startedAt = now;
 		updatedAt = now;
@@ -76,6 +98,13 @@ public class PlayoutSessionEntity {
 		if (bufferReadyCount == null) {
 			bufferReadyCount = 0;
 		}
+		if (purpose == null || purpose.isBlank()) {
+			purpose = PURPOSE_LIVE;
+		}
 		updatedAt = Instant.now();
+	}
+
+	public boolean isPreGeneration() {
+		return PURPOSE_PRE_GENERATION.equals(purpose);
 	}
 }

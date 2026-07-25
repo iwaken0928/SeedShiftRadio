@@ -46,15 +46,27 @@ public class GenerateMusicJob {
 			latestItem.setContentOrigin(generatedAsset.contentOrigin());
 			latestItem.setStatus(QueueItemStatus.READY);
 			queueItemRepository.save(latestItem);
+			if (session.isPreGeneration()) {
+				return;
+			}
 			radioService.synchronizeSessionAfterAsyncUpdate(latestItem.getSessionId());
 		} catch (MusicGenWorkerException exception) {
-			handleFailure(queueItemId, item.getSessionId(), exception.errorCode());
+			handleFailure(queueItemId, session, exception.errorCode());
 		} catch (RuntimeException exception) {
-			handleFailure(queueItemId, item.getSessionId(), "PROVIDER_BAD_RESPONSE");
+			handleFailure(queueItemId, session, "PROVIDER_BAD_RESPONSE");
 		}
 	}
 
-	private void handleFailure(String queueItemId, String sessionId, String errorCode) {
-		radioService.handleAsyncGenerationFailure(sessionId, queueItemId, errorCode);
+	private void handleFailure(String queueItemId, PlayoutSessionEntity session, String errorCode) {
+		if (session.isPreGeneration()) {
+			queueItemRepository.findById(queueItemId).ifPresent(item -> {
+				if (item.getStatus() == QueueItemStatus.GENERATING) {
+					item.setStatus(QueueItemStatus.FAILED);
+					queueItemRepository.save(item);
+				}
+			});
+			return;
+		}
+		radioService.handleAsyncGenerationFailure(session.getId(), queueItemId, errorCode);
 	}
 }

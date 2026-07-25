@@ -366,6 +366,94 @@ public class RadioService {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public PreGenerationResult preGenerateOffAirContent(
+			String sessionId,
+			String templateId,
+			int targetProgramCount,
+			boolean includeSpeech,
+			boolean includeMusic) {
+		return withSessionLock(sessionId, () -> {
+			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId)
+					.orElseThrow(() -> new ApiException(
+							HttpStatus.NOT_FOUND,
+							"NOT_FOUND",
+							"事前生成セッションが見つかりません。",
+							Map.of("sessionId", sessionId)));
+			if (!session.isPreGeneration()) {
+				throw new ApiException(
+						HttpStatus.CONFLICT,
+						"CONFLICT",
+						"ライブ再生セッションは手動事前生成に使用できません。",
+						Map.of("sessionId", sessionId));
+			}
+			int programCount = Math.max(1, Math.min(10, targetProgramCount));
+			int nextSequence = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(sessionId).size() + 1;
+			int materializedSegmentCount = 0;
+			int queuedMusicCount = 0;
+			OffsetDateTime plannedAt = OffsetDateTime.now();
+			for (int programIndex = 0; programIndex < programCount; programIndex++) {
+				ResolvedProgramPlan plan = programmingService.resolvePreGenerationPlan(
+						session.getStationId(),
+						templateId,
+						plannedAt);
+				ProgramBlockEntity block = createProgramBlock(session, plan, ProgramBlockStatus.PLANNED);
+				List<ProgramBlockSlotEntity> blockSlots =
+						programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(block.getId());
+				List<QueueItemEntity> queueItems = new ArrayList<>();
+				for (ProgramBlockSlotEntity blockSlot : blockSlots) {
+					QueueItemEntity item = createQueueItem(
+							session,
+							block,
+							blockSlot,
+							nextSequence++,
+							blockSlots.size());
+					blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
+					queueItems.add(item);
+				}
+				queueItemRepository.saveAll(queueItems);
+				queueItemRepository.flush();
+				for (QueueItemEntity item : queueItems) {
+					if (item.getAssetId() != null && !item.getAssetId().isBlank()) {
+						continue;
+					}
+					if (item.getSegmentType() == SegmentType.MUSIC_AI) {
+						if (includeMusic) {
+							item.setStatus(QueueItemStatus.GENERATING);
+							requestGenerateMusic(item);
+							queuedMusicCount++;
+						} else {
+							item.setStatus(QueueItemStatus.PLANNED);
+						}
+						continue;
+					}
+					if (item.getSegmentType() == SegmentType.MUSIC_LOCAL) {
+						if (includeMusic) {
+							assetService.ensureQueueAudioAsset(item);
+						} else {
+							item.setStatus(QueueItemStatus.PLANNED);
+						}
+						continue;
+					}
+					if (includeSpeech) {
+						assetService.ensureQueueAudioAsset(item);
+					} else {
+						item.setStatus(QueueItemStatus.PLANNED);
+					}
+				}
+				queueItemRepository.saveAll(queueItems);
+				programBlockSlotRepository.saveAll(blockSlots);
+				materializedSegmentCount += queueItems.size();
+				plannedAt = plannedAt.plusNanos((long) plan.plannedDurationMs() * 1_000_000L);
+			}
+			long readyCount = queueItemRepository.countBySessionIdAndStatus(sessionId, QueueItemStatus.READY);
+			session.setBufferReadyCount(Math.toIntExact(Math.min(Integer.MAX_VALUE, readyCount)));
+			session.setState(PlayoutState.STOPPED);
+			playoutSessionRepository.save(session);
+			return new PreGenerationResult(programCount, materializedSegmentCount, queuedMusicCount);
+		});
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void synchronizeSessionAfterAsyncUpdate(String sessionId) {
 		withSessionLock(sessionId, () -> {
 			PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId).orElse(null);
@@ -1154,5 +1242,11 @@ public class RadioService {
 
 	private String nextId(String prefix) {
 		return prefix + "-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+	}
+
+	public record PreGenerationResult(
+			int materializedProgramCount,
+			int materializedSegmentCount,
+			int queuedMusicCount) {
 	}
 }

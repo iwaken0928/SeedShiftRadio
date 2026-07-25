@@ -95,4 +95,33 @@ class GenerateMusicJobTests {
 		verify(radioService).handleAsyncGenerationFailure("playout-1", "queue-1", "PROVIDER_TIMEOUT");
 		verify(radioService, never()).synchronizeSessionAfterAsyncUpdate(any());
 	}
+
+	@Test
+	void preGenerationSuccessDoesNotSynchronizeLiveRadioSession() {
+		QueueItemEntity item = new QueueItemEntity();
+		item.setId("queue-pregen");
+		item.setSessionId("playout-pregen");
+		item.setStatus(QueueItemStatus.GENERATING);
+		PlayoutSessionEntity session = PlayoutSessionEntity.preGeneration(
+				"playout-pregen",
+				"station-night",
+				"pregen-1");
+
+		when(queueItemRepository.findById("queue-pregen")).thenReturn(Optional.of(item), Optional.of(item));
+		when(playoutSessionRepository.findById("playout-pregen")).thenReturn(Optional.of(session));
+		when(musicGenerationRuntimeService.generate(eq("station-night"), any(QueueItemEntity.class)))
+				.thenReturn(new MusicGenerationRuntimeService.GeneratedMusicAsset(
+						"asset-pregen",
+						"/api/assets/audio/asset-pregen.wav",
+						"provider-job-pregen",
+						"worker-job-pregen",
+						"LIVE_GEN"));
+
+		generateMusicJob.run("queue-pregen", "pregen-1");
+
+		org.junit.jupiter.api.Assertions.assertEquals(QueueItemStatus.READY, item.getStatus());
+		verify(queueItemRepository).save(item);
+		verify(radioService, never()).synchronizeSessionAfterAsyncUpdate(any());
+		verify(radioService, never()).handleAsyncGenerationFailure(any(), any(), any());
+	}
 }

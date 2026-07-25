@@ -71,6 +71,20 @@ public interface GeneratedAssetRepository extends JpaRepository<GeneratedAssetEn
 			""")
 	List<AssetTypeStats> summarizeByAssetType();
 
+	@Query(value = """
+			SELECT ga.asset_type AS assetType,
+				COUNT(ga.id) AS assetCount,
+				COALESCE(SUM(ga.byte_size), 0) AS byteSize,
+				MAX(ga.created_at) AS latestCreatedAt
+			FROM generated_asset ga
+			JOIN queue_item qi ON qi.id = ga.queue_item_id
+			JOIN program_block pb ON pb.id = qi.program_block_id
+			WHERE pb.station_id = :stationId
+				AND ga.byte_size > 0
+			GROUP BY ga.asset_type
+			""", nativeQuery = true)
+	List<StationAssetStats> summarizeByStationId(@Param("stationId") String stationId);
+
 	interface AssetTypeStats {
 
 		GeneratedAssetType getAssetType();
@@ -80,5 +94,16 @@ public interface GeneratedAssetRepository extends JpaRepository<GeneratedAssetEn
 		long getByteSize();
 
 		long getCacheHitCount();
+	}
+
+	interface StationAssetStats {
+
+		String getAssetType();
+
+		long getAssetCount();
+
+		long getByteSize();
+
+		Instant getLatestCreatedAt();
 	}
 }

@@ -270,6 +270,19 @@ Irodori の設定例:
 
 `apiKeyRef` は Irodori-TTS-Server の optional bearer token を使う場合だけ設定する。無認証 localhost 運用では空でもよいが、外部 bind は禁止に近い扱いとし、必要な場合は firewall と token を必須にする。
 
+### 8.5 管理画面からのオフエア事前生成
+
+`POST /api/management/stations/{stationId}/pre-generations` は `PreGenerationJobCoordinator` を介して `PreGenerationJob` を JobRunr へ投入する。
+background job server が無効な test / local 実行では、既存 queue job と同様に transaction commit 後のインライン実行へ切り替える。
+
+`PreGenerationJob` は `playout_session.purpose=PRE_GENERATION` の session に対して、`ProgrammingService.resolvePreGenerationPlan` で現在の局ルールまたは指定した有効 template を解決し、`program_block`, `program_block_slot`, `queue_item` を materialize する。
+script / TTS は既存 `AssetService` / `SpeechAssetGenerationService`、`MUSIC_AI` は既存 `GenerateMusicJob` を使い、別の Provider 契約を増やさない。
+事前生成 MusicGen の成功・失敗はオフエア queue item と `provider_job` だけを更新し、`radio.status.changed`, `queue.updated`, `program.changed` のライブ SSE を発行しない。
+
+`PreGenerationRequestStatus.MATERIALIZED` は番組データと queue item の作成、および MusicGen job 投入が完了した状態である。
+全 MusicGen job の成功待ちではないため、運用者は `/api/management/dashboard` の局別 asset 集計と `/api/monitor/summary` の `runningJobs` / `recentErrors` を併用する。
+request / response / log には prompt、lyrics、台本本文、レター本文、radioName、秘密値を含めない。
+
 ## 9. 推奨 OSS と使い分け
 
 | 領域 | 第一候補 | 代替 |

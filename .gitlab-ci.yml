@@ -283,6 +283,7 @@ compose-prod-validate:
     - export SEEDSHIFT_RADIO_DB_USERNAME=seedshift
     - export SEEDSHIFT_RADIO_DB_PASSWORD=validate-password
     - export SEEDSHIFT_ADMIN_TOKEN=validate-token
+    - export ACESTEP_API_KEY=validate-acestep-token
     - export SEEDSHIFT_WEB_ADMIN_PASSWORD=validate-password
     - export SEEDSHIFT_WEB_SESSION_SECRET=validate-session-secret-at-least-32-bytes
     - podman --remote compose -f infra/compose/compose.prod.yml config >/dev/null
@@ -387,7 +388,7 @@ deploy-app:
   resource_group: seedshift-radio-deploy
   script:
     - export SEEDSHIFT_IMAGE_REPOSITORY="${SEEDSHIFT_IMAGE_REPOSITORY:-${CI_REGISTRY_IMAGE:-${SEEDSHIFT_LOCAL_IMAGE_REPOSITORY}}}"
-    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN SEEDSHIFT_WEB_ADMIN_PASSWORD SEEDSHIFT_WEB_SESSION_SECRET
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_ADMIN_TOKEN ACESTEP_API_KEY SEEDSHIFT_WEB_ADMIN_PASSWORD SEEDSHIFT_WEB_SESSION_SECRET
     - export SEEDSHIFT_SERVER_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/server:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_WEB_IMAGE="${SEEDSHIFT_IMAGE_REPOSITORY}/web:${CI_COMMIT_SHORT_SHA}"
     - export SEEDSHIFT_DEPLOY_DIR="${SEEDSHIFT_DEPLOY_DIR:-$HOME/seedshift-radio-deploy}"

@@ -193,7 +193,7 @@ stale job は条件付き更新で `FAILED`、`error_code=PROVIDER_INTERRUPTED`�
 - preGenerationMode
 - TTS adapter (`VOICEVOX`, `IRODORI_OPENAI_TTS` など)
 
-機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。
+機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。参照先が未設定、空、読み取り不能の場合、接続テストと実行経路は `PROVIDER_AUTH_FAILED` として扱い、health endpoint が匿名で成功しても `UP` にしない。
 LLM の `defaultModelProfileId` は model 名として使い、`modelProfiles` の存在を要求しない。LLM endpoint の `timeoutMs` を省略する場合は 20000 ms を既定とする。
 
 Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になり、script、TTS、MusicGen が cache-first 再利用へ接続済みである。MusicGen では station `preGeneration.preferCacheReuse=false` の場合に reusable asset が存在しても worker submit を優先する。
@@ -215,7 +215,7 @@ Server は実行経路を `provider_job` と `generated_asset` に残し、`queu
 | Field | 用途 |
 |---|---|
 | `adapter` | `MUSICGEN_WORKER` または `ACE_STEP` |
-| `apiKeyRef` | `env:` / `file:` 形式の秘密値参照。空なら無認証 |
+| `apiKeyRef` | `env:` / `file:` 形式の秘密値参照。ACE-Step では `env:ACESTEP_API_KEY` を標準とする |
 | `defaultModelProfileId` | 未指定 request の profile id |
 | `modelProfiles` | profile id から model 設定への map |
 
@@ -223,7 +223,7 @@ ACE-Step profile は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTr
 
 ### 8.3 ACE-Step runtime probes
 
-ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。監視 UI は生成本文ではなく、provider key、adapter、profile id、分類済み失敗理由だけを表示する。
+ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。`/health` と `/v1/models` が匿名で成功する実装でも、保護対象の `/v1/stats`, `/release_task`, `/query_result`, `/v1/audio` に同じ Bearer token が必要なため、Server container へ `ACESTEP_API_KEY` を必ず注入する。監視 UI は生成本文ではなく、provider key、adapter、profile id、分類済み失敗理由だけを表示する。
 
 ### 8.4 TTS provider profile
 

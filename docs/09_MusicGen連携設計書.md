@@ -66,6 +66,8 @@ ACE-Step 1.5 は次の REST API を使う。
 - `/v1/audio?path=...`: 成功 result 内の file URL を Server が download し、asset pipeline に登録する
 - `GET /health`, `GET /v1/models`, `GET /v1/stats`: settings / monitor から接続状態、model 一覧、queue size、平均処理時間を確認する
 
+iwaken-server の production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server は host network で動作するため `baseUrl=http://127.0.0.1:8001` を使い、ACE-Step の host port `8001` へ接続する。
+
 HTTP `401/403` は `PROVIDER_AUTH_FAILED`、`408/504` と通信 timeout は `PROVIDER_TIMEOUT`、`429/503` は `PROVIDER_RESOURCE_EXHAUSTED`、その他 4xx と安全性ポリシーによる拒否は `PROVIDER_REJECTED`、接続不能は `PROVIDER_UNREACHABLE`、その他 5xx / JSON 不正 / 空応答 / 未知状態は `PROVIDER_BAD_RESPONSE` に分類する。Server 側の中断は `PROVIDER_INTERRUPTED` とする。外部 Provider または Worker が未知の error code を返した場合も `PROVIDER_BAD_RESPONSE` へ正規化する。分類は縮退判断に使い、Provider 応答本文を標準ログへそのまま残さない。
 
 ## 5. ACE-Step model profiles

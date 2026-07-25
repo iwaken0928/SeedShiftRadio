@@ -169,6 +169,8 @@ public class ProviderHealthService {
 					provider.capabilities(),
 					provider.baseUrl(),
 					enrichProviderMetadata(providerType, provider)));
+		} catch (ProviderSecretException exception) {
+			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "PROVIDER_AUTH_FAILED", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (IllegalArgumentException exception) {
 			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "無効な URL です。", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (HttpTimeoutException exception) {
@@ -335,16 +337,28 @@ public class ProviderHealthService {
 			return null;
 		}
 		if (secretRef.startsWith("env:")) {
-			return System.getenv(secretRef.substring("env:".length()));
+			String value = System.getenv(secretRef.substring("env:".length()));
+			if (value == null || value.isBlank()) {
+				throw new ProviderSecretException();
+			}
+			return value;
 		}
 		if (secretRef.startsWith("file:")) {
 			try {
-				return java.nio.file.Files.readString(java.nio.file.Path.of(secretRef.substring("file:".length()))).trim();
+				String value = java.nio.file.Files.readString(java.nio.file.Path.of(secretRef.substring("file:".length()))).trim();
+				if (value.isBlank()) {
+					throw new ProviderSecretException();
+				}
+				return value;
 			} catch (IOException exception) {
-				return null;
+				throw new ProviderSecretException();
 			}
 		}
-		return null;
+		throw new ProviderSecretException();
+	}
+
+	private static final class ProviderSecretException extends RuntimeException {
+		private static final long serialVersionUID = 1L;
 	}
 
 	private void putIfPresent(Map<String, Object> metadata, String key, JsonNode value) {

@@ -1156,7 +1156,7 @@ Web の `/settings` Import / Export は専用 API を追加せず、`GET /api/se
 
 ### 6.10 `POST /api/settings/test-connections`
 
-Provider に対する接続テストを一括実行し、種別ごとの `status` を返します。レスポンスは `checkedAt` と `providers` map を持ち、各 payload は `/api/monitor/summary`, `/api/health`, SSE `provider.health.changed` と同一形式です。Web の `/settings` では未保存 draft ではなく、直前に保存された `config.json` を対象にテストします。
+Provider に対する接続テストを一括実行し、種別ごとの `status` を返します。レスポンスは `checkedAt` と `providers` map を持ち、各 payload は `/api/monitor/summary`, `/api/health`, SSE `provider.health.changed` と同一形式です。Web の `/settings` では未保存 draft ではなく、直前に保存された `config.json` を対象にテストします。`apiKeyRef` の環境変数または file が未設定、空、読み取り不能の場合は、匿名 health endpoint が成功しても対象 Provider を `DOWN / PROVIDER_AUTH_FAILED` として返します。
 
 ```json
 {

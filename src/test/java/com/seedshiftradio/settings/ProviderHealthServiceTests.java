@@ -184,6 +184,51 @@ class ProviderHealthServiceTests {
 		assertEquals(List.of("irodori-tts"), health.metadata().get("models"));
 	}
 
+	@Test
+	void missingProviderSecretReferenceIsReportedAsAuthenticationFailure() {
+		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort();
+		SettingsDocument settings = SettingsDocument.defaults();
+		SettingsDocument.ProviderCatalog defaults = settings.providers();
+		SettingsDocument.ProviderEndpoint aceStep = new SettingsDocument.ProviderEndpoint(
+				baseUrl,
+				"/up",
+				1_000,
+				List.of("MUSIC_GEN", "ACE_STEP"),
+				"ACE_STEP",
+				"file:" + tempDir.resolve("missing-acestep-token"),
+				"ace-ja-fast",
+				SettingsDocument.MusicGenerationModelProfile.defaultAceStepProfiles());
+		SettingsDocument configured = new SettingsDocument(
+				settings.version(),
+				settings.schemaVersion(),
+				settings.updatedAt(),
+				settings.server(),
+				settings.paths(),
+				settings.playout(),
+				settings.cache(),
+				settings.programming(),
+				new SettingsDocument.ProviderCatalog(
+						defaults.llm(),
+						defaults.tts(),
+						new SettingsDocument.ProviderGroup("ace-step", List.of(), Map.of("ace-step", aceStep))),
+				settings.security(),
+				settings.features()).normalize();
+		ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+		RadioSettingsStore store = new RadioSettingsStore(
+				objectMapper,
+				new RadioConfigProperties(tempDir.resolve("missing-secret-config.json").toString()));
+		store.save(configured);
+		ProviderHealthService service = new ProviderHealthService(
+				new ProviderRegistry(store),
+				new StreamEventService(),
+				objectMapper);
+
+		SettingsDtos.ProviderHealthPayload health = service.refreshHealth().get("musicGen");
+
+		assertEquals("DOWN", health.status());
+		assertEquals("PROVIDER_AUTH_FAILED", health.message());
+	}
+
 	private void write(HttpExchange exchange, int statusCode, String body) throws IOException {
 		byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
 		exchange.sendResponseHeaders(statusCode, bytes.length);

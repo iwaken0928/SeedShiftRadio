@@ -410,7 +410,7 @@ public class RadioService {
 					blockSlot.setStatus(ProgramBlockSlotStatus.QUEUED);
 					queueItems.add(item);
 				}
-				queueItemRepository.saveAll(queueItems);
+				queueItems = queueItemRepository.saveAll(queueItems);
 				queueItemRepository.flush();
 				for (QueueItemEntity item : queueItems) {
 					if (item.getAssetId() != null && !item.getAssetId().isBlank()) {

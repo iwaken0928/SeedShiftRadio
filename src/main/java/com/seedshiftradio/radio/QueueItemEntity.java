@@ -106,7 +106,11 @@ public class QueueItemEntity {
 
 	@PreUpdate
 	void onUpdate() {
-		updatedAt = Instant.now();
+		Instant now = Instant.now();
+		if (createdAt == null) {
+			createdAt = now;
+		}
+		updatedAt = now;
 		if (contentOrigin == null || contentOrigin.isBlank()) {
 			contentOrigin = "LIVE_GEN";
 		}

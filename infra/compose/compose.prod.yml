@@ -4,6 +4,7 @@ services:
   server:
     image: ${SEEDSHIFT_SERVER_IMAGE:?SEEDSHIFT_SERVER_IMAGE is required}
     container_name: ${SEEDSHIFT_SERVER_CONTAINER_NAME:-seedshift-radio-server}
+    working_dir: /var/lib/seedshift-radio
     network_mode: host
     restart: unless-stopped
     security_opt:

@@ -78,6 +78,15 @@ LLM へ渡す `messages` は system prompt と `ScriptGenerationContext.prompt`�
 
 LLM の Provider 試行は 1 試行ごとに `provider_job` を作り、同じ論理生成要求では `correlationId` を継承する。回復可能な `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` だけを次 Provider へ送る。`PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` は別 Provider へ同じ prompt を送らない。外部 Provider で成功しなかった場合は `TemplateScriptProvider` の安全な定型台本へ縮退し、この fallback も `providerKey=template-script` の別 `provider_job` として記録する。
 
+Provider が有効な構造化台本を返し、Server の台本正規化と品質検査まで完了した時点で
+その Provider 試行の `provider_job` は `SUCCEEDED` とする。
+後続の asset 保存失敗は Provider 応答形式の不正ではないため `PROVIDER_BAD_RESPONSE` にせず、
+上位の事前生成 request を `PRE_GENERATION_FAILED` で終了させる。
+Provider 応答後でも台本正規化や品質検査で Server 内部例外が起きた場合と、cache clone に失敗した場合は、
+該当する `provider_job` を `PROVIDER_INTERRUPTED` とする。
+asset storage 自体が利用不能な場合、別 Provider や `TemplateScriptProvider` へ切り替えても回復しないため、
+Provider fallback は行わない。
+
 ### 5.2 Irodori OpenAI TTS adapter
 
 Irodori-TTS は Java Server から Python CLI を直接起動せず、`Aratako/Irodori-TTS-Server` を別プロセスまたは別 container として起動し、HTTP で呼び出す。

@@ -61,6 +61,8 @@ LLM の候補が不正または Provider chain 全体が利用不能でも、同
 - 許可する field は `text` と `safetyFlags` の 2 つだけとし、未知 field を含む応答は拒否する
 - `text` は 1 文字以上 20000 文字以下、`safetyFlags` は 32 件以下の文字列配列、各 flag は 1 文字以上 128 文字以下とする
 - 不正 JSON、必須 field 欠落、型不正、空台本は `PROVIDER_BAD_RESPONSE` へ正規化する
+- 有効な台本応答を正規化した後の asset 保存失敗は Provider 応答不正ではないため
+  `PROVIDER_BAD_RESPONSE` にせず、事前生成では `PRE_GENERATION_FAILED` として扱う
 - 構造化 JSON の検証に成功しても、後段の `JapaneseScriptNormalizer` と `JapaneseQualityGuard` は省略しない
 - 入力 prompt、レター原文、raw Provider response は生成 asset metadata、Provider job、監視 API、SSE、標準ログへ残さない。生成済み `GeneratedScript.text` は放送 directive の正本として script asset に保存する
 

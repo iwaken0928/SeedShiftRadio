@@ -120,24 +120,26 @@ public class ScriptGenerationService {
 				return reuseScriptAsset(item, provider.providerKey(), cacheKey, reusableAsset.orElseThrow());
 			}
 			ProviderJobEntity providerJob = createRunningJob(item, provider.providerKey());
+			ScriptDirectiveSnapshot snapshot;
 			try {
-				ScriptDirectiveSnapshot snapshot = buildSnapshot(
+				snapshot = buildSnapshot(
 						httpScriptProvider,
 						provider,
 						context,
 						resolveVoiceHint(context, null));
-				persistScriptAsset(item, context, snapshot, provider, providerJob.getId(), cacheKey);
-				providerJobService.markSucceeded(providerJob.getId());
-				return snapshot;
 			} catch (ProviderRuntimeException exception) {
 				providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
 				if (!ProviderErrorClassifier.fallbackAllowed(ProviderType.LLM, exception.providerErrorCode())) {
 					break;
 				}
+				continue;
 			} catch (RuntimeException exception) {
-				providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
+				providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_INTERRUPTED);
 				throw exception;
 			}
+			providerJobService.markSucceeded(providerJob.getId());
+			persistScriptAsset(item, context, snapshot, provider, providerJob.getId(), cacheKey);
+			return snapshot;
 		}
 		return createTemplateScriptAsset(item, context);
 	}
@@ -150,27 +152,28 @@ public class ScriptGenerationService {
 			return reuseScriptAsset(item, providerKey, cacheKey, reusableAsset.orElseThrow());
 		}
 		ProviderJobEntity providerJob = createRunningJob(item, providerKey);
+		ScriptDirectiveSnapshot snapshot;
 		try {
-			ScriptDirectiveSnapshot snapshot = buildSnapshot(
+			snapshot = buildSnapshot(
 					templateScriptProvider,
 					null,
 					context,
 					resolveVoiceHint(context, null));
-			generatedAssetService.createScriptAsset(
-					snapshot.normalizedText(),
-					"template-script:deterministic",
-					item.getId(),
-					providerJob.getId(),
-					metadata(item, context, snapshot, providerKey, providerJob.getId(), cacheKey, false));
-			providerJobService.markSucceeded(providerJob.getId());
-			return snapshot;
 		} catch (ProviderRuntimeException exception) {
 			providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
 			throw exception;
 		} catch (RuntimeException exception) {
-			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
+			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_INTERRUPTED);
 			throw exception;
 		}
+		providerJobService.markSucceeded(providerJob.getId());
+		generatedAssetService.createScriptAsset(
+				snapshot.normalizedText(),
+				"template-script:deterministic",
+				item.getId(),
+				providerJob.getId(),
+				metadata(item, context, snapshot, providerKey, providerJob.getId(), cacheKey, false));
+		return snapshot;
 	}
 
 	private ProviderJobEntity createRunningJob(QueueItemEntity item, String providerKey) {
@@ -228,7 +231,7 @@ public class ScriptGenerationService {
 			providerJobService.markSucceeded(providerJob.getId());
 			return ScriptDirectiveSnapshot.fromMetadata(cloned.getMetadata());
 		} catch (RuntimeException exception) {
-			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
+			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_INTERRUPTED);
 			throw exception;
 		}
 	}

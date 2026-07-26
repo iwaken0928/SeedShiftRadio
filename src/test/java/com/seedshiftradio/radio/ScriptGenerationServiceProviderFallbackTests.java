@@ -1,6 +1,7 @@
 package com.seedshiftradio.radio;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -19,7 +20,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 
+import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
@@ -171,6 +174,57 @@ class ScriptGenerationServiceProviderFallbackTests {
 		verify(httpScriptProvider, never()).generate(fallback, context);
 		verify(templateScriptProvider).generate(null, context);
 		verify(providerJobService).markSucceeded("job-template");
+	}
+
+	@Test
+	void templateAssetPersistenceFailureDoesNotReclassifySuccessfulTemplateGenerationAsBadResponse() {
+		ProviderRegistry.ResolvedProvider primary = provider("llm-primary", false);
+		ProviderJobEntity primaryJob = job("job-primary");
+		ProviderJobEntity templateJob = job("job-template");
+		when(providerRegistry.resolveChain(ProviderType.LLM)).thenReturn(List.of(primary));
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.SCRIPT_GEN), eq(ProviderType.LLM), anyString(), eq("queue-script-1"), eq("corr-script-1")))
+				.thenReturn(primaryJob, templateJob);
+		when(httpScriptProvider.generate(primary, context))
+				.thenThrow(new ScriptGenerationException(ProviderErrorCode.PROVIDER_TIMEOUT, "timeout"));
+		when(templateScriptProvider.generate(null, context))
+				.thenReturn(new GeneratedScript("template script", List.of("DETERMINISTIC_FALLBACK")));
+		when(generatedAssetService.createScriptAsset(
+				anyString(), anyString(), eq("queue-script-1"), eq("job-template"), any(Map.class)))
+				.thenThrow(new ApiException(
+						HttpStatus.INTERNAL_SERVER_ERROR,
+						"INTERNAL_ERROR",
+						"generated asset の保存に失敗しました。"));
+
+		assertThrows(ApiException.class, () -> service.ensureScriptAsset(item));
+
+		verify(providerJobService).markFailed("job-primary", ProviderErrorCode.PROVIDER_TIMEOUT);
+		verify(providerJobService).markSucceeded("job-template");
+		verify(providerJobService, never()).markFailed(eq("job-template"), any(ProviderErrorCode.class));
+	}
+
+	@Test
+	void externalProviderAssetPersistenceFailureDoesNotTriggerTemplateFallback() {
+		ProviderRegistry.ResolvedProvider primary = provider("llm-primary", false);
+		ProviderJobEntity primaryJob = job("job-primary");
+		when(providerRegistry.resolveChain(ProviderType.LLM)).thenReturn(List.of(primary));
+		when(providerJobService.createQueuedJob(
+				eq(ProviderJobType.SCRIPT_GEN), eq(ProviderType.LLM), eq("llm-primary"),
+				eq("queue-script-1"), eq("corr-script-1"))).thenReturn(primaryJob);
+		when(httpScriptProvider.generate(primary, context))
+				.thenReturn(new GeneratedScript("generated script", List.of("LLM_GENERATED")));
+		when(generatedAssetService.createScriptAsset(
+				anyString(), anyString(), eq("queue-script-1"), eq("job-primary"), any(Map.class)))
+				.thenThrow(new ApiException(
+						HttpStatus.INTERNAL_SERVER_ERROR,
+						"INTERNAL_ERROR",
+						"generated asset の保存に失敗しました。"));
+
+		assertThrows(ApiException.class, () -> service.ensureScriptAsset(item));
+
+		verify(providerJobService).markSucceeded("job-primary");
+		verify(providerJobService, never()).markFailed(eq("job-primary"), any(ProviderErrorCode.class));
+		verify(templateScriptProvider, never()).generate(any(), any());
 	}
 
 	@Test

@@ -21,6 +21,7 @@ import org.springframework.context.ApplicationEventPublisher;
 
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.PreGenerationRequestStatus;
+import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.management.ManagementDtos.ManagementDashboardResponse;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
@@ -32,6 +33,7 @@ import com.seedshiftradio.radio.PlayoutSessionEntity;
 import com.seedshiftradio.radio.PlayoutSessionRepository;
 import com.seedshiftradio.radio.ProgramBlockRepository;
 import com.seedshiftradio.radio.RadioService;
+import com.seedshiftradio.radio.ScriptGenerationException;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
@@ -145,6 +147,53 @@ class ManagementServiceTests {
 						new PreGenerationRequest(null, 1, false, false)));
 
 		assertEquals("VALIDATION_ERROR", error.getCode());
+	}
+
+	@Test
+	void assetStorageFailureRemainsInternalPreGenerationFailure() {
+		PreGenerationRequestEntity request = preGenerationRequest("pregen-storage", "station-night");
+		request.setStatus(PreGenerationRequestStatus.RUNNING);
+		PlayoutSessionEntity session = org.mockito.Mockito.mock(PlayoutSessionEntity.class);
+		when(session.getCorrelationId()).thenReturn("corr-storage");
+		when(preGenerationRequestRepository.findById("pregen-storage")).thenReturn(Optional.of(request));
+		when(playoutSessionRepository.findById(request.getSessionId())).thenReturn(Optional.of(session));
+
+		service.markPreGenerationFailed(
+				"pregen-storage",
+				new ApiException(
+						org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+						"INTERNAL_ERROR",
+						"generated asset の保存に失敗しました。"));
+
+		assertEquals(PreGenerationRequestStatus.FAILED, request.getStatus());
+		assertEquals("PRE_GENERATION_FAILED", request.getErrorCode());
+		verify(operationalEventService).recordPreGenerationFailure(
+				"pregen-storage",
+				"corr-storage",
+				"PRE_GENERATION_FAILED",
+				"事前生成処理で内部エラーが発生しました。requestId と同時刻の構造化運用ログを確認してください。");
+	}
+
+	@Test
+	void providerFailureKeepsClassifiedProviderErrorCode() {
+		PreGenerationRequestEntity request = preGenerationRequest("pregen-timeout", "station-night");
+		request.setStatus(PreGenerationRequestStatus.RUNNING);
+		PlayoutSessionEntity session = org.mockito.Mockito.mock(PlayoutSessionEntity.class);
+		when(session.getCorrelationId()).thenReturn("corr-timeout");
+		when(preGenerationRequestRepository.findById("pregen-timeout")).thenReturn(Optional.of(request));
+		when(playoutSessionRepository.findById(request.getSessionId())).thenReturn(Optional.of(session));
+
+		service.markPreGenerationFailed(
+				"pregen-timeout",
+				new ScriptGenerationException(ProviderErrorCode.PROVIDER_TIMEOUT, "timeout"));
+
+		assertEquals(PreGenerationRequestStatus.FAILED, request.getStatus());
+		assertEquals("PROVIDER_TIMEOUT", request.getErrorCode());
+		verify(operationalEventService).recordPreGenerationFailure(
+				"pregen-timeout",
+				"corr-timeout",
+				"PROVIDER_TIMEOUT",
+				"事前生成中に Provider がタイムアウトしました。実生成用 timeout とモデルのコールドスタート時間を確認してください。");
 	}
 
 	private GeneratedAssetRepository.StationAssetStats assetStats(String type, long count, long bytes) {

@@ -23,10 +23,10 @@ test("motion: reduced motion and mobile interaction targets stay usable", async 
   await page.goto(appUrl("/"));
 
   const hero = page.locator("main section").filter({
-    has: page.getByRole("heading", { name: "Live Playout", exact: true }),
+    has: page.getByRole("heading", { name: "番組再生", exact: true }),
   });
   const queue = page.locator("main section").filter({
-    has: page.getByRole("heading", { name: "Queue Snapshot", exact: true }),
+    has: page.getByRole("heading", { name: "再生待ち一覧", exact: true }),
   });
 
   await expect(hero).toHaveClass(/motion-enter/);

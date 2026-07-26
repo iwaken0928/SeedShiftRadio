@@ -21,6 +21,7 @@ import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
 import com.seedshiftradio.management.ManagementDtos.StationContentInventory;
 import com.seedshiftradio.monitor.MonitorService;
+import com.seedshiftradio.monitor.OperationalEventService;
 import com.seedshiftradio.programming.ProgramTemplateRepository;
 import com.seedshiftradio.programming.ProgrammingService;
 import com.seedshiftradio.radio.PlayoutSessionEntity;
@@ -28,6 +29,7 @@ import com.seedshiftradio.radio.PlayoutSessionRepository;
 import com.seedshiftradio.radio.ProgramBlockRepository;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
+import com.seedshiftradio.settings.ProviderRuntimeException;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
 
@@ -44,6 +46,7 @@ public class ManagementService {
 	private final ProgrammingService programmingService;
 	private final RadioService radioService;
 	private final ApplicationEventPublisher eventPublisher;
+	private final OperationalEventService operationalEventService;
 
 	public ManagementService(
 			MonitorService monitorService,
@@ -55,7 +58,8 @@ public class ManagementService {
 			PlayoutSessionRepository playoutSessionRepository,
 			ProgrammingService programmingService,
 			RadioService radioService,
-			ApplicationEventPublisher eventPublisher) {
+			ApplicationEventPublisher eventPublisher,
+			OperationalEventService operationalEventService) {
 		this.monitorService = monitorService;
 		this.stationRepository = stationRepository;
 		this.programTemplateRepository = programTemplateRepository;
@@ -66,6 +70,7 @@ public class ManagementService {
 		this.programmingService = programmingService;
 		this.radioService = radioService;
 		this.eventPublisher = eventPublisher;
+		this.operationalEventService = operationalEventService;
 	}
 
 	@Transactional(readOnly = true)
@@ -163,13 +168,42 @@ public class ManagementService {
 	}
 
 	@Transactional
-	public void markPreGenerationFailed(String requestId) {
+	public void markPreGenerationFailed(String requestId, RuntimeException exception) {
 		preGenerationRequestRepository.findById(requestId).ifPresent(entity -> {
+			String errorCode = resolvePreGenerationErrorCode(exception);
 			entity.setStatus(PreGenerationRequestStatus.FAILED);
-			entity.setErrorCode("PRE_GENERATION_FAILED");
+			entity.setErrorCode(errorCode);
 			entity.setCompletedAt(Instant.now());
 			preGenerationRequestRepository.save(entity);
+			operationalEventService.recordPreGenerationFailure(
+					requestId,
+					playoutSessionRepository.findById(entity.getSessionId())
+							.map(PlayoutSessionEntity::getCorrelationId)
+							.orElse(null),
+					errorCode,
+					preGenerationFailureMessage(errorCode));
 		});
+	}
+
+	private static String resolvePreGenerationErrorCode(Throwable exception) {
+		Throwable current = exception;
+		while (current != null) {
+			if (current instanceof ProviderRuntimeException providerException) {
+				return providerException.errorCode();
+			}
+			current = current.getCause();
+		}
+		return "PRE_GENERATION_FAILED";
+	}
+
+	private static String preGenerationFailureMessage(String errorCode) {
+		return switch (errorCode) {
+			case "PROVIDER_TIMEOUT" -> "事前生成中に Provider がタイムアウトしました。実生成用 timeout とモデルのコールドスタート時間を確認してください。";
+			case "PROVIDER_UNREACHABLE" -> "事前生成中に Provider へ接続できませんでした。";
+			case "PROVIDER_BAD_RESPONSE" -> "事前生成中に Provider が期待した形式の応答を返しませんでした。";
+			case "PROVIDER_RESOURCE_EXHAUSTED" -> "事前生成中に Provider の処理資源が不足しました。";
+			default -> "事前生成処理で内部エラーが発生しました。requestId と同時刻の構造化運用ログを確認してください。";
+		};
 	}
 
 	private StationContentInventory inventory(StationEntity station, PreGenerationResponse latestPreGeneration) {

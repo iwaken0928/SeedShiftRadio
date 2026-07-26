@@ -25,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.monitor.OperationalEventService;
 import com.seedshiftradio.stream.StreamEventService;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,11 +37,14 @@ class ProviderJobServiceTests {
 	@Mock
 	StreamEventService streamEventService;
 
+	@Mock
+	OperationalEventService operationalEventService;
+
 	ProviderJobService providerJobService;
 
 	@BeforeEach
 	void setUp() {
-		providerJobService = new ProviderJobService(providerJobRepository, streamEventService);
+		providerJobService = new ProviderJobService(providerJobRepository, streamEventService, operationalEventService);
 	}
 
 	@Test
@@ -67,6 +71,7 @@ class ProviderJobServiceTests {
 		Map<String, Object> payload = (Map<String, Object>) payloadCaptor.getValue();
 		assertEquals("PROVIDER_BAD_RESPONSE", payload.get("errorCode"));
 		assertEquals(false, payload.containsValue("WORKER_PRIVATE_ERROR"));
+		verify(operationalEventService).recordProviderJob("provider.job.failed", entity);
 	}
 
 	@Test
@@ -121,6 +126,7 @@ class ProviderJobServiceTests {
 		assertFalse(payload.containsKey("lyrics"));
 		assertFalse(payload.containsKey("apiKey"));
 		assertFalse(payload.containsKey("adminToken"));
+		verify(operationalEventService).recordProviderJob("provider.job.failed", failed);
 	}
 
 	@Test
@@ -140,6 +146,7 @@ class ProviderJobServiceTests {
 		assertFalse(recovered);
 		verify(providerJobRepository, never()).findById("provider-job-raced");
 		verify(streamEventService, never()).publish(any(String.class), any());
+		verify(operationalEventService, never()).recordProviderJob(any(String.class), any());
 	}
 
 	private ProviderJobEntity job(String id, ProviderJobStatus status) {

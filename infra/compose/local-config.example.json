@@ -16,7 +16,7 @@
         "ollama": {
           "baseUrl": "http://127.0.0.1:11434",
           "healthPath": "/api/tags",
-          "timeoutMs": 20000,
+          "timeoutMs": 120000,
           "capabilities": [
             "SCRIPT_GEN"
           ],

@@ -472,6 +472,20 @@ export interface MonitorAuditEvent {
   summary: string;
 }
 
+export interface OperationalEvent {
+  id: string;
+  level: "INFO" | "WARN" | "ERROR";
+  category: string;
+  eventType: string;
+  sourceId: string | null;
+  correlationId: string | null;
+  providerType: string | null;
+  providerKey: string | null;
+  errorCode: string | null;
+  message: string;
+  occurredAt: string;
+}
+
 export interface ProviderHealthPayload {
   providerType: string;
   providerKey: string | null;

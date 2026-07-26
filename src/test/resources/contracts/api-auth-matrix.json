@@ -12,6 +12,7 @@
   { "method": "GET", "path": "/api/management/stations/{stationId}/content", "access": "ADMIN" },
   { "method": "POST", "path": "/api/management/stations/{stationId}/pre-generations", "access": "ADMIN" },
   { "method": "GET", "path": "/api/monitor/assets/consistency", "access": "ADMIN" },
+  { "method": "GET", "path": "/api/monitor/logs", "access": "ADMIN" },
   { "method": "GET", "path": "/api/monitor/summary", "access": "ADMIN" },
   { "method": "GET", "path": "/api/play-history", "access": "ADMIN" },
   { "method": "GET", "path": "/api/play-history/{id}", "access": "ADMIN" },

@@ -25,6 +25,7 @@ import com.seedshiftradio.management.ManagementDtos.ManagementDashboardResponse;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
 import com.seedshiftradio.monitor.MonitorService;
+import com.seedshiftradio.monitor.OperationalEventService;
 import com.seedshiftradio.programming.ProgramTemplateRepository;
 import com.seedshiftradio.programming.ProgrammingService;
 import com.seedshiftradio.radio.PlayoutSessionEntity;
@@ -48,6 +49,7 @@ class ManagementServiceTests {
 	@Mock ProgrammingService programmingService;
 	@Mock RadioService radioService;
 	@Mock ApplicationEventPublisher eventPublisher;
+	@Mock OperationalEventService operationalEventService;
 
 	ManagementService service;
 
@@ -63,7 +65,8 @@ class ManagementServiceTests {
 				playoutSessionRepository,
 				programmingService,
 				radioService,
-				eventPublisher);
+				eventPublisher,
+				operationalEventService);
 	}
 
 	@Test

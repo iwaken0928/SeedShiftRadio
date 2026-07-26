@@ -63,6 +63,20 @@ public final class MonitorDtos {
 			String summary) {
 	}
 
+	public record OperationalEventSummary(
+			String id,
+			String level,
+			String category,
+			String eventType,
+			String sourceId,
+			String correlationId,
+			String providerType,
+			String providerKey,
+			String errorCode,
+			String message,
+			Instant occurredAt) {
+	}
+
 	public record AssetConsistencyResponse(
 			Instant checkedAt,
 			long assetCount,

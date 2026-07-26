@@ -3,12 +3,16 @@ package com.seedshiftradio.monitor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.seedshiftradio.common.config.OpenApiConfig;
 import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.monitor.MonitorDtos.AssetConsistencyResponse;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
+import com.seedshiftradio.monitor.MonitorDtos.OperationalEventSummary;
+
+import java.util.List;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 
@@ -18,10 +22,15 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 public class MonitorController {
 
 	private final MonitorService monitorService;
+	private final OperationalEventService operationalEventService;
 	private final AdminApiGuard adminApiGuard;
 
-	public MonitorController(MonitorService monitorService, AdminApiGuard adminApiGuard) {
+	public MonitorController(
+			MonitorService monitorService,
+			OperationalEventService operationalEventService,
+			AdminApiGuard adminApiGuard) {
 		this.monitorService = monitorService;
+		this.operationalEventService = operationalEventService;
 		this.adminApiGuard = adminApiGuard;
 	}
 
@@ -35,5 +44,13 @@ public class MonitorController {
 	public AssetConsistencyResponse assetConsistency(@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
 		adminApiGuard.require(adminToken);
 		return monitorService.assetConsistency();
+	}
+
+	@GetMapping("/logs")
+	public List<OperationalEventSummary> logs(
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
+			@RequestParam(defaultValue = "100") int limit) {
+		adminApiGuard.require(adminToken);
+		return operationalEventService.recent(limit);
 	}
 }

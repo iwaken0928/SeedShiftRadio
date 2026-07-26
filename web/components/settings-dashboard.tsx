@@ -1320,6 +1320,7 @@ function NumberField({
   value,
   min,
   step,
+  description,
   onChange,
 }: {
   id: string;
@@ -1327,6 +1328,7 @@ function NumberField({
   value: number;
   min: number;
   step?: number;
+  description?: string;
   onChange: (value: number) => void;
 }) {
   return (
@@ -1340,6 +1342,7 @@ function NumberField({
         value={value}
         onChange={(event) => onChange(Number.isNaN(event.currentTarget.valueAsNumber) ? min : event.currentTarget.valueAsNumber)}
       />
+      {description ? <p className="mt-2 text-xs leading-5 text-amber-700">{description}</p> : null}
     </div>
   );
 }
@@ -1557,6 +1560,11 @@ function ProviderGroupEditor({
                   label="タイムアウト（ミリ秒）"
                   value={endpoint.timeoutMs}
                   min={100}
+                  description={
+                    groupKey === "llm" && endpoint.timeoutMs < 30_000
+                      ? "接続確認には成功しても、モデルのコールドスタート中に実生成が失敗する短い設定です。実測ロード時間を上回る値（目安 30,000 ms 以上）を設定してください。"
+                      : undefined
+                  }
                   onChange={(value) => onEndpointChange(providerKey, "timeoutMs", value)}
                 />
                 <TextField

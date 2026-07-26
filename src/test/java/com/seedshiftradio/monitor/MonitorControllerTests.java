@@ -24,6 +24,7 @@ import com.seedshiftradio.domain.PlayoutState;
 import com.seedshiftradio.monitor.MonitorDtos.ArchiveMetrics;
 import com.seedshiftradio.monitor.MonitorDtos.AssetConsistencyResponse;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
+import com.seedshiftradio.monitor.MonitorDtos.OperationalEventSummary;
 import com.seedshiftradio.settings.GeneratedAssetService;
 
 @ExtendWith(MockitoExtension.class)
@@ -35,11 +36,44 @@ class MonitorControllerTests {
 	@Mock
 	AdminApiGuard adminApiGuard;
 
+	@Mock
+	OperationalEventService operationalEventService;
+
 	MockMvc mockMvc;
 
 	@BeforeEach
 	void setUp() {
-		mockMvc = MockMvcBuilders.standaloneSetup(new MonitorController(monitorService, adminApiGuard)).build();
+		mockMvc = MockMvcBuilders.standaloneSetup(
+				new MonitorController(monitorService, operationalEventService, adminApiGuard)).build();
+	}
+
+	@Test
+	void logsReturnsSafeStructuredEventsAndRequiresAdminToken() throws Exception {
+		when(operationalEventService.recent(50)).thenReturn(List.of(
+				new OperationalEventSummary(
+						"oplog-001",
+						"ERROR",
+						"PROVIDER_JOB",
+						"provider.job.failed",
+						"provider-job-001",
+						"corr-001",
+						"LLM",
+						"ollama",
+						"PROVIDER_TIMEOUT",
+						"Provider がタイムアウトしました。",
+						Instant.parse("2026-07-26T04:37:24Z"))));
+
+		mockMvc.perform(get("/api/monitor/logs")
+						.param("limit", "50")
+						.header(AdminApiGuard.HEADER_NAME, "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].category").value("PROVIDER_JOB"))
+				.andExpect(jsonPath("$[0].providerKey").value("ollama"))
+				.andExpect(jsonPath("$[0].errorCode").value("PROVIDER_TIMEOUT"))
+				.andExpect(jsonPath("$[0].correlationId").value("corr-001"));
+
+		verify(adminApiGuard).require("test-admin-token");
+		verify(operationalEventService).recent(50);
 	}
 
 	@Test

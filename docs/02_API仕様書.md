@@ -39,6 +39,7 @@
 | `GET` | `/api/management/stations/{stationId}/content` | `ADMIN` |
 | `POST` | `/api/management/stations/{stationId}/pre-generations` | `ADMIN` |
 | `GET` | `/api/monitor/assets/consistency` | `ADMIN` |
+| `GET` | `/api/monitor/logs` | `ADMIN` |
 | `GET` | `/api/monitor/summary` | `ADMIN` |
 | `GET` | `/api/play-history` | `ADMIN` |
 | `GET` | `/api/play-history/{id}` | `ADMIN` |
@@ -454,6 +455,7 @@
 | `POST` | `/api/management/stations/{stationId}/pre-generations` | オフエア事前生成 request 受付 |
 | `GET` | `/api/health` | ヘルス参照 |
 | `GET` | `/api/monitor/summary` | 監視サマリ参照 |
+| `GET` | `/api/monitor/logs` | 構造化運用ログ参照 |
 | `GET` | `/api/monitor/assets/consistency` | generated asset 整合性検査 |
 
 ## 6. 主要API詳細
@@ -1046,7 +1048,7 @@ Response:
         "ollama": {
           "baseUrl": "http://127.0.0.1:11434",
           "healthPath": "/api/tags",
-          "timeoutMs": 20000,
+          "timeoutMs": 120000,
           "capabilities": ["SCRIPT_GEN"],
           "adapter": "OLLAMA",
           "defaultModelProfileId": "qwen3:8b"
@@ -1152,7 +1154,7 @@ Response:
 
 `playout.minimumReadyCount` は `playout.targetReadyCount` 以下、`playout.maxPreparedDurationMs` は `playout.minReadyDurationMs` 以上で指定する必要があります。`maxPreparedBlocks`, `scriptAheadCount`, `ttsAheadCount`, `musicAheadCount` は 0 以上で受け付け、`idlePrefetchEnabled` は manual play 待機中に安全バッファ達成後の extra prefetch を許可するフラグです。
 
-`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持ちます。`providers.musicGen.providers.{key}` は追加で `modelProfiles` を持ちます。LLM の `adapter` は `OLLAMA` または `OPENAI_COMPATIBLE` を必須とし、`defaultModelProfileId` は実 Provider へ送る model 名として必須です。LLM の timeout 未指定時は 20000 ms に補正します。MusicGen の `adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、TTS の `adapter` は `VOICEVOX` または `IRODORI_OPENAI_TTS` を使います。`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
+`programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持ちます。`providers.musicGen.providers.{key}` は追加で `modelProfiles` を持ちます。LLM の `adapter` は `OLLAMA` または `OPENAI_COMPATIBLE` を必須とし、`defaultModelProfileId` は実 Provider へ送る model 名として必須です。LLM の timeout 未指定時は、Ollama のモデルロードを含む初回生成を考慮して 120000 ms に補正します。MusicGen の `adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、TTS の `adapter` は `VOICEVOX` または `IRODORI_OPENAI_TTS` を使います。`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
 
 Irodori-TTS は OpenAI互換 `POST /v1/audio/speech` を使う内部 provider であり、外部公開 API として `/v1/audio/speech` を SeedShiftRadio から再公開しません。Web / C# Client は従来どおり `QueueItem.assetUrl`, `/api/assets/audio/{assetId}.wav`, `SpeechDirective.voiceHint` を利用します。
 
@@ -1354,7 +1356,18 @@ Response:
 - script / TTS は JobRunr の事前生成 job 内で materialize し、`MUSIC_AI` は既存 `GenerateMusicJob` へ非同期投入する
 - `PreGenerationRequestStatus` は `QUEUED`, `RUNNING`, `MATERIALIZED`, `FAILED`。`MATERIALIZED` は番組 block と queue item の作成、および必要な MusicGen job 投入が完了した状態で、全 MusicGen job の成功を意味しない
 - MusicGen の成否は既存 `provider_job`, `/api/monitor/summary`, 局別 asset 集計で確認する
-- `errorCode` は分類済みの `PRE_GENERATION_FAILED` だけを返し、例外本文や生成入力は返さない
+- Provider 起因の例外を特定できた場合は `PROVIDER_TIMEOUT`, `PROVIDER_UNREACHABLE`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` などの共通 code を `errorCode` に保存する。分類できない内部例外だけを `PRE_GENERATION_FAILED` とし、例外本文や生成入力は返さない
+
+### 6.17 Operational Logs
+
+`GET /api/monitor/logs?limit=100` は、再起動後も参照できる管理者向けの構造化運用ログを新しい順で返す。
+`limit` は 1 から 200 に丸める。
+初期対象は Provider job の `queued/running/succeeded/failed` と事前生成失敗で、Provider job の外側の transaction が rollback しても診断 record は独立 transaction で保持する。
+保持期間は 30 日とし、新しい event の保存時に期限切れ record を削除する。
+
+各要素は `id`, `level`, `category`, `eventType`, `sourceId`, `correlationId`, `providerType`, `providerKey`, `errorCode`, `message`, `occurredAt` を持つ。
+`message` は分類済み code から生成する安全な運用文だけとし、prompt、lyrics、台本本文、Provider 応答本文、letter body、radioName、API key、管理トークンを保存・返却しない。
+生のコンテナーログや例外 message をこの API で返さない。
 
 ## 7. SSE仕様
 

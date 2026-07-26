@@ -26,6 +26,7 @@
 | `/settings/programming` | 番組編成 | 局別ポリシー、ProgramTemplate、ProgramRule、Programming Preview |
 | `/settings/content` | コンテンツ管理 | 局別の番組・台本・音声・曲 asset 台帳とオフエア事前生成 |
 | `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
+| `/monitor/logs` | 運用ログ | 永続化した生成失敗、Provider error、request/job ID、相関 ID の検索 |
 
 ## 4. レイアウト方針
 
@@ -153,6 +154,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - URL、adapter、model / profile の保存前検証は内部 JSON path をそのまま表示せず、対象 Provider と修正例を日本語で示す
 - TTS provider は `VOICEVOX` と `IRODORI_OPENAI_TTS` の default/fallback 切替を扱えるようにする。Irodori の `apiKeyRef` は `env:` / `file:` 参照のみ表示・編集し、bearer token の実値は扱わない
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
+- LLM の接続確認は health/model inventory の確認であり、実モデルのコールドスタート時間や構造化台本生成の成功を保証しない。`timeoutMs` が実生成時間より短い場合は、接続成功でも生成時に `PROVIDER_TIMEOUT` になり得ることを画面と運用ログで判断できるようにする
 - 管理 session がない場合は Settings / Monitor 導線を非表示にし、`/settings`、`/monitor` を直接開いた時は `/admin/login` へ遷移する
 - `/admin/login` は Web 管理用パスワードだけを一時入力として受け取り、成功時に server-side で署名した `HttpOnly` session Cookie を確立する。管理 API 用トークンとは別資格情報とし、入力値を browser storage や標準ログへ残さない
 - `/admin/login` の同一 origin 判定は、Next.js 内部 URL ではなく利用者から見える protocol と host を基準にする。host は reverse proxy が設定した `X-Forwarded-Host` の先頭要素を優先し、なければ `Host`、protocol は `X-Forwarded-Proto` の先頭要素を優先し、なければ request URL を使う。`Origin` の欠落、不正 URL、protocol / host 不一致は拒否する
@@ -222,6 +224,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `/settings` の station 基本情報更新は API client test で、CSRF header、JSON body、URL encode を確認し、browser が `X-Admin-Token` を生成しないことを固定する
 - `/settings` の station programming policy 更新は API client test で、CSRF header、JSON body、URL encode を確認し、管理 token 注入は BFF test で固定する
 - 管理ダッシュボードは Vitest で byte 表示と管理 API proxy 分類を確認し、`/settings/content` の事前生成 request は API client test で CSRF header、URL encode、JSON body を固定する
+- `/monitor/logs` は `GET /api/monitor/logs` を 5 秒間隔で再取得し、level、category、error code、Provider、source/request ID、correlation ID で絞り込む。prompt、本文、秘密値、生の Provider 応答は表示しない
 - Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID`、`/settings` の管理カテゴリー遷移、`/settings/content` の台帳表示と事前生成 request を mock API / mock stream / audio stub で確認する
 - E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する
 - Playwright では 390px viewport の header 高さ、44px 以上の navigation target、横 overflow、`aria-current`、reduced motion 時の opacity-only entrance を確認する

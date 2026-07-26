@@ -182,7 +182,7 @@ public record SettingsDocument(
 
 		public ProviderCatalog normalize() {
 			return new ProviderCatalog(
-					llm == null ? defaults().llm() : llm.normalize(20_000),
+					llm == null ? defaults().llm() : llm.normalize(120_000),
 					tts == null ? defaults().tts() : tts.normalize(),
 					musicGen == null ? defaults().musicGen() : musicGen.normalize());
 		}
@@ -195,7 +195,7 @@ public record SettingsDocument(
 							Map.of("ollama", new ProviderEndpoint(
 									"http://127.0.0.1:11434",
 									"/api/tags",
-									20_000,
+									120_000,
 									List.of("SCRIPT_GEN"),
 									"OLLAMA",
 									null,

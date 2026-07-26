@@ -14,6 +14,7 @@ import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobStatus;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.monitor.OperationalEventService;
 import com.seedshiftradio.stream.StreamEventService;
 
 @Service
@@ -21,10 +22,15 @@ public class ProviderJobService {
 
 	private final ProviderJobRepository providerJobRepository;
 	private final StreamEventService streamEventService;
+	private final OperationalEventService operationalEventService;
 
-	public ProviderJobService(ProviderJobRepository providerJobRepository, StreamEventService streamEventService) {
+	public ProviderJobService(
+			ProviderJobRepository providerJobRepository,
+			StreamEventService streamEventService,
+			OperationalEventService operationalEventService) {
 		this.providerJobRepository = providerJobRepository;
 		this.streamEventService = streamEventService;
+		this.operationalEventService = operationalEventService;
 	}
 
 	@Transactional
@@ -131,6 +137,7 @@ public class ProviderJobService {
 		putIfPresent(payload, "errorCode", entity.getErrorCode());
 		payload.put("correlationId", entity.getCorrelationId());
 		streamEventService.publish(eventName, payload);
+		operationalEventService.recordProviderJob(eventName, entity);
 	}
 
 	private static void putIfPresent(Map<String, Object> payload, String key, String value) {

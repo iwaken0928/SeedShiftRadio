@@ -72,7 +72,7 @@ LLM は `OLLAMA` と `OPENAI_COMPATIBLE` の 2 adapter を持つ。現行の `Ht
 | `OLLAMA` | `POST /api/chat` | `GET /api/tags` | `model`, `messages`, `stream=false`, strict JSON format | `message.content` |
 | `OPENAI_COMPATIBLE` | `POST /v1/chat/completions` | `GET /v1/models` | `model`, `messages`, `stream=false`, JSON object response format | `choices[0].message.content` |
 
-model 名には `providers.llm.providers.{providerKey}.defaultModelProfileId` を使う。LLM ではこの field を Music Generation の profile map 参照として解釈せず、実 Provider へ送る model 名そのものとして扱う。`adapter`, `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `defaultModelProfileId` は必須とし、`OPENAI_COMPATIBLE` で認証が必要な場合だけ `apiKeyRef` を設定する。既定 timeout は 20 秒とする。
+model 名には `providers.llm.providers.{providerKey}.defaultModelProfileId` を使う。LLM ではこの field を Music Generation の profile map 参照として解釈せず、実 Provider へ送る model 名そのものとして扱う。`adapter`, `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `defaultModelProfileId` は必須とし、`OPENAI_COMPATIBLE` で認証が必要な場合だけ `apiKeyRef` を設定する。既定 timeout は、Ollama のモデルロードを含む初回生成を考慮して 120 秒とする。
 
 LLM へ渡す `messages` は system prompt と `ScriptGenerationContext.prompt`、局・personality、信頼しないレター source data から作る。レター本文は `untrustedLetter` として分離し、system instruction として扱わない。adapter は response body が strict structured JSON であることを確認し、`text` と `safetyFlags` 以外の field を拒否してから `GeneratedScript` へ正規化する。`text` は 1 文字以上 20000 文字以下、`safetyFlags` は 32 件以下、各 flag は 1 文字以上 128 文字以下とする。空応答、非 JSON、必須 field 欠落、未知 field、型不正、上限超過は `PROVIDER_BAD_RESPONSE` とする。
 
@@ -139,6 +139,11 @@ fallback 方針:
 
 ## 6. タイムアウト/リトライ
 
+Provider の接続確認は health endpoint と model inventory の確認であり、実生成 request の完了時間や構造化出力の妥当性までは保証しない。
+とくに Ollama のコールドスタートはモデルロード時間を含むため、`timeoutMs` は対象モデルの実測ロード時間より十分長く設定する。
+接続確認が `UP` でも、実生成で Server 側 timeout が先に切れると Ollama はクライアント切断を HTTP 499 として記録し、モデルロードを中断することがある。
+実生成の `PROVIDER_TIMEOUT` / `PROVIDER_BAD_RESPONSE` は `operational_event_log` へ安全な分類済み情報として保存し、`/monitor/logs` から Provider key と correlation ID を追跡する。
+
 | Provider | Timeout | Retry |
 |---|---|---|
 | LLM | 20 秒 | 1 回 |
@@ -194,7 +199,7 @@ stale job は条件付き更新で `FAILED`、`error_code=PROVIDER_INTERRUPTED`�
 - TTS adapter (`VOICEVOX`, `IRODORI_OPENAI_TTS` など)
 
 機密値は `env:` または `file:` 参照とする。`apiKeyRef` は参照名だけを保存し、実値は API response、SSE、標準ログへ出さない。参照先が未設定、空、読み取り不能の場合、接続テストと実行経路は `PROVIDER_AUTH_FAILED` として扱い、health endpoint が匿名で成功しても `UP` にしない。
-LLM の `defaultModelProfileId` は model 名として使い、`modelProfiles` の存在を要求しない。LLM endpoint の `timeoutMs` を省略する場合は 20000 ms を既定とする。
+LLM の `defaultModelProfileId` は model 名として使い、`modelProfiles` の存在を要求しない。LLM endpoint の `timeoutMs` を省略する場合は 120000 ms を既定とする。
 LLM の接続確認では `OLLAMA` は `GET /api/tags`、`OPENAI_COMPATIBLE` は `GET /v1/models` から model 一覧を取得し、`providerHealth.metadata.models`, `selectedModel`, `selectedModelAvailable` に短い値だけを返す。接続自体が成功しても指定 model が一覧に存在しない場合は `DEGRADED` とし、台本生成前に設定不備を発見できるようにする。model 一覧取得だけが失敗した場合は `modelsStatus=UNAVAILABLE` とし、health endpoint の結果まで直ちに `DOWN` へ落とさない。
 
 Server は実行経路を `provider_job` と `generated_asset` に残し、`queue_item.assetId` から再生資産へ辿れるようにする。worker 未接続の段階では placeholder provider 経路で同じ永続化契約を先に満たしてよい。`config.json.cache` の reuse scope は cache hit 判定と eviction の設計基盤になり、script、TTS、MusicGen が cache-first 再利用へ接続済みである。MusicGen では station `preGeneration.preferCacheReuse=false` の場合に reusable asset が存在しても worker submit を優先する。

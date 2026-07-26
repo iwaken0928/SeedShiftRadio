@@ -9,6 +9,7 @@ import {
   type LetterSummary,
   type ManagementDashboardResponse,
   type MonitorSummary,
+  type OperationalEvent,
   type PlaybackEventRequest,
   type ProgramTemplateDetail,
   type ProgramTemplateSummary,
@@ -361,6 +362,12 @@ export function replyLetter(letterId: string, body: { replyText: string }) {
 
 export function getMonitorSummary() {
   return requestJson<MonitorSummary>("/api/monitor/summary", {
+    headers: withAdminHeaders(),
+  });
+}
+
+export function getOperationalLogs(limit = 100) {
+  return requestJson<OperationalEvent[]>(`/api/monitor/logs?limit=${encodeURIComponent(limit)}`, {
     headers: withAdminHeaders(),
   });
 }

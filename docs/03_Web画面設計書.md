@@ -63,6 +63,9 @@
 ### 5.3 音声プレイヤー挙動
 
 - Queue の先頭 `READY` セグメントを順次再生する
+- Tune 後は SSE が切断・再接続中でも生成完了を見失わないよう、`RadioStatus` と Queue を 3 秒程度の REST polling でも再同期する
+- `programBlockId` が未設定の間は `/api/radio/program`、再生可能 item がない間は `/api/radio/next-speech-directive` を呼ばず、準備中の 404 / 409 をブラウザーエラーとして連打しない
+- 主操作の「音声を再生」は Server の再生開始と `HTMLAudioElement.play()` を一つのユーザー操作で行い、準備完了前は無効化する
 - 次セグメントは再生終了 3 秒前を目安に preload する
 - Tune 時は現在音声を即時停止せず、フェードアウト後に新局へ切り替える
 - 再生エラー時は 1 回だけ同一 asset を再試行し、失敗なら次候補へ進む
@@ -177,10 +180,10 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - archive pool 件数と archive replay rate
 - musicGen worker の queue size, queued/running jobs, average job seconds, adapter, default model / profile
 - 進行中ジョブ
-- 直近エラー
+- 成功・失敗を含む直近のジョブ実行結果
 - 直近 10 件の監査イベント
 
-監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
+監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / recent result / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
 - worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `selectedModel`, `selectedModelAvailable`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
 - Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する。upstream の chunk-level SSE 対応と現行 SeedShiftRadio adapter の有効化状態は分けて表示する
@@ -199,6 +202,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - 初期表示は `GET /api/radio/status` と `GET /api/radio/queue` で取得する
 - 以後は SSE で差分更新する
 - 切断時は指数バックオフで再接続する
+- SSE 切断中もラジオ画面は 3 秒程度、監視画面は 5 から 10 秒程度の REST polling を fallback として継続する
 - `subtitle.updated` を受けたら現在の発話のみ差し替える
 
 ## 11. アクセシビリティ
@@ -224,7 +228,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `/settings` の station 基本情報更新は API client test で、CSRF header、JSON body、URL encode を確認し、browser が `X-Admin-Token` を生成しないことを固定する
 - `/settings` の station programming policy 更新は API client test で、CSRF header、JSON body、URL encode を確認し、管理 token 注入は BFF test で固定する
 - 管理ダッシュボードは Vitest で byte 表示と管理 API proxy 分類を確認し、`/settings/content` の事前生成 request は API client test で CSRF header、URL encode、JSON body を固定する
-- `/monitor/logs` は `GET /api/monitor/logs` を 5 秒間隔で再取得し、level、category、error code、Provider、source/request ID、correlation ID で絞り込む。prompt、本文、秘密値、生の Provider 応答は表示しない
+- `/monitor/logs` は `GET /api/monitor/logs` と `GET /api/monitor/summary` を 5 秒間隔で再取得し、Provider job SSE 受信時にも再取得する。待機・実行中・成功・失敗を日本語で表示し、level、category、error code、Provider、source/request ID、correlation ID で絞り込む。prompt、本文、秘密値、生の Provider 応答は表示しない
 - Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID`、`/settings` の管理カテゴリー遷移、`/settings/content` の台帳表示と事前生成 request を mock API / mock stream / audio stub で確認する
 - E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する
 - Playwright では 390px viewport の header 高さ、44px 以上の navigation target、横 overflow、`aria-current`、reduced motion 時の opacity-only entrance を確認する

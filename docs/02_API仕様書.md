@@ -698,6 +698,7 @@ Response は `GET /play-history` の各要素と同じ DTO を返す。
 ```
 
 この API は厳密同期ではなく、Server が体感ズレやエラー把握を行うための補助イベントとする。
+受理時は `202 Accepted` を空本文で返すため、Client は JSON body を前提にしない。
 
 - `sessionId` と `itemId` は同一 `playout_session` に属している必要がある
 - `SEGMENT_STARTED` は `READY` item、`SEGMENT_ENDED` と `PLAYBACK_STOPPED` は現在 `PLAYING` 中の item のみ受け付ける
@@ -729,6 +730,9 @@ Response:
   ]
 }
 ```
+
+Tune 直後など `currentProgramBlockId` がまだ未設定の場合は `404 PROGRAM_NOT_READY` と「番組は現在準備中です。」を返す。
+未準備を内部エラーとして扱わず、Client は `RadioStatus.programBlockId` または `program.changed` を確認してから再取得する。
 
 ### 6.6 `GET /stations/{id}/programming`
 
@@ -1219,7 +1223,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.14 MonitorSummary
 
-`GET /api/monitor/summary` は `ProviderHealth` に加えて、READY queue の合計 duration、generated asset cache の集約値、archive pool / replay 集約値、`provider_job` から復元した `runningJobs` / `recentErrors`、SSE 履歴から抽出した `auditEvents` を返します。`cache` と `archive` は prompt や本文を含まず、件数、byte 数、hit/replay rate などの数値だけを返します。`runningJobs` は `RUNNING` の provider job、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
+`GET /api/monitor/summary` は `ProviderHealth` に加えて、READY queue の合計 duration、generated asset cache の集約値、archive pool / replay 集約値、`provider_job` から復元した `runningJobs` / `recentJobs` / `recentErrors`、SSE 履歴から抽出した `auditEvents` を返します。`cache` と `archive` は prompt や本文を含まず、件数、byte 数、hit/replay rate などの数値だけを返します。`runningJobs` は `RUNNING` の provider job、`recentJobs` は状態を問わず直近 20 件、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
 
 ```json
 {
@@ -1390,6 +1394,7 @@ Event 種別:
 | `letter.updated` | `LetterSummary` | レター一覧反映 |
 
 SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備える。
+接続維持のため 15 秒間隔を既定とする comment heartbeat を送信し、Client は業務イベントとして扱わない。
 
 ## 8. エラー体系
 
@@ -1398,6 +1403,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 | `VALIDATION_ERROR` | 400 | 入力不正 |
 | `INVALID_TEMPLATE` | 400 | 番組テンプレート不正 |
 | `NOT_FOUND` | 404 | 対象なし |
+| `PROGRAM_NOT_READY` | 404 | Tune 後の番組準備中 |
 | `CONFLICT` | 409 | 状態競合 |
 | `QUEUE_NOT_READY` | 409 | 次セグメント未生成 |
 | `PROVIDER_UNAVAILABLE` | 503 | Provider 利用不可 |
@@ -1424,7 +1430,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - 管理 API は `components.securitySchemes.adminToken` と operation 単位の `security` で `X-Admin-Token` 必須を表す
 - DTO は Server / Client 両方で再利用しやすいよう JSON naming を固定する
 - `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
-- 現在の OpenAPI snapshot SHA-256 は `f84e3f1d2bf856819148790bf33da27e3f11439143a5f1269462af4cf08ef431` とする
+- 現在の OpenAPI snapshot SHA-256 は `d32c4a83b71b09096860d9835e19250babc088f43105965551c040e266cdf101` とする
 - 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
 - GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

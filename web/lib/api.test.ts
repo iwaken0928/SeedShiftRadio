@@ -51,6 +51,12 @@ describe("api helpers", () => {
     await expect(requestJson<void>("/api/radio/play", { method: "POST" })).resolves.toBeUndefined();
   });
 
+  it("202 の空レスポンスも undefined を返す", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 202 }));
+
+    await expect(requestJson<void>("/api/radio/playback-events", { method: "POST" })).resolves.toBeUndefined();
+  });
+
   it("unsafe request は session endpoint の CSRF token を送り、管理トークンは生成しない", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       if (input === "/api/auth/session") {

@@ -134,6 +134,7 @@ class MonitorControllerTests {
 				List.of(),
 				List.of(),
 				List.of(),
+				List.of(),
 				Instant.parse("2026-03-20T09:00:00Z"));
 	}
 

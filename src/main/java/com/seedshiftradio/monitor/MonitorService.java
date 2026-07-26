@@ -82,6 +82,9 @@ public class MonitorService {
 		List<ProviderJobSummary> runningJobs = providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING).stream()
 				.map(MonitorService::toJobSummary)
 				.toList();
+		List<ProviderJobSummary> recentJobs = providerJobRepository.findTop20ByOrderByUpdatedAtDesc().stream()
+				.map(MonitorService::toJobSummary)
+				.toList();
 		List<ProviderJobSummary> recentErrors = providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.FAILED).stream()
 				.map(MonitorService::toJobSummary)
 				.toList();
@@ -102,6 +105,7 @@ public class MonitorService {
 				generatedAssetService.cacheMetrics(),
 				archiveMetrics,
 				runningJobs,
+				recentJobs,
 				recentErrors,
 				auditEvents,
 				status.updatedAt());

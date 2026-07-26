@@ -86,7 +86,11 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  const responseBody = await response.text();
+  if (!responseBody.trim()) {
+    return undefined as T;
+  }
+  return JSON.parse(responseBody) as T;
 }
 
 export function withAdminHeaders(headers?: HeadersInit) {

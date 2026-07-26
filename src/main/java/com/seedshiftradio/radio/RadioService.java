@@ -218,7 +218,15 @@ public class RadioService {
 	@Transactional(readOnly = true)
 	public ProgramBlockResponse getProgram() {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
-		ProgramBlockEntity block = programBlockRepository.findById(session.getCurrentProgramBlockId())
+		String programBlockId = session.getCurrentProgramBlockId();
+		if (programBlockId == null || programBlockId.isBlank()) {
+			throw new ApiException(
+					HttpStatus.NOT_FOUND,
+					"PROGRAM_NOT_READY",
+					"番組は現在準備中です。",
+					Map.of("sessionId", session.getId()));
+		}
+		ProgramBlockEntity block = programBlockRepository.findById(programBlockId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "現在の番組 block が見つかりません。", Map.of("sessionId", session.getId())));
 		List<ProgramBlockSlotEntity> slots = programBlockSlotRepository.findByProgramBlockIdOrderBySequenceNoAsc(block.getId());
 		int remaining = (int) slots.stream()

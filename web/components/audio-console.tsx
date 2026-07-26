@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button, Card, Badge } from "@/components/ui";
 import type { PlaybackEventRequest } from "@/lib/types";
 
@@ -14,7 +14,14 @@ type Props = {
   onPlaybackEvent: (request: PlaybackEventRequest) => Promise<void> | void;
 };
 
-export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, volume, onPlaybackEvent }: Props) {
+export type AudioConsoleHandle = {
+  play: () => Promise<void>;
+};
+
+export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function AudioConsole(
+  { sourceUrl, label, clientId, itemId, sessionId, volume, onPlaybackEvent },
+  ref,
+) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const sentStartRef = useRef<string | null>(null);
@@ -72,6 +79,8 @@ export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, vo
     }
   };
 
+  useImperativeHandle(ref, () => ({ play }));
+
   const pause = () => {
     const audio = audioRef.current;
     if (!audio) {
@@ -98,21 +107,21 @@ export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, vo
       <div className="relative space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200">Audio console</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-200">音声プレイヤー</div>
             <div className="mt-1 text-lg font-semibold text-white">{label}</div>
           </div>
-          <Badge tone={playing ? "success" : "default"}>{playing ? "PLAYING" : "READY"}</Badge>
+          <Badge tone={playing ? "success" : "default"}>{playing ? "再生中" : "再生可能"}</Badge>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" tone="secondary" onClick={() => void play()} disabled={!sourceUrl} data-testid="audio-play">
-            Play
+            再生
           </Button>
           <Button type="button" tone="ghost" onClick={pause} data-testid="audio-pause">
-            Pause
+            一時停止
           </Button>
           <Button type="button" tone="danger" onClick={() => void stop()} data-testid="audio-stop">
-            Stop
+            停止
           </Button>
         </div>
 
@@ -137,4 +146,4 @@ export function AudioConsole({ sourceUrl, label, clientId, itemId, sessionId, vo
       </div>
     </Card>
   );
-}
+});

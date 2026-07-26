@@ -159,6 +159,16 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void getProgramReturnsNotReadyWhileWarmupHasNotCreatedProgramBlock() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		when(playoutSessionRepository.findFirstByOrderByStartedAtDesc()).thenReturn(Optional.of(session));
+
+		ApiException exception = assertThrows(ApiException.class, () -> radioService.getProgram());
+
+		assertEquals("PROGRAM_NOT_READY", exception.getCode());
+	}
+
+	@Test
 	void recordPlaybackEventRejectsQueueItemFromDifferentSession() {
 		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-002");
 		QueueItemEntity item = queueItem("queue-001", "playout-999", QueueItemStatus.PLAYING);

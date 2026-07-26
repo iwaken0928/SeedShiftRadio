@@ -15,6 +15,8 @@ public interface ProviderJobRepository extends JpaRepository<ProviderJobEntity, 
 
 	List<ProviderJobEntity> findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus status);
 
+	List<ProviderJobEntity> findTop20ByOrderByUpdatedAtDesc();
+
 	List<ProviderJobEntity> findByStatusAndUpdatedAtBeforeOrderByUpdatedAtAsc(
 			ProviderJobStatus status,
 			Instant cutoff,

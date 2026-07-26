@@ -80,6 +80,13 @@ function syncCache(queryClient: ReturnType<typeof useQueryClient>, event: EventM
     case "letter.updated":
       queryClient.invalidateQueries({ queryKey: ["letters"] });
       break;
+    case "provider.job.queued":
+    case "provider.job.running":
+    case "provider.job.succeeded":
+    case "provider.job.failed":
+      queryClient.invalidateQueries({ queryKey: ["monitor", "summary"] });
+      queryClient.invalidateQueries({ queryKey: ["monitor", "logs"] });
+      break;
     case "subtitle.updated":
       useUiStore.getState().setLiveSubtitle(extractSubtitle(event.data));
       break;

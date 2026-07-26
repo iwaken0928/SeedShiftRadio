@@ -362,6 +362,7 @@ export interface MonitorSummary {
   cache: CacheMetricsSnapshot;
   archive: ArchiveMetricsSnapshot;
   runningJobs: MonitorProviderJob[];
+  recentJobs: MonitorProviderJob[];
   recentErrors: MonitorProviderJob[];
   auditEvents: MonitorAuditEvent[];
   updatedAt: string;

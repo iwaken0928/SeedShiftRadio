@@ -43,7 +43,7 @@ export function MonitorDashboard() {
   const programQuery = useQuery({
     queryKey: ["radio", "program"],
     queryFn: getRadioProgram,
-    enabled: hasAdminToken,
+    enabled: hasAdminToken && Boolean(summaryQuery.data?.sessionId) && summaryQuery.data?.state !== "PREPARING",
     retry: false,
     refetchInterval: LIVE_REFRESH_INTERVAL_MS,
     refetchOnWindowFocus: false,
@@ -55,8 +55,8 @@ export function MonitorDashboard() {
         <PanelColumn className="xl:col-span-7">
           <Card>
             <SectionHeader
-              eyebrow="Monitor"
-              title="Admin token required"
+              eyebrow="監視"
+              title="管理者ログインが必要です"
               description="`/monitor` は管理トークン前提の監視画面です。公開 UI には表示せず、直接アクセスされた場合だけ案内を出します。"
             />
             <EmptyState
@@ -81,7 +81,7 @@ export function MonitorDashboard() {
     }))
     .filter((entry): entry is { key: string; health: ProviderHealthPayload; details: WorkerStatusDetails } => entry.details != null);
   const runningJobs = (summary?.runningJobs ?? []).filter((job) => matchesJobSearch(job, deferredJobSearchText));
-  const recentErrors = (summary?.recentErrors ?? []).filter((job) => matchesJobSearch(job, deferredJobSearchText));
+  const recentJobs = (summary?.recentJobs ?? []).filter((job) => matchesJobSearch(job, deferredJobSearchText));
   const auditEvents = (summary?.auditEvents ?? []).filter((event) => matchesAuditSearch(event, deferredAuditSearchText));
 
   return (
@@ -89,33 +89,33 @@ export function MonitorDashboard() {
       <PanelColumn className="xl:col-span-7">
         <Card>
           <SectionHeader
-            eyebrow="Monitor"
-            title="Operational summary"
-            description="監視サマリは 10 秒ごとに再取得し、provider health と queue/program 状態を追跡します。"
+            eyebrow="監視"
+            title="稼働状況サマリー"
+            description="10秒ごとに再取得し、Provider、再生キュー、番組、生成ジョブの状態を追跡します。"
           />
           {summary ? (
             <div className="space-y-6">
               <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                <Metric label="State" value={summary.state ?? "IDLE"} tone={summary.degraded ? "warning" : "default"} />
-                <Metric label="Buffer Ready" value={summary.bufferReadyCount} tone="accent" />
-                <Metric label="Ready Duration" value={formatDurationMs(summary.queueReadyDurationMs)} tone="accent" />
-                <Metric label="Pending Letters" value={summary.pendingLetterCount} />
-                <Metric label="Station" value={summary.stationId ?? "none"} />
-                <Metric label="Updated" value={formatInstant(summary.updatedAt)} />
+                <Metric label="再生状態" value={summary.state ?? "IDLE"} tone={summary.degraded ? "warning" : "default"} />
+                <Metric label="再生可能件数" value={summary.bufferReadyCount} tone="accent" />
+                <Metric label="再生可能時間" value={formatDurationMs(summary.queueReadyDurationMs)} tone="accent" />
+                <Metric label="未処理レター" value={summary.pendingLetterCount} />
+                <Metric label="局 ID" value={summary.stationId ?? "なし"} />
+                <Metric label="更新日時" value={formatInstant(summary.updatedAt)} />
               </div>
 
               <section className="space-y-3">
-                <SectionHeader eyebrow="Archive" title="Archive pool / replay" description="再放送候補と直近 playback に占める archive replay の割合です。" />
+                <SectionHeader eyebrow="再放送" title="アーカイブ候補と再放送実績" description="再放送候補と直近の再生に占めるアーカイブ再放送の割合です。" />
                 <div className="grid gap-3 md:grid-cols-4">
-                  <Metric label="Eligible Pool" value={`${summary.archive.eligibleArchiveCount} / ${summary.archive.totalArchiveCount}`} tone="accent" />
-                  <Metric label="Replay Rate" value={formatPercent(summary.archive.archiveReplayRate)} />
-                  <Metric label="Archive Replays" value={summary.archive.archiveReplayCount} />
-                  <Metric label="Total Playback" value={summary.archive.totalPlaybackCount} />
+                  <Metric label="利用可能候補" value={`${summary.archive.eligibleArchiveCount} / ${summary.archive.totalArchiveCount}`} tone="accent" />
+                  <Metric label="再放送率" value={formatPercent(summary.archive.archiveReplayRate)} />
+                  <Metric label="再放送回数" value={summary.archive.archiveReplayCount} />
+                  <Metric label="総再生回数" value={summary.archive.totalPlaybackCount} />
                 </div>
               </section>
 
               <section className="space-y-3">
-                <SectionHeader eyebrow="Program" title="Current program block" description="監視画面でも現在の block / template version を見える化します。" />
+                <SectionHeader eyebrow="番組" title="現在の番組" description="現在の番組ブロックとテンプレートの版を表示します。" />
                 {programQuery.data ? (
                   <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
                     <div className="flex flex-wrap items-center gap-2">
@@ -125,9 +125,9 @@ export function MonitorDashboard() {
                       <Badge tone="default">v{programQuery.data.templateVersion ?? "-"}</Badge>
                     </div>
                     <div className="mt-3 grid gap-3 text-sm text-slate-600 md:grid-cols-3">
-                      <div>Remaining slots: {programQuery.data.remainingSlotCount}</div>
-                      <div>Planned duration: {formatDurationMs(programQuery.data.plannedDurationMs)}</div>
-                      <div>Started at: {formatInstant(programQuery.data.startedAt)}</div>
+                      <div>残りの番組枠: {programQuery.data.remainingSlotCount}</div>
+                      <div>予定時間: {formatDurationMs(programQuery.data.plannedDurationMs)}</div>
+                      <div>開始日時: {formatInstant(programQuery.data.startedAt)}</div>
                     </div>
                   </div>
                 ) : (
@@ -139,12 +139,12 @@ export function MonitorDashboard() {
               </section>
 
               <section className="space-y-3">
-                <SectionHeader eyebrow="Cache" title="Generated assets" description="生成済み script / TTS / music の保存量と再利用状況を追跡します。" />
+                <SectionHeader eyebrow="生成物" title="生成済みアセット" description="生成済み台本・音声・楽曲の保存量と再利用状況を追跡します。" />
                 <div className="grid gap-3 md:grid-cols-4">
-                  <Metric label="Bytes" value={formatBytes(summary.cache.byteSize)} tone="accent" />
-                  <Metric label="Assets" value={summary.cache.assetCount} />
-                  <Metric label="Cache Hit Rate" value={formatPercent(summary.cache.cacheHitRate)} />
-                  <Metric label="Expired" value={summary.cache.expiredAssetCount} tone={summary.cache.expiredAssetCount > 0 ? "warning" : "default"} />
+                  <Metric label="保存容量" value={formatBytes(summary.cache.byteSize)} tone="accent" />
+                  <Metric label="アセット数" value={summary.cache.assetCount} />
+                  <Metric label="再利用率" value={formatPercent(summary.cache.cacheHitRate)} />
+                  <Metric label="期限切れ" value={summary.cache.expiredAssetCount} tone={summary.cache.expiredAssetCount > 0 ? "warning" : "default"} />
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
                   {Object.entries(summary.cache.byType).map(([assetType, metrics]) => (
@@ -154,7 +154,7 @@ export function MonitorDashboard() {
               </section>
 
               <section className="space-y-3">
-                <SectionHeader eyebrow="Providers" title="Provider health" description="状態フィルタと詳細情報で provider の異常切り分けをしやすくします。" />
+                <SectionHeader eyebrow="Provider" title="接続状態" description="状態フィルターと詳細情報から、異常箇所を切り分けます。" />
                 <div className="flex flex-wrap gap-2">
                   {PROVIDER_STATUS_FILTERS.map((status) => (
                     <button
@@ -181,9 +181,9 @@ export function MonitorDashboard() {
 
                 <div className="space-y-3 pt-2">
                   <SectionHeader
-                    eyebrow="Workers"
-                    title="Worker status detail"
-                    description="musicGen worker の queue / model profile / adapter 状態を monitor から確認できます。"
+                    eyebrow="Worker"
+                    title="Worker の稼働状況"
+                    description="MusicGen worker のキュー、モデルプロファイル、アダプター状態を確認できます。"
                   />
                   {workerStatusEntries.length ? (
                     <div className="grid gap-3 xl:grid-cols-2">
@@ -201,23 +201,23 @@ export function MonitorDashboard() {
               </section>
 
               <section className="space-y-3">
-                <SectionHeader eyebrow="Jobs" title="Running jobs / recent errors" description="queueItemId, providerKey, errorCode, externalRef を検索できます。" />
-                <Input value={jobSearchText} onChange={(event) => setJobSearchText(event.target.value)} placeholder="queue item / provider / error code を検索" />
+                <SectionHeader eyebrow="生成ジョブ" title="実行中と直近の結果" description="キュー項目 ID、Provider、エラーコード、外部参照で検索できます。" />
+                <Input value={jobSearchText} onChange={(event) => setJobSearchText(event.target.value)} placeholder="キュー項目 / Provider / エラーコードを検索" />
                 <div className="grid gap-4 xl:grid-cols-2">
                   <div className="space-y-3">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Running jobs</div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">実行中のジョブ</div>
                     {runningJobs.length ? (
                       runningJobs.map((job) => <MonitorJobCard key={job.id} job={job} />)
                     ) : (
-                      <EmptyState title="条件に一致する running job はありません" />
+                      <EmptyState title="条件に一致する実行中ジョブはありません" />
                     )}
                   </div>
                   <div className="space-y-3">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recent errors</div>
-                    {recentErrors.length ? (
-                      recentErrors.map((job) => <MonitorJobCard key={job.id} job={job} />)
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">直近の実行結果</div>
+                    {recentJobs.length ? (
+                      recentJobs.map((job) => <MonitorJobCard key={job.id} job={job} />)
                     ) : (
-                      <EmptyState title="条件に一致する recent error はありません" />
+                      <EmptyState title="条件に一致する実行結果はありません" />
                     )}
                   </div>
                 </div>
@@ -234,14 +234,14 @@ export function MonitorDashboard() {
 
       <PanelColumn className="xl:col-span-5">
         <Card>
-          <SectionHeader eyebrow="Health" title="Server health" description="`/api/health` の集約値です。" />
+          <SectionHeader eyebrow="ヘルスチェック" title="Server の稼働状態" description="`/api/health` の集約値です。" />
           {healthQuery.data ? (
             <div className="grid gap-3">
-              <Metric label="Status" value={healthQuery.data.status} tone={healthQuery.data.status === "UP" ? "success" : "warning"} />
-              <Metric label="Stations" value={healthQuery.data.stationCount} />
-              <Metric label="Sessions" value={healthQuery.data.sessionCount} />
-              <Metric label="Queue Items" value={healthQuery.data.queueCount} />
-              <Metric label="Current Session" value={healthQuery.data.currentSessionId ?? "none"} />
+              <Metric label="状態" value={healthQuery.data.status} tone={healthQuery.data.status === "UP" ? "success" : "warning"} />
+              <Metric label="局数" value={healthQuery.data.stationCount} />
+              <Metric label="セッション数" value={healthQuery.data.sessionCount} />
+              <Metric label="キュー項目数" value={healthQuery.data.queueCount} />
+              <Metric label="現在のセッション" value={healthQuery.data.currentSessionId ?? "なし"} />
             </div>
           ) : (
             <EmptyState title="health を取得できません" description={healthQuery.error instanceof Error ? formatSafeDisplayText(healthQuery.error.message) : undefined} />
@@ -249,9 +249,9 @@ export function MonitorDashboard() {
         </Card>
 
         <Card className="mt-4">
-          <SectionHeader eyebrow="Audit" title="Audit events" description="SSE 履歴由来の監査イベントを検索しながら確認します。" />
+          <SectionHeader eyebrow="監査" title="監査イベント" description="SSE 履歴由来の監査イベントを検索しながら確認します。" />
           <div className="space-y-3">
-            <Input value={auditSearchText} onChange={(event) => setAuditSearchText(event.target.value)} placeholder="event type / summary を検索" />
+            <Input value={auditSearchText} onChange={(event) => setAuditSearchText(event.target.value)} placeholder="イベント種別 / 要約を検索" />
             {auditEvents.length ? (
               <div className="space-y-3">
                 {auditEvents.map((event) => (
@@ -283,9 +283,9 @@ function CacheMetricCard({ metrics }: { metrics: CacheTypeMetrics }) {
         <Badge tone="default">{formatBytes(metrics.byteSize)}</Badge>
       </div>
       <div className="mt-2 grid gap-2 text-sm text-slate-600">
-        <div>Assets: {metrics.assetCount}</div>
-        <div>Hits: {metrics.cacheHitCount}</div>
-        <div>Rate: {formatPercent(metrics.cacheHitRate)}</div>
+        <div>アセット数: {metrics.assetCount}</div>
+        <div>再利用回数: {metrics.cacheHitCount}</div>
+        <div>再利用率: {formatPercent(metrics.cacheHitRate)}</div>
       </div>
     </div>
   );
@@ -308,10 +308,10 @@ function ProviderHealthCard({ label, health }: { label: string; health: Provider
       </div>
       <div className="mt-2 text-sm leading-6 text-slate-600">{formatSafeDisplayText(health.message)}</div>
       <div className="mt-3 grid gap-3 text-sm text-slate-500 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Last Checked" value={health.lastCheckedAt ? formatInstant(health.lastCheckedAt) : "-"} />
-        <Metric label="Response" value={health.responseTimeMs != null ? `${health.responseTimeMs} ms` : "-"} />
-        <Metric label="Capabilities" value={health.capabilities.length ? health.capabilities.join(", ") : "-"} />
-        <Metric label="Base URL" value={formatSafeDisplayText(health.baseUrl)} />
+        <Metric label="最終確認" value={health.lastCheckedAt ? formatInstant(health.lastCheckedAt) : "-"} />
+        <Metric label="応答時間" value={health.responseTimeMs != null ? `${health.responseTimeMs} ms` : "-"} />
+        <Metric label="機能" value={health.capabilities.length ? health.capabilities.join(", ") : "-"} />
+        <Metric label="接続先 URL" value={formatSafeDisplayText(health.baseUrl)} />
       </div>
     </div>
   );
@@ -344,28 +344,28 @@ function WorkerStatusCard({
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Queue Size" value={formatCount(details.queueSize)} tone="accent" />
-        <Metric label="Queued Jobs" value={formatCount(details.queuedJobs)} tone={metricTone(details.queuedJobs)} />
-        <Metric label="Running Jobs" value={formatCount(details.runningJobs)} tone={metricTone(details.runningJobs)} />
-        <Metric label="Avg Seconds" value={formatSeconds(details.averageJobSeconds)} />
+        <Metric label="キュー件数" value={formatCount(details.queueSize)} tone="accent" />
+        <Metric label="待機中ジョブ" value={formatCount(details.queuedJobs)} tone={metricTone(details.queuedJobs)} />
+        <Metric label="実行中ジョブ" value={formatCount(details.runningJobs)} tone={metricTone(details.runningJobs)} />
+        <Metric label="平均処理秒数" value={formatSeconds(details.averageJobSeconds)} />
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <DetailGroup
-          label="Default Model"
+          label="既定モデル"
           description={details.defaultModel ? details.defaultModel : "未取得"}
           footer={details.defaultModelProfileId ? `profile: ${details.defaultModelProfileId}` : "default profile 未取得"}
         />
         <DetailGroup
-          label="Provider Context"
+          label="Provider 情報"
           description={health.providerKey ?? "provider key なし"}
           footer={formatSafeDisplayText(health.baseUrl)}
         />
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <PillList label="Model Profiles" values={profileValues} emptyLabel="profile 情報なし" />
-        <PillList label="Available Models" values={modelValues} emptyLabel="model 情報なし" />
+        <PillList label="モデルプロファイル" values={profileValues} emptyLabel="プロファイル情報なし" />
+        <PillList label="利用可能モデル" values={modelValues} emptyLabel="モデル情報なし" />
       </div>
     </div>
   );
@@ -412,21 +412,47 @@ function MonitorJobCard({ job }: { job: MonitorProviderJob }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="font-semibold text-slate-950">{job.jobType}</div>
-        <Badge tone={job.status === "RUNNING" ? "warning" : job.status === "FAILED" ? "danger" : "default"}>{job.status}</Badge>
+        <div className="font-semibold text-slate-950">{formatJobType(job.jobType)}</div>
+        <Badge tone={monitorJobTone(job.status)}>{formatJobStatus(job.status)}</Badge>
         <Badge tone="default">{job.providerType}</Badge>
         {job.providerKey ? <Badge tone="accent">{job.providerKey}</Badge> : null}
       </div>
-      <div className="mt-2 text-sm text-slate-600">{job.queueItemId ?? "no queue item"}</div>
+      <div className="mt-2 text-sm text-slate-600">{job.queueItemId ?? "キュー項目なし"}</div>
       <div className="mt-1 text-xs text-slate-500">
         {formatInstant(job.updatedAt)}
         {job.errorCode || job.externalRef ? " / " : ""}
-        {job.errorCode ? `error: ${job.errorCode}` : null}
+        {job.errorCode ? `エラー: ${job.errorCode}` : null}
         {job.errorCode && job.externalRef ? " / " : ""}
-        {job.externalRef ? `ref: ${formatSafeDisplayText(job.externalRef)}` : ""}
+        {job.externalRef ? `外部参照: ${formatSafeDisplayText(job.externalRef)}` : ""}
       </div>
     </div>
   );
+}
+
+function formatJobStatus(status: MonitorProviderJob["status"]) {
+  return {
+    QUEUED: "待機中",
+    RUNNING: "実行中",
+    SUCCEEDED: "成功",
+    FAILED: "失敗",
+    CANCELLED: "中止",
+  }[status];
+}
+
+function formatJobType(jobType: MonitorProviderJob["jobType"]) {
+  return {
+    SCRIPT_GEN: "台本生成",
+    TTS_GEN: "音声生成",
+    MUSIC_GEN: "楽曲生成",
+  }[jobType];
+}
+
+function monitorJobTone(status: MonitorProviderJob["status"]): "default" | "accent" | "success" | "warning" | "danger" {
+  if (status === "SUCCEEDED") return "success";
+  if (status === "RUNNING") return "accent";
+  if (status === "FAILED") return "danger";
+  if (status === "CANCELLED") return "warning";
+  return "default";
 }
 
 function matchesProviderStatusFilter(health: ProviderHealthPayload, filter: ProviderStatusFilter) {

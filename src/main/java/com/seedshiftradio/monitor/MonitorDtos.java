@@ -28,6 +28,7 @@ public final class MonitorDtos {
 			GeneratedAssetService.CacheMetricsSnapshot cache,
 			ArchiveMetrics archive,
 			List<ProviderJobSummary> runningJobs,
+			List<ProviderJobSummary> recentJobs,
 			List<ProviderJobSummary> recentErrors,
 			List<AuditEventSummary> auditEvents,
 			Instant updatedAt) {

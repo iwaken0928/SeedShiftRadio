@@ -552,6 +552,7 @@ function buildManagementDashboard() {
         archiveReplayRate: 0,
       },
       runningJobs: [],
+      recentJobs: [],
       recentErrors: [],
       auditEvents: [],
       updatedAt: "2026-07-26T00:00:00Z",

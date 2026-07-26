@@ -120,6 +120,10 @@ class MonitorServiceTests {
 		when(playHistoryRepository.countByStationIdAndResultStatus("station-night", PlayHistoryResultStatus.DONE)).thenReturn(12L);
 		when(playHistoryRepository.countByStationIdAndResultStatusAndContentOrigin("station-night", PlayHistoryResultStatus.DONE, "ARCHIVE_REPLAY")).thenReturn(3L);
 		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.RUNNING)).thenReturn(List.of(job("job-running", ProviderJobStatus.RUNNING, ProviderJobType.MUSIC_GEN)));
+		when(providerJobRepository.findTop20ByOrderByUpdatedAtDesc()).thenReturn(List.of(
+				job("job-succeeded", ProviderJobStatus.SUCCEEDED, ProviderJobType.SCRIPT_GEN),
+				job("job-running", ProviderJobStatus.RUNNING, ProviderJobType.MUSIC_GEN),
+				job("job-failed", ProviderJobStatus.FAILED, ProviderJobType.TTS_GEN)));
 		when(providerJobRepository.findTop10ByStatusOrderByUpdatedAtDesc(ProviderJobStatus.FAILED)).thenReturn(List.of(job("job-failed", ProviderJobStatus.FAILED, ProviderJobType.TTS_GEN)));
 		when(streamEventService.recentEvents(20)).thenReturn(List.of(
 				new RadioEventRecord("12", "provider.job.failed", Instant.parse("2026-03-20T09:15:00Z"), Map.of(
@@ -150,6 +154,8 @@ class MonitorServiceTests {
 		assertEquals(0.25D, summary.archive().archiveReplayRate());
 		assertEquals(1, summary.runningJobs().size());
 		assertEquals("job-running", summary.runningJobs().getFirst().id());
+		assertEquals(3, summary.recentJobs().size());
+		assertEquals(ProviderJobStatus.SUCCEEDED, summary.recentJobs().getFirst().status());
 		assertEquals(1, summary.recentErrors().size());
 		assertEquals("job-failed", summary.recentErrors().getFirst().id());
 		assertEquals("PROVIDER_INTERRUPTED", summary.recentErrors().getFirst().errorCode());

@@ -61,4 +61,13 @@ class StreamEventServiceTests {
 		assertEquals("provider.health.changed", replay.getFirst().eventType());
 		assertEquals(payload, replay.getFirst().payload());
 	}
+
+	@Test
+	void heartbeatDoesNotCreateReplayableBusinessEvent() {
+		StreamEventService service = new StreamEventService();
+
+		service.sendHeartbeat();
+
+		assertEquals(List.of(), service.replayAfter("0"));
+	}
 }

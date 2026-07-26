@@ -108,8 +108,6 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
 
   await page.goto(appUrl("/"));
 
-  const audioConsole = page.getByTestId("audio-console");
-
   await expect(page.getByRole("button", { name: station.name, exact: true })).toBeVisible();
   await expect(page.getByTestId("radio-tune")).toBeEnabled();
 
@@ -124,9 +122,6 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
   await page.getByTestId("radio-play").click();
 
   await expect(page.getByTestId("radio-state")).toContainText("PLAYING");
-
-  await audioConsole.getByTestId("audio-play").click();
-
   await expect.poll(() => playbackEvents.length).toBe(1);
   await expect(playbackEvents[0]).toMatchObject({
     sessionId: "session-night-001",

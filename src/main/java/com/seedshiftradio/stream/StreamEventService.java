@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -79,6 +80,18 @@ public class StreamEventService {
 					.filter(event -> Long.parseLong(event.id()) > lastSeen)
 					.toList();
 		}
+	}
+
+	@Scheduled(fixedDelayString = "${seedshift.radio.stream.heartbeat-delay:15s}")
+	public void sendHeartbeat() {
+		emitters.forEach((emitterId, emitter) -> {
+			try {
+				emitter.send(SseEmitter.event().comment("keepalive"));
+			} catch (IOException | IllegalStateException exception) {
+				emitter.completeWithError(exception);
+				emitters.remove(emitterId, emitter);
+			}
+		});
 	}
 
 	public String latestEventId() {

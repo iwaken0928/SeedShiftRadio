@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getApiBase,
@@ -15,7 +15,7 @@ import {
   stopPlayback,
   tuneRadio,
 } from "@/lib/api";
-import { AudioConsole } from "@/components/audio-console";
+import { AudioConsole, type AudioConsoleHandle } from "@/components/audio-console";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Button, Card, EmptyState, Metric, SectionHeader } from "@/components/ui";
 import { useUiStore } from "@/stores/ui-store";
@@ -23,6 +23,7 @@ import type { PlaybackEventRequest, QueueItem, RadioStatus, SpeechDirective, Sta
 
 export function RadioDashboard() {
   const queryClient = useQueryClient();
+  const audioConsoleRef = useRef<AudioConsoleHandle | null>(null);
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const setSelectedStationId = useUiStore((state) => state.setSelectedStationId);
   const volume = useUiStore((state) => state.volume);
@@ -36,20 +37,32 @@ export function RadioDashboard() {
   const statusQuery = useQuery({
     queryKey: ["radio", "status"],
     queryFn: getRadioStatus,
+    refetchInterval: 3_000,
+    refetchOnWindowFocus: false,
   });
   const queueQuery = useQuery({
     queryKey: ["radio", "queue"],
     queryFn: getRadioQueue,
+    enabled: Boolean(statusQuery.data?.sessionId),
+    retry: false,
+    refetchInterval: 3_000,
+    refetchOnWindowFocus: false,
   });
   const programQuery = useQuery({
     queryKey: ["radio", "program"],
     queryFn: getRadioProgram,
+    enabled: Boolean(statusQuery.data?.programBlockId),
     retry: false,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: false,
   });
   const speechDirectiveQuery = useQuery({
     queryKey: ["radio", "speech-directive", ensureClientId()],
     queryFn: () => getNextSpeechDirective(ensureClientId()),
-    enabled: Boolean(statusQuery.data?.sessionId),
+    enabled: Boolean(
+      statusQuery.data?.sessionId
+      && queueQuery.data?.items.some((item) => item.status === "READY" || item.status === "PLAYING"),
+    ),
     retry: false,
   });
 
@@ -87,7 +100,11 @@ export function RadioDashboard() {
   });
 
   const playMutation = useMutation({
-    mutationFn: startPlayback,
+    mutationFn: async () => {
+      const status = await startPlayback();
+      await audioConsoleRef.current?.play();
+      return status;
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["radio"] });
     },
@@ -110,9 +127,9 @@ export function RadioDashboard() {
       <PanelColumn className="xl:col-span-7">
         <Card elevation="raised" material="glass" motion="enter">
           <SectionHeader
-            eyebrow="Radio"
-            title="Live Playout"
-            description="局選択、再生制御、現在の queue 状態をひとつの画面で追える初期 UI です。"
+            eyebrow="ラジオ"
+            title="番組再生"
+            description="局を選んで準備を開始し、再生可能になったら同じ画面から音声を再生できます。"
             action={
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -121,13 +138,18 @@ export function RadioDashboard() {
                   onClick={() => tuneMutation.mutate()}
                   data-testid="radio-tune"
                 >
-                  Tune
+                  選局・準備
                 </Button>
-                <Button tone="primary" disabled={playMutation.isPending} onClick={() => playMutation.mutate()} data-testid="radio-play">
-                  Play
+                <Button
+                  tone="primary"
+                  disabled={playMutation.isPending || !currentOrNextItem?.assetUrl}
+                  onClick={() => playMutation.mutate()}
+                  data-testid="radio-play"
+                >
+                  {playMutation.isPending ? "再生を開始中…" : "音声を再生"}
                 </Button>
                 <Button tone="ghost" disabled={stopMutation.isPending} onClick={() => stopMutation.mutate()} data-testid="radio-stop">
-                  Stop
+                  停止
                 </Button>
               </div>
             }
@@ -140,11 +162,16 @@ export function RadioDashboard() {
             <Metric label="Buffer Ready" value={status?.bufferReadyCount ?? 0} tone="accent" />
             <Metric label="Current Item" value={status?.currentItemId ?? "none"} />
           </div>
+          {playMutation.isError ? (
+            <p className="mt-3 text-sm font-medium text-rose-700" role="alert">
+              {playMutation.error instanceof Error ? playMutation.error.message : "再生を開始できませんでした。"}
+            </p>
+          ) : null}
           <div className="mt-5 grid gap-3 lg:grid-cols-[1.2fr_1fr]">
             <div className="space-y-3">
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  Station
+                  局
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {stations.length ? (
@@ -170,9 +197,9 @@ export function RadioDashboard() {
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <Card tone="accent" className="p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-700">Now playing</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-teal-700">現在／次のセグメント</div>
                   <div className="mt-2 text-lg font-semibold text-slate-950" data-testid="radio-now-playing-title">
-                    {currentOrNextItem?.title ?? "Queue waiting"}
+                    {currentOrNextItem?.title ?? "生成・準備を待っています"}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {currentOrNextItem ? <Badge tone="accent">{currentOrNextItem.type}</Badge> : null}
@@ -182,6 +209,7 @@ export function RadioDashboard() {
                   {currentOrNextItem?.assetUrl && status?.sessionId ? (
                     <div className="mt-4">
                       <AudioConsole
+                        ref={audioConsoleRef}
                         sourceUrl={getAssetUrl(currentOrNextItem.assetUrl)}
                         label={currentOrNextItem.title}
                         clientId={ensureClientId()}
@@ -196,11 +224,11 @@ export function RadioDashboard() {
                   )}
                 </Card>
                 <Card className="p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Client controls</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">再生設定</div>
                   <div className="mt-3 space-y-3">
                     <div>
                       <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        Volume
+                        音量
                       </label>
                       <input
                         type="range"
@@ -222,8 +250,8 @@ export function RadioDashboard() {
             <Card className="p-4">
               <SectionHeader
                 eyebrow="Speech"
-                title="Next Speech Directive"
-                description="Client-side TTS を使う将来 client 向けに、現在の `SpeechDirective` を見える化しています。"
+                title="次の読み上げ指示"
+                description="再生可能なセグメントが用意された時だけ、読み上げ指示を取得します。"
               />
               {speechDirectiveQuery.data ? (
                 <SpeechDirectivePanel directive={speechDirectiveQuery.data} />
@@ -238,7 +266,7 @@ export function RadioDashboard() {
         </Card>
 
         <Card className="mt-4">
-          <SectionHeader eyebrow="Queue" title="Queue Snapshot" description="SSE と REST で同期される queue の現在値です。" />
+          <SectionHeader eyebrow="キュー" title="再生待ち一覧" description="SSE に加えて3秒間隔の REST 再同期で、生成完了後の状態を追跡します。" />
           {queue?.items?.length ? (
             <div className="grid gap-3" data-testid="queue-list">
               {queue.items.map((item) => (
@@ -272,7 +300,7 @@ export function RadioDashboard() {
 
       <PanelColumn className="xl:col-span-5">
         <Card>
-          <SectionHeader eyebrow="Program" title="Current Program Block" description="現在 block と slot の解決結果です。" />
+          <SectionHeader eyebrow="番組" title="現在の番組構成" description="現在の番組と各枠の準備状態です。" />
           {programQuery.data ? (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">

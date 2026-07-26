@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterOperationalEvents } from "./operational-log-viewer";
+import { eventTypeLabel, filterOperationalEvents, jobStatusLabel } from "./operational-log-viewer";
 import type { OperationalEvent } from "@/lib/types";
 
 const EVENTS: OperationalEvent[] = [
@@ -38,5 +38,11 @@ describe("filterOperationalEvents", () => {
 
   it("相関IDでも検索できる", () => {
     expect(filterOperationalEvents(EVENTS, "ALL", "ALL", "corr-2")).toEqual([EVENTS[1]]);
+  });
+
+  it("生成ジョブの状態とイベント種別を日本語化する", () => {
+    expect(jobStatusLabel("SUCCEEDED")).toBe("成功");
+    expect(jobStatusLabel("RUNNING")).toBe("実行中");
+    expect(eventTypeLabel("provider.job.failed")).toBe("生成ジョブに失敗しました");
   });
 });

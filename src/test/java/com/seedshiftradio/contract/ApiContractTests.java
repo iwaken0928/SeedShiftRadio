@@ -54,6 +54,7 @@ import com.seedshiftradio.monitor.HealthController;
 import com.seedshiftradio.monitor.HealthService;
 import com.seedshiftradio.monitor.MonitorController;
 import com.seedshiftradio.monitor.MonitorService;
+import com.seedshiftradio.monitor.OperationalEventService;
 import com.seedshiftradio.programming.ProgramTemplateController;
 import com.seedshiftradio.programming.ProgrammingAdminService;
 import com.seedshiftradio.radio.PlayHistoryController;
@@ -111,6 +112,9 @@ class ApiContractTests {
 
 	@MockitoBean
 	MonitorService monitorService;
+
+	@MockitoBean
+	OperationalEventService operationalEventService;
 
 	@MockitoBean
 	PlayHistoryQueryService playHistoryQueryService;

@@ -189,7 +189,7 @@ class AssetServiceTests {
 	void ensureQueueAudioAssetFallsBackToPlaceholderForMusicLocalItemsWithoutLibrary() {
 		when(settingsStore.load()).thenReturn(settingsDocument());
 		byte[] wav = "music-local-placeholder".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-		when(placeholderAudioFactory.createFallbackWav(45_000)).thenReturn(wav);
+		when(placeholderAudioFactory.createMusicPlaceholderWav(45_000)).thenReturn(wav);
 		GeneratedAssetEntity asset = new GeneratedAssetEntity();
 		asset.setId("asset-music-local-placeholder");
 		when(generatedAssetService.createAudioAsset(

@@ -153,7 +153,7 @@ public class AssetService {
 				? 30_000
 				: item.getDurationMs();
 		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
-				placeholderAudioFactory.createFallbackWav(durationMs),
+				placeholderAudioFactory.createMusicPlaceholderWav(durationMs),
 				"server:music-local-placeholder",
 				item.getId(),
 				null,

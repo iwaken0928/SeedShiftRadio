@@ -701,8 +701,9 @@ Response は `GET /play-history` の各要素と同じ DTO を返す。
 受理時は `202 Accepted` を空本文で返すため、Client は JSON body を前提にしない。
 
 - `sessionId` と `itemId` は同一 `playout_session` に属している必要がある
-- `SEGMENT_STARTED` は `READY` item、`SEGMENT_ENDED` と `PLAYBACK_STOPPED` は現在 `PLAYING` 中の item のみ受け付ける
+- `SEGMENT_STARTED` は `READY` item、`SEGMENT_ENDED` と `PLAYBACK_STOPPED` は現在 `PLAYING` 中の item を受け付ける
 - `SEGMENT_ERROR` は再生開始前の `READY` item または現在 `PLAYING` 中の item を受け付け、対象 item を `FAILED` として縮退補充を試みる
+- Client の再送や終了イベント競合に備え、既に `DONE` の item への `SEGMENT_ENDED` と、既に `FAILED` の item への `SEGMENT_ERROR` は冪等な再送として `202 Accepted` にする。履歴や後続補充を重複実行しない
 - 条件を満たさない場合は `409 CONFLICT` を返す
 
 ### 6.5 `GET /radio/program`

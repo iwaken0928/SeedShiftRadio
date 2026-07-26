@@ -11,6 +11,7 @@ type Props = {
   itemId: string | null;
   sessionId: string | null;
   volume: number;
+  autoPlay: boolean;
   onPlaybackEvent: (request: PlaybackEventRequest) => Promise<void> | void;
 };
 
@@ -20,13 +21,17 @@ export type AudioConsoleHandle = {
 };
 
 export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function AudioConsole(
-  { sourceUrl, label, clientId, itemId, sessionId, volume, onPlaybackEvent },
+  { sourceUrl, label, clientId, itemId, sessionId, volume, autoPlay, onPlaybackEvent },
   ref,
 ) {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [playing, setPlaying] = useState(false);
     const [playbackError, setPlaybackError] = useState<string | null>(null);
     const sentStartRef = useRef<string | null>(null);
+    const sentTerminalRef = useRef<string | null>(null);
+    const retryCountRef = useRef(0);
+    const playbackRequestedRef = useRef(false);
+    const playAttemptRef = useRef<Promise<void> | null>(null);
     const playbackTargetRef = useRef({ clientId, itemId, sessionId, onPlaybackEvent });
     playbackTargetRef.current = { clientId, itemId, sessionId, onPlaybackEvent };
 
@@ -46,6 +51,10 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
       audio.load();
     }
     sentStartRef.current = null;
+    sentTerminalRef.current = null;
+    retryCountRef.current = 0;
+    playbackRequestedRef.current = false;
+    playAttemptRef.current = null;
     setPlaying(false);
     setPlaybackError(null);
   }, [sourceUrl, itemId]);
@@ -72,38 +81,54 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
   }, []);
 
   const emitPlaybackEvent = async (eventType: PlaybackEventRequest["eventType"]) => {
-    if (!sessionId || !itemId) {
+    const target = playbackTargetRef.current;
+    if (!target.sessionId || !target.itemId) {
       return;
     }
-    await onPlaybackEvent({
-      clientId,
-      sessionId,
-      itemId,
+    await target.onPlaybackEvent({
+      clientId: target.clientId,
+      sessionId: target.sessionId,
+      itemId: target.itemId,
       eventType,
       occurredAt: new Date().toISOString(),
     });
   };
 
   const play = async () => {
+    if (playAttemptRef.current) {
+      return playAttemptRef.current;
+    }
     const audio = audioRef.current;
     if (!audio || !sourceUrl) {
       throw new Error("再生可能な音声アセットがありません。");
     }
-    setPlaybackError(null);
-    try {
-      await audio.play();
-      setPlaying(true);
-      if (itemId && sentStartRef.current !== itemId) {
-        sentStartRef.current = itemId;
-        void emitPlaybackEvent("SEGMENT_STARTED").catch(() => {
-          setPlaybackError("音声は再生中ですが、Server へ再生開始を通知できませんでした。");
-        });
+
+    const attempt = (async () => {
+      playbackRequestedRef.current = true;
+      setPlaybackError(null);
+      try {
+        await audio.play();
+        setPlaying(true);
+        if (itemId && sentStartRef.current !== itemId) {
+          sentStartRef.current = itemId;
+          await emitPlaybackEvent("SEGMENT_STARTED").catch(() => {
+            setPlaybackError("音声は再生中ですが、Server へ再生開始を通知できませんでした。");
+          });
+        }
+      } catch (cause) {
+        const message = playbackFailureMessage(cause);
+        setPlaying(false);
+        setPlaybackError(message);
+        throw new Error(message);
       }
-    } catch (cause) {
-      const message = playbackFailureMessage(cause);
-      setPlaying(false);
-      setPlaybackError(message);
-      throw new Error(message);
+    })();
+    playAttemptRef.current = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (playAttemptRef.current === attempt) {
+        playAttemptRef.current = null;
+      }
     }
   };
 
@@ -114,6 +139,7 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
     }
     audio.pause();
     audio.currentTime = 0;
+    playbackRequestedRef.current = false;
     setPlaying(false);
   };
 
@@ -136,6 +162,56 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
     reset();
     await emitPlaybackEvent("PLAYBACK_STOPPED");
   };
+
+  const emitTerminalEvent = async (eventType: "SEGMENT_ENDED" | "SEGMENT_ERROR") => {
+    const target = playbackTargetRef.current;
+    const eventKey = target.sessionId && target.itemId
+      ? `${target.sessionId}:${target.itemId}:${eventType}`
+      : null;
+    if (!eventKey || sentTerminalRef.current === eventKey) {
+      return;
+    }
+    sentTerminalRef.current = eventKey;
+    try {
+      await emitPlaybackEvent(eventType);
+    } catch {
+      sentTerminalRef.current = null;
+      setPlaybackError(
+        eventType === "SEGMENT_ENDED"
+          ? "音声は終了しましたが、Server へ終了を通知できませんでした。再同期を待っています。"
+          : "音声エラーを Server へ通知できませんでした。再同期を待っています。",
+      );
+    }
+  };
+
+  const handleEnded = () => {
+    playbackRequestedRef.current = false;
+    setPlaying(false);
+    void emitTerminalEvent("SEGMENT_ENDED");
+  };
+
+  const handleError = () => {
+    const audio = audioRef.current;
+    setPlaying(false);
+    if (audio && playbackRequestedRef.current && retryCountRef.current < 1) {
+      retryCountRef.current += 1;
+      audio.load();
+      void play().catch(() => {
+        setPlaybackError("音声アセットの再試行に失敗しました。次のセグメントへ進みます。");
+        void emitTerminalEvent("SEGMENT_ERROR");
+      });
+      return;
+    }
+    setPlaybackError("音声アセットを読み込めませんでした。次のセグメントへ進みます。");
+    void emitTerminalEvent("SEGMENT_ERROR");
+  };
+
+  useEffect(() => {
+    if (!autoPlay || !sourceUrl || !itemId) {
+      return;
+    }
+    void play().catch(() => undefined);
+  }, [autoPlay, itemId, sourceUrl]);
 
   return (
     <Card tone="dark" className="relative overflow-hidden" data-testid="audio-console">
@@ -167,20 +243,17 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
           className="hidden"
           preload="auto"
           data-testid="audio-element"
-          onEnded={() => {
-            setPlaying(false);
-            void emitPlaybackEvent("SEGMENT_ENDED");
-          }}
-          onError={() => {
-            setPlaying(false);
-            setPlaybackError("音声アセットを読み込めませんでした。しばらく待ってから再試行してください。");
-            void emitPlaybackEvent("SEGMENT_ERROR");
-          }}
+          onEnded={handleEnded}
+          onError={handleError}
         />
 
         {playbackError ? <p className="text-sm font-semibold text-rose-200" role="alert">{playbackError}</p> : null}
         <p className="text-sm leading-6 text-slate-200">
-          {sourceUrl ? "現在の READY セグメントを再生できます。" : "再生可能な asset がまだありません。"}
+          {sourceUrl
+            ? autoPlay
+              ? "この番組の残りセグメントを順番に連続再生します。"
+              : "現在の READY セグメントを再生できます。"
+            : "再生可能な asset がまだありません。"}
         </p>
       </div>
     </Card>

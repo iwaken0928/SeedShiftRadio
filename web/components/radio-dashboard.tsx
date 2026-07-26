@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getApiBase,
@@ -24,6 +24,10 @@ import type { PlaybackEventRequest, QueueItem, RadioStatus, SpeechDirective, Sta
 export function RadioDashboard() {
   const queryClient = useQueryClient();
   const audioConsoleRef = useRef<AudioConsoleHandle | null>(null);
+  const [continuousPlayback, setContinuousPlayback] = useState<{
+    sessionId: string;
+    programBlockId: string;
+  } | null>(null);
   const selectedStationId = useUiStore((state) => state.selectedStationId);
   const setSelectedStationId = useUiStore((state) => state.setSelectedStationId);
   const volume = useUiStore((state) => state.volume);
@@ -42,30 +46,34 @@ export function RadioDashboard() {
     refetchInterval: 3_000,
     refetchOnWindowFocus: false,
   });
+  const status = statusQuery.data;
   const queueQuery = useQuery({
-    queryKey: ["radio", "queue"],
+    queryKey: ["radio", "queue", status?.sessionId],
     queryFn: getRadioQueue,
-    enabled: Boolean(statusQuery.data?.sessionId),
+    enabled: Boolean(status?.sessionId),
     retry: false,
     refetchInterval: 3_000,
     refetchOnWindowFocus: false,
   });
+  const queue = queueQuery.data;
+  const currentOrNextItem = resolveCurrentOrNextItem(status, queue?.items ?? []);
   const programQuery = useQuery({
-    queryKey: ["radio", "program"],
+    queryKey: ["radio", "program", status?.sessionId, status?.programBlockId],
     queryFn: getRadioProgram,
-    enabled: Boolean(statusQuery.data?.programBlockId),
+    enabled: Boolean(status?.sessionId && status.programBlockId),
     retry: false,
     refetchInterval: 5_000,
     refetchOnWindowFocus: false,
   });
+  const nextReadyItemId = queue?.items.find((item) => item.status === "READY")?.id;
   const speechDirectiveQuery = useQuery({
-    queryKey: ["radio", "speech-directive", clientId],
+    queryKey: ["radio", "speech-directive", status?.sessionId, nextReadyItemId, clientId],
     queryFn: () => getNextSpeechDirective(clientId),
     enabled: Boolean(
       clientId
       &&
-      statusQuery.data?.sessionId
-      && queueQuery.data?.items.some((item) => item.status === "READY" || item.status === "PLAYING"),
+      status?.sessionId
+      && nextReadyItemId,
     ),
     retry: false,
   });
@@ -95,12 +103,15 @@ export function RadioDashboard() {
   }, [clientId, ensureClientId, hasHydrated]);
 
   const tuneMutation = useMutation({
-    mutationFn: () =>
-      tuneRadio({
+    mutationFn: () => {
+      setContinuousPlayback(null);
+      audioConsoleRef.current?.reset();
+      return tuneRadio({
         stationId: selectedStationId ?? "",
         requestedBy: "web-client",
         resumePlayback: false,
-      }),
+      });
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["radio"] }),
@@ -115,6 +126,13 @@ export function RadioDashboard() {
       if (!audioConsole) {
         throw new Error("音声プレイヤーの準備が完了していません。もう一度お試しください。");
       }
+      if (!status?.sessionId || !currentOrNextItem?.programBlockId) {
+        throw new Error("番組の再生対象を確定できません。準備完了後にもう一度お試しください。");
+      }
+      setContinuousPlayback({
+        sessionId: status.sessionId,
+        programBlockId: currentOrNextItem.programBlockId,
+      });
 
       // Browser media playback must begin in the original click task. Start both
       // operations before awaiting either network or media completion.
@@ -127,6 +145,7 @@ export function RadioDashboard() {
       }
 
       audioConsole.reset();
+      setContinuousPlayback(null);
       await stopPlayback().catch(() => undefined);
       if (audioResult.status === "rejected") {
         throw audioResult.reason;
@@ -143,6 +162,7 @@ export function RadioDashboard() {
 
   const stopMutation = useMutation({
     mutationFn: async () => {
+      setContinuousPlayback(null);
       audioConsoleRef.current?.reset();
       return stopPlayback();
     },
@@ -151,9 +171,34 @@ export function RadioDashboard() {
     },
   });
 
-  const status = statusQuery.data;
-  const queue = queueQuery.data;
-  const currentOrNextItem = resolveCurrentOrNextItem(status, queue?.items ?? []);
+  const handlePlaybackEvent = useCallback(async (request: PlaybackEventRequest) => {
+    if (request.eventType === "PLAYBACK_STOPPED") {
+      setContinuousPlayback(null);
+    }
+    await emitPlaybackEvent(request);
+    if (request.eventType !== "SEGMENT_STARTED") {
+      await queryClient.invalidateQueries({ queryKey: ["radio"] });
+    }
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (!continuousPlayback) {
+      return;
+    }
+    if (status?.sessionId && status.sessionId !== continuousPlayback.sessionId) {
+      setContinuousPlayback(null);
+      return;
+    }
+    if (currentOrNextItem?.programBlockId && currentOrNextItem.programBlockId !== continuousPlayback.programBlockId) {
+      setContinuousPlayback(null);
+    }
+  }, [continuousPlayback, currentOrNextItem?.programBlockId, status?.sessionId]);
+
+  const shouldAutoPlayCurrentItem = Boolean(
+    continuousPlayback
+    && status?.sessionId === continuousPlayback.sessionId
+    && currentOrNextItem?.programBlockId === continuousPlayback.programBlockId,
+  );
   const stations = stationsQuery.data ?? [];
 
   return (
@@ -176,11 +221,15 @@ export function RadioDashboard() {
                 </Button>
                 <Button
                   tone="primary"
-                  disabled={playMutation.isPending || !currentOrNextItem?.assetUrl}
+                  disabled={playMutation.isPending || Boolean(continuousPlayback) || !currentOrNextItem?.assetUrl}
                   onClick={() => playMutation.mutate()}
                   data-testid="radio-play"
                 >
-                  {playMutation.isPending ? "再生を開始中…" : "音声を再生"}
+                  {playMutation.isPending
+                    ? "再生を開始中…"
+                    : continuousPlayback
+                      ? "番組を再生中"
+                      : "番組を再生"}
                 </Button>
                 <Button tone="ghost" disabled={stopMutation.isPending} onClick={() => stopMutation.mutate()} data-testid="radio-stop">
                   停止
@@ -250,7 +299,8 @@ export function RadioDashboard() {
                         itemId={currentOrNextItem.id}
                         sessionId={status.sessionId}
                         volume={volume}
-                        onPlaybackEvent={(request) => void emitPlaybackEvent(request)}
+                        autoPlay={shouldAutoPlayCurrentItem}
+                        onPlaybackEvent={handlePlaybackEvent}
                       />
                     </div>
                   ) : (

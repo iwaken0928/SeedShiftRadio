@@ -285,6 +285,9 @@ public class RadioService {
 		QueueItemEntity item = queueItemRepository.findById(request.itemId())
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "QueueItem が見つかりません。", Map.of("itemId", request.itemId())));
 		assertPlaybackEventTargetsSession(session, item);
+		if (isIdempotentTerminalPlaybackEvent(request.eventType(), item)) {
+			return;
+		}
 		assertPlaybackEventTransition(request, session, item);
 		switch (request.eventType()) {
 			case SEGMENT_STARTED -> {
@@ -1032,6 +1035,11 @@ public class RadioService {
 							"itemId", item.getId(),
 							"itemSessionId", item.getSessionId()));
 		}
+	}
+
+	private boolean isIdempotentTerminalPlaybackEvent(PlaybackEventType eventType, QueueItemEntity item) {
+		return (eventType == PlaybackEventType.SEGMENT_ENDED && item.getStatus() == QueueItemStatus.DONE)
+				|| (eventType == PlaybackEventType.SEGMENT_ERROR && item.getStatus() == QueueItemStatus.FAILED);
 	}
 
 	private void assertPlaybackEventTransition(PlaybackEventRequest request, PlayoutSessionEntity session, QueueItemEntity item) {

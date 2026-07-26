@@ -207,6 +207,43 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void recordPlaybackEventAcceptsDuplicateSegmentEndedAsIdempotent() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		QueueItemEntity item = queueItem("queue-001", "playout-001", QueueItemStatus.DONE);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(queueItemRepository.findById("queue-001")).thenReturn(Optional.of(item));
+
+		radioService.recordPlaybackEvent(new PlaybackEventRequest(
+				"web-client",
+				"playout-001",
+				"queue-001",
+				PlaybackEventType.SEGMENT_ENDED,
+				Instant.now()));
+
+		verify(playHistoryService, never()).record(any(), any(), any());
+		verify(queueItemRepository, never()).save(item);
+	}
+
+	@Test
+	void recordPlaybackEventAcceptsDuplicateSegmentErrorAsIdempotent() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.DEGRADED, null);
+		QueueItemEntity item = queueItem("queue-001", "playout-001", QueueItemStatus.FAILED);
+		item.setAssetBanned(true);
+		when(playoutSessionRepository.findById("playout-001")).thenReturn(Optional.of(session));
+		when(queueItemRepository.findById("queue-001")).thenReturn(Optional.of(item));
+
+		radioService.recordPlaybackEvent(new PlaybackEventRequest(
+				"web-client",
+				"playout-001",
+				"queue-001",
+				PlaybackEventType.SEGMENT_ERROR,
+				Instant.now()));
+
+		verify(playHistoryService, never()).record(any(), any(), any());
+		verify(queueItemRepository, never()).save(item);
+	}
+
+	@Test
 	void stopReturnsCurrentPlayingItemToReady() {
 		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-001");
 		QueueItemEntity item = queueItem("queue-001", "playout-001", QueueItemStatus.PLAYING);

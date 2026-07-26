@@ -64,6 +64,28 @@ class SeedShiftRadioApplicationTests {
 	}
 
 	@Test
+	void defaultProgramPlacesMusicGenAfterTheOpeningTalk() {
+		var slot = jdbcTemplate.queryForMap("""
+				select sequence_no, role, constraint_mode,
+				       candidate_segment_types::text as candidate_segment_types,
+				       fallback_segment_types::text as fallback_segment_types
+				from program_template_slot
+				where id = 'slot-night-regular-topic'
+				""");
+
+		assertEquals(2, slot.get("sequence_no"));
+		assertEquals("MUSIC_BREAK", slot.get("role"));
+		assertEquals("HARD", slot.get("constraint_mode"));
+		assertEquals("[\"MUSIC_AI\"]", slot.get("candidate_segment_types"));
+		assertEquals("[\"MUSIC_LOCAL\", \"JINGLE\"]", slot.get("fallback_segment_types"));
+		assertEquals(
+				4,
+				jdbcTemplate.queryForObject(
+						"select version from program_template where id = 'tmpl-night-regular'",
+						Integer.class));
+	}
+
+	@Test
 	@Transactional
 	void staleProviderJobRecoveryUsesTheDatabaseConditionAndIsIdempotent() {
 		Instant now = Instant.parse("2026-07-23T00:30:00Z");

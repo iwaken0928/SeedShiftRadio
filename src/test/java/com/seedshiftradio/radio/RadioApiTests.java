@@ -422,7 +422,8 @@ class RadioApiTests {
 		assertTrue(playHistoryRepository.findBySessionIdOrderByPlayedAtDesc(session.getId()).stream()
 				.anyMatch(history -> history.getQueueItemId().equals(item.getId())
 						&& history.getResultStatus() == PlayHistoryResultStatus.DONE
-						&& "LIVE_GEN".equals(history.getContentOrigin())));
+						&& item.getContentOrigin().equals(history.getContentOrigin())),
+				"再生履歴は再生したキュー項目の contentOrigin を保持する必要があります。");
 	}
 
 	@Test

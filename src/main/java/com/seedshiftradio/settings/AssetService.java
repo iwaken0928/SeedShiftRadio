@@ -80,7 +80,7 @@ public class AssetService {
 			return bytes;
 		}
 		if (Boolean.TRUE.equals(settings.features().streaming().placeholderEnabled())) {
-			return placeholderAudioFactory.createSilentWav(1_000);
+			return placeholderAudioFactory.createFallbackWav(1_000);
 		}
 		throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "指定された audio asset が見つかりません。", Map.of("assetId", assetId));
 	}
@@ -132,7 +132,7 @@ public class AssetService {
 				? 15_000
 				: item.getDurationMs();
 		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
-				placeholderAudioFactory.createSilentWav(durationMs),
+				placeholderAudioFactory.createFallbackWav(durationMs),
 				"server:music-fallback",
 				item.getId(),
 				null,
@@ -153,7 +153,7 @@ public class AssetService {
 				? 30_000
 				: item.getDurationMs();
 		GeneratedAssetEntity asset = generatedAssetService.createAudioAsset(
-				placeholderAudioFactory.createSilentWav(durationMs),
+				placeholderAudioFactory.createFallbackWav(durationMs),
 				"server:music-local-placeholder",
 				item.getId(),
 				null,

@@ -40,6 +40,8 @@ export async function stubAudioPlayback(page: Page) {
     Object.defineProperty(HTMLMediaElement.prototype, "play", {
       configurable: true,
       value() {
+        const target = window as Window & { __seedshiftAudioPlayCount?: number };
+        target.__seedshiftAudioPlayCount = (target.__seedshiftAudioPlayCount ?? 0) + 1;
         return Promise.resolve();
       },
     });

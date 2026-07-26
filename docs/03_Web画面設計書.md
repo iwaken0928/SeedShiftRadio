@@ -65,7 +65,8 @@
 - Queue の先頭 `READY` セグメントを順次再生する
 - Tune 後は SSE が切断・再接続中でも生成完了を見失わないよう、`RadioStatus` と Queue を 3 秒程度の REST polling でも再同期する
 - `programBlockId` が未設定の間は `/api/radio/program`、再生可能 item がない間は `/api/radio/next-speech-directive` を呼ばず、準備中の 404 / 409 をブラウザーエラーとして連打しない
-- 主操作の「音声を再生」は Server の再生開始と `HTMLAudioElement.play()` を一つのユーザー操作で行い、準備完了前は無効化する
+- Web の Tune は `resumePlayback=false` を送り、Server が音声出力前に `PLAYING` へ先行しないようにする
+- 主操作の「音声を再生」は、クリックの user activation が失われる前に `HTMLAudioElement.play()` を開始し、Server の再生開始 API と並行して完了を確認する。どちらかが失敗した場合はブラウザー音声を停止し、Server も停止状態へ戻して理由を画面へ表示する
 - 次セグメントは再生終了 3 秒前を目安に preload する
 - Tune 時は現在音声を即時停止せず、フェードアウト後に新局へ切り替える
 - 再生エラー時は 1 回だけ同一 asset を再試行し、失敗なら次候補へ進む
@@ -184,6 +185,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - 直近 10 件の監査イベント
 
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / recent result / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
+- `/monitor` の `PLAYING` は Server の再生状態であり、ブラウザー音声の再生有無そのものではない。監視画面にはラジオ画面への明示導線を置き、ブラウザー音声の開始・停止操作と混同させない
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
 - worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `selectedModel`, `selectedModelAvailable`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
 - Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する。upstream の chunk-level SSE 対応と現行 SeedShiftRadio adapter の有効化状態は分けて表示する
@@ -219,6 +221,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 ## 12. 実装メモ
 
 - ラジオ画面の再生状態は Client Component に集約する
+- LocalStorage の永続 UI 状態は hydration 完了後に復元し、SSR とブラウザーの初回描画へ保存値やランダムな `clientId` を混在させない
 - `useEffectEvent` を用いて音声イベント購読処理を安定化する
 - 過剰なグローバル状態は避け、Server State と UI State を分離する
 - Settings / Monitor 導線は `GET /api/auth/session` が認証済みを返す時だけ表示し、同じ導線から session logout を実行できるようにする

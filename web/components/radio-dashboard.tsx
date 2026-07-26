@@ -28,6 +28,8 @@ export function RadioDashboard() {
   const setSelectedStationId = useUiStore((state) => state.setSelectedStationId);
   const volume = useUiStore((state) => state.volume);
   const setVolume = useUiStore((state) => state.setVolume);
+  const clientId = useUiStore((state) => state.clientId);
+  const hasHydrated = useUiStore((state) => state.hasHydrated);
   const ensureClientId = useUiStore((state) => state.ensureClientId);
 
   const stationsQuery = useQuery({
@@ -57,9 +59,11 @@ export function RadioDashboard() {
     refetchOnWindowFocus: false,
   });
   const speechDirectiveQuery = useQuery({
-    queryKey: ["radio", "speech-directive", ensureClientId()],
-    queryFn: () => getNextSpeechDirective(ensureClientId()),
+    queryKey: ["radio", "speech-directive", clientId],
+    queryFn: () => getNextSpeechDirective(clientId),
     enabled: Boolean(
+      clientId
+      &&
       statusQuery.data?.sessionId
       && queueQuery.data?.items.some((item) => item.status === "READY" || item.status === "PLAYING"),
     ),
@@ -67,13 +71,19 @@ export function RadioDashboard() {
   });
 
   useEffect(() => {
-    if (!selectedStationId && stationsQuery.data && stationsQuery.data.length > 0) {
+    if (hasHydrated && !selectedStationId && stationsQuery.data && stationsQuery.data.length > 0) {
       setSelectedStationId(stationsQuery.data[0].id);
     }
-  }, [selectedStationId, setSelectedStationId, stationsQuery.data]);
+  }, [hasHydrated, selectedStationId, setSelectedStationId, stationsQuery.data]);
 
   useEffect(() => {
-    const clientId = ensureClientId();
+    if (!hasHydrated) {
+      return;
+    }
+    if (!clientId) {
+      ensureClientId();
+      return;
+    }
     void registerClientCapabilities({
       clientId,
       clientType: "WEB",
@@ -82,14 +92,14 @@ export function RadioDashboard() {
       preferredPlaybackMode: "SERVER_AUDIO",
       localVoiceProfiles: [],
     }).catch(() => undefined);
-  }, [ensureClientId]);
+  }, [clientId, ensureClientId, hasHydrated]);
 
   const tuneMutation = useMutation({
     mutationFn: () =>
       tuneRadio({
         stationId: selectedStationId ?? "",
         requestedBy: "web-client",
-        resumePlayback: true,
+        resumePlayback: false,
       }),
     onSuccess: async () => {
       await Promise.all([
@@ -101,9 +111,30 @@ export function RadioDashboard() {
 
   const playMutation = useMutation({
     mutationFn: async () => {
-      const status = await startPlayback();
-      await audioConsoleRef.current?.play();
-      return status;
+      const audioConsole = audioConsoleRef.current;
+      if (!audioConsole) {
+        throw new Error("音声プレイヤーの準備が完了していません。もう一度お試しください。");
+      }
+
+      // Browser media playback must begin in the original click task. Start both
+      // operations before awaiting either network or media completion.
+      const audioResultPromise = audioConsole.play();
+      const serverResultPromise = startPlayback();
+      const [serverResult, audioResult] = await Promise.allSettled([serverResultPromise, audioResultPromise]);
+
+      if (serverResult.status === "fulfilled" && audioResult.status === "fulfilled") {
+        return serverResult.value;
+      }
+
+      audioConsole.reset();
+      await stopPlayback().catch(() => undefined);
+      if (audioResult.status === "rejected") {
+        throw audioResult.reason;
+      }
+      if (serverResult.status === "rejected") {
+        throw serverResult.reason;
+      }
+      throw new Error("再生を開始できませんでした。");
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["radio"] });
@@ -111,7 +142,10 @@ export function RadioDashboard() {
   });
 
   const stopMutation = useMutation({
-    mutationFn: stopPlayback,
+    mutationFn: async () => {
+      audioConsoleRef.current?.reset();
+      return stopPlayback();
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["radio"] });
     },
@@ -212,7 +246,7 @@ export function RadioDashboard() {
                         ref={audioConsoleRef}
                         sourceUrl={getAssetUrl(currentOrNextItem.assetUrl)}
                         label={currentOrNextItem.title}
-                        clientId={ensureClientId()}
+                        clientId={clientId}
                         itemId={currentOrNextItem.id}
                         sessionId={status.sessionId}
                         volume={volume}
@@ -241,7 +275,7 @@ export function RadioDashboard() {
                       />
                     </div>
                     <div className="rounded-2xl bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                      clientId: <span className="font-mono text-slate-900">{ensureClientId()}</span>
+                      clientId: <span className="font-mono text-slate-900">{clientId || "準備中"}</span>
                     </div>
                   </div>
                 </Card>

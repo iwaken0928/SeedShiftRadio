@@ -14,6 +14,7 @@ import {
   fulfillJson,
   mockUnavailableStream,
   stubAudioPlayback,
+  UI_STORE_STORAGE_KEY,
 } from "./fixtures";
 
 test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
@@ -27,6 +28,10 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
   let queue = buildQueueSnapshot({ items: [] });
   const playbackEvents: Array<Record<string, unknown>> = [];
   const tuneRequests: Array<Record<string, unknown>> = [];
+  let releasePlayResponse!: () => void;
+  const playResponseGate = new Promise<void>((resolve) => {
+    releasePlayResponse = resolve;
+  });
 
   await mockUnavailableStream(page);
 
@@ -84,6 +89,7 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
   });
 
   await page.route(apiUrl("/api/radio/play"), async (route) => {
+    await playResponseGate;
     status = {
       ...status,
       state: "PLAYING",
@@ -121,6 +127,8 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
 
   await page.getByTestId("radio-play").click();
 
+  await expect.poll(() => page.evaluate(() => (window as Window & { __seedshiftAudioPlayCount?: number }).__seedshiftAudioPlayCount ?? 0)).toBe(1);
+  releasePlayResponse();
   await expect(page.getByTestId("radio-state")).toContainText("PLAYING");
   await expect.poll(() => playbackEvents.length).toBe(1);
   await expect(playbackEvents[0]).toMatchObject({
@@ -128,4 +136,73 @@ test("radio: Tune -> Play -> audio playback event POST", async ({ page }) => {
     itemId: readyItem.id,
     eventType: "SEGMENT_STARTED",
   });
+});
+
+test("radio: browser の再生拒否を画面へ表示する", async ({ page }) => {
+  await clearPersistedUiState(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value() {
+        return Promise.reject(new DOMException("playback blocked", "NotAllowedError"));
+      },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "pause", { configurable: true, value() {} });
+    Object.defineProperty(HTMLMediaElement.prototype, "load", { configurable: true, value() {} });
+  });
+
+  const station = buildStation();
+  const readyItem = buildQueueItem();
+  const status = buildRadioStatus({
+    sessionId: "session-night-001",
+    stationId: station.id,
+    programBlockId: "block-night-001",
+    currentItemId: readyItem.id,
+    bufferReadyCount: 1,
+  });
+
+  await mockUnavailableStream(page);
+  await page.route(apiUrl("/api/stations"), (route) => fulfillJson(route, [station]));
+  await page.route(apiUrl("/api/radio/status"), (route) => fulfillJson(route, status));
+  await page.route(apiUrl("/api/radio/queue"), (route) => fulfillJson(route, buildQueueSnapshot({ items: [readyItem] })));
+  await page.route(apiUrl("/api/radio/program"), (route) => fulfillJson(route, buildProgramBlock()));
+  await page.route(apiRegExp("/api/radio/next-speech-directive\\?clientId=.*"), (route) => fulfillJson(route, buildSpeechDirective()));
+  await page.route(apiUrl("/api/clients/capabilities"), (route) => fulfillEmpty(route));
+  await page.route(apiUrl("/api/radio/play"), (route) => fulfillJson(route, status));
+  await page.route(apiUrl("/api/radio/stop"), (route) => fulfillJson(route, { ...status, state: "STOPPED" }));
+
+  await page.goto(appUrl("/"));
+  await page.getByTestId("radio-play").click();
+
+  await expect(page.getByTestId("audio-console").getByRole("alert")).toContainText(
+    "ブラウザーが音声再生を許可しませんでした",
+  );
+});
+
+test("radio: 保存済みUI状態があっても hydration error を起こさない", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(({ storageKey }) => {
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      state: {
+        clientId: "web-persisted",
+        selectedStationId: "station-night",
+        radioName: "Persisted Listener",
+        volume: 0.35,
+        activeRoute: "radio",
+        localLetterSubmissions: [],
+      },
+      version: 0,
+    }));
+  }, { storageKey: UI_STORE_STORAGE_KEY });
+
+  await mockUnavailableStream(page);
+  await page.route(apiUrl("/api/stations"), (route) => fulfillJson(route, [buildStation()]));
+  await page.route(apiUrl("/api/radio/status"), (route) => fulfillJson(route, buildRadioStatus()));
+  await page.route(apiUrl("/api/clients/capabilities"), (route) => fulfillEmpty(route));
+
+  await page.goto(appUrl("/"));
+
+  await expect(page.getByText("web-persisted", { exact: true })).toBeVisible();
+  await expect.poll(() => pageErrors.filter((message) => message.includes("418") || message.includes("Hydration")).length).toBe(0);
 });

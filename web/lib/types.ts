@@ -5,7 +5,14 @@ export type ProgramBlockStatus = "PLANNED" | "ACTIVE" | "DONE" | "FAILED";
 export type ConstraintMode = "HARD" | "SOFT";
 export type SlotRole = "OPENING" | "TOPIC" | "LETTER" | "MUSIC_BREAK" | "ENDING";
 export type SegmentType = "TALK" | "LETTER" | "JINGLE" | "MUSIC_LOCAL" | "MUSIC_AI";
-export type ContentOrigin = "LIVE_GEN" | "CACHE_REUSED" | "PLACEHOLDER" | "ARCHIVE_REPLAY" | "LOCAL_LIBRARY";
+export type ContentOrigin =
+  | "LIVE_GEN"
+  | "CACHE_REUSED"
+  | "PLACEHOLDER"
+  | "ARCHIVE_REPLAY"
+  | "MUSIC_LOCAL_FALLBACK"
+  | "MUSIC_LOCAL_PLACEHOLDER"
+  | "JINGLE_FALLBACK";
 export type LetterStatus = "UNREAD" | "PENDING" | "ADOPTED" | "REPLIED";
 export type GeneratedAssetType = "SCRIPT" | "AUDIO" | "MUSIC";
 

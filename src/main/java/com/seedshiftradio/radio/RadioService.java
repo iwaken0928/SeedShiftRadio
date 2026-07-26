@@ -1,7 +1,5 @@
 package com.seedshiftradio.radio;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -338,29 +336,6 @@ public class RadioService {
 				streamEventService.latestEventId(),
 				latest.map(PlayoutSessionEntity::getId).orElse(null),
 				Map.of());
-	}
-
-	public byte[] placeholderWav() {
-		int sampleRate = 8_000;
-		int seconds = 1;
-		int dataSize = sampleRate * seconds;
-		ByteBuffer buffer = ByteBuffer.allocate(44 + dataSize).order(ByteOrder.LITTLE_ENDIAN);
-		buffer.put("RIFF".getBytes());
-		buffer.putInt(36 + dataSize);
-		buffer.put("WAVEfmt ".getBytes());
-		buffer.putInt(16);
-		buffer.putShort((short) 1);
-		buffer.putShort((short) 1);
-		buffer.putInt(sampleRate);
-		buffer.putInt(sampleRate);
-		buffer.putShort((short) 1);
-		buffer.putShort((short) 8);
-		buffer.put("data".getBytes());
-		buffer.putInt(dataSize);
-		for (int i = 0; i < dataSize; i++) {
-			buffer.put((byte) 0x80);
-		}
-		return buffer.array();
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)

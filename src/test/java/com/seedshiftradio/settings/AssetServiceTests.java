@@ -136,7 +136,7 @@ class AssetServiceTests {
 	void prepareMusicFailureFallbackUsesPlaceholderJingleWhenLibraryIsUnavailable() {
 		when(settingsStore.load()).thenReturn(settingsDocument());
 		byte[] wav = "fallback-wav".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-		when(placeholderAudioFactory.createSilentWav(30_000)).thenReturn(wav);
+		when(placeholderAudioFactory.createFallbackWav(30_000)).thenReturn(wav);
 		GeneratedAssetEntity asset = new GeneratedAssetEntity();
 		asset.setId("asset-fallback-jingle");
 		when(generatedAssetService.createAudioAsset(
@@ -189,7 +189,7 @@ class AssetServiceTests {
 	void ensureQueueAudioAssetFallsBackToPlaceholderForMusicLocalItemsWithoutLibrary() {
 		when(settingsStore.load()).thenReturn(settingsDocument());
 		byte[] wav = "music-local-placeholder".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-		when(placeholderAudioFactory.createSilentWav(45_000)).thenReturn(wav);
+		when(placeholderAudioFactory.createFallbackWav(45_000)).thenReturn(wav);
 		GeneratedAssetEntity asset = new GeneratedAssetEntity();
 		asset.setId("asset-music-local-placeholder");
 		when(generatedAssetService.createAudioAsset(
@@ -432,6 +432,7 @@ class AssetServiceTests {
 
 		assertEquals("asset-tts-placeholder", item.getAssetId());
 		assertEquals("/api/assets/audio/asset-tts-placeholder.wav", item.getAssetUrl());
+		assertEquals("PLACEHOLDER", item.getContentOrigin());
 		verify(providerJobService).markFailed("provider-job-failed", ProviderErrorCode.PROVIDER_TIMEOUT);
 		verify(providerJobService).markSucceeded("provider-job-placeholder");
 	}
@@ -500,6 +501,7 @@ class AssetServiceTests {
 		assetService.ensureQueueAudioAsset(item);
 
 		assertEquals("asset-non-recoverable-placeholder", item.getAssetId());
+		assertEquals("PLACEHOLDER", item.getContentOrigin());
 		verify(providerJobService).markFailed("provider-job-rejected", errorCode);
 		verify(ttsProvider, never()).synthesize(eq(fallback), eq(item), any(), nullable(TtsRuntimeProfile.class));
 		verify(providerJobService, never()).createQueuedJob(

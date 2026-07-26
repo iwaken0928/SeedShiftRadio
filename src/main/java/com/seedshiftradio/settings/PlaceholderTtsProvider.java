@@ -31,7 +31,7 @@ public class PlaceholderTtsProvider {
 		metadata.put("personaRef", directive.personaRef());
 		metadata.put("archiveEligible", false);
 		return new TtsProvider.SynthesizedAudio(
-				placeholderAudioFactory.createSilentWav(item.getDurationMs()),
+				placeholderAudioFactory.createFallbackWav(item.getDurationMs()),
 				provider.providerKey() + ":placeholder",
 				metadata);
 	}

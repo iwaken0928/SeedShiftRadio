@@ -198,7 +198,7 @@ public class SpeechAssetGenerationService {
 			GeneratedAssetEntity asset = createAudioAsset(
 					item, scriptAsset, directive, provider, null, providerJob, synthesizedAudio, cacheKey, previousFailure);
 			providerJobService.markSucceeded(providerJob.getId());
-			applyAsset(item, asset, "LIVE_GEN");
+			applyAsset(item, asset, "PLACEHOLDER");
 		} catch (TtsSynthesisException exception) {
 			providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
 			throw exception;
@@ -231,7 +231,7 @@ public class SpeechAssetGenerationService {
 			GeneratedAssetEntity asset = generatedAssetService.cloneAssetForQueue(
 					reusableAsset, item.getId(), providerJob.getId(), cacheKey, metadata);
 			providerJobService.markSucceeded(providerJob.getId());
-			applyAsset(item, asset, "CACHE_REUSED");
+			applyAsset(item, asset, "seedshift-placeholder".equals(provider.providerKey()) ? "PLACEHOLDER" : "CACHE_REUSED");
 		} catch (RuntimeException exception) {
 			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
 			throw exception;

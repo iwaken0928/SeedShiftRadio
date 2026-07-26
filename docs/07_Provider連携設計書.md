@@ -144,7 +144,7 @@ fallback 方針:
 1. Irodori で `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_TIMEOUT`, `PROVIDER_UNREACHABLE`, `PROVIDER_BAD_RESPONSE` が発生した場合、同一台本で `providers.tts.fallbackProviders` の次候補へ切り替える
 2. Irodori の `VOICE_CONSENT_REQUIRED`, `VOICE_REF_NOT_FOUND` は同一 Provider で再試行せず、別 `VoiceProfile` または VOICEVOX fallback へ切り替える
 3. fallback で生成した audio asset は `provider_fingerprint` と `voiceHint` を明示し、Irodori cache と混同しない
-4. すべての TTS が失敗した場合は、`features.streaming.placeholderEnabled=true` なら placeholder WAV へ縮退し、無効なら provider error を返して上位の degraded 扱いにする
+4. すべての TTS が失敗した場合は、`features.streaming.placeholderEnabled=true` なら短い可聴キューを含む placeholder WAV へ縮退し、`QueueItem.contentOrigin=PLACEHOLDER` で識別可能にする。無効なら provider error を返して上位の degraded 扱いにする
 
 ## 6. タイムアウト/リトライ
 

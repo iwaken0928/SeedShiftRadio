@@ -108,12 +108,35 @@ describe("ui-store", () => {
   it("clientId が空なら ensureClientId で再生成する", () => {
     const randomUuidSpy = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("fixed-id");
     const store = createUiStoreStore(createMemoryStorage());
-    randomUuidSpy.mockClear();
-
-    store.setState({ clientId: "" });
 
     expect(store.getState().ensureClientId()).toBe("web-fixed-id");
     expect(store.getState().clientId).toBe("web-fixed-id");
     expect(randomUuidSpy).toHaveBeenCalledOnce();
+  });
+
+  it("初期描画では storage を同期反映せず、明示的な rehydrate 後に復元する", async () => {
+    const storage = createMemoryStorage({
+      [UI_STORE_STORAGE_KEY]: JSON.stringify({
+        state: {
+          clientId: "web-persisted",
+          selectedStationId: "station-persisted",
+          radioName: "Persisted Listener",
+          volume: 0.4,
+          activeRoute: "radio",
+          localLetterSubmissions: [],
+        },
+        version: 0,
+      }),
+    });
+    const store = createUiStoreStore(storage);
+
+    expect(store.getState().clientId).toBe("");
+    expect(store.getState().selectedStationId).toBeNull();
+
+    await store.persist.rehydrate();
+
+    expect(store.getState().hasHydrated).toBe(true);
+    expect(store.getState().clientId).toBe("web-persisted");
+    expect(store.getState().selectedStationId).toBe("station-persisted");
   });
 });

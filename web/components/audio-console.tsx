@@ -16,15 +16,19 @@ type Props = {
 
 export type AudioConsoleHandle = {
   play: () => Promise<void>;
+  reset: () => void;
 };
 
 export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function AudioConsole(
   { sourceUrl, label, clientId, itemId, sessionId, volume, onPlaybackEvent },
   ref,
 ) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const sentStartRef = useRef<string | null>(null);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [playing, setPlaying] = useState(false);
+    const [playbackError, setPlaybackError] = useState<string | null>(null);
+    const sentStartRef = useRef<string | null>(null);
+    const playbackTargetRef = useRef({ clientId, itemId, sessionId, onPlaybackEvent });
+    playbackTargetRef.current = { clientId, itemId, sessionId, onPlaybackEvent };
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -39,12 +43,33 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
     if (audio) {
       audio.pause();
       audio.currentTime = 0;
-      audio.removeAttribute("src");
       audio.load();
     }
     sentStartRef.current = null;
     setPlaying(false);
+    setPlaybackError(null);
   }, [sourceUrl, itemId]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => {
+      if (!audio || audio.paused) {
+        return;
+      }
+      audio.pause();
+      const target = playbackTargetRef.current;
+      if (!target.sessionId || !target.itemId) {
+        return;
+      }
+      void target.onPlaybackEvent({
+        clientId: target.clientId,
+        sessionId: target.sessionId,
+        itemId: target.itemId,
+        eventType: "PLAYBACK_STOPPED",
+        occurredAt: new Date().toISOString(),
+      });
+    };
+  }, []);
 
   const emitPlaybackEvent = async (eventType: PlaybackEventRequest["eventType"]) => {
     if (!sessionId || !itemId) {
@@ -62,24 +87,37 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
   const play = async () => {
     const audio = audioRef.current;
     if (!audio || !sourceUrl) {
-      return;
+      throw new Error("再生可能な音声アセットがありません。");
     }
-    if (audio.src !== sourceUrl) {
-      audio.src = sourceUrl;
-    }
+    setPlaybackError(null);
     try {
       await audio.play();
       setPlaying(true);
       if (itemId && sentStartRef.current !== itemId) {
         sentStartRef.current = itemId;
-        await emitPlaybackEvent("SEGMENT_STARTED");
+        void emitPlaybackEvent("SEGMENT_STARTED").catch(() => {
+          setPlaybackError("音声は再生中ですが、Server へ再生開始を通知できませんでした。");
+        });
       }
-    } catch {
-      await emitPlaybackEvent("SEGMENT_ERROR");
+    } catch (cause) {
+      const message = playbackFailureMessage(cause);
+      setPlaying(false);
+      setPlaybackError(message);
+      throw new Error(message);
     }
   };
 
-  useImperativeHandle(ref, () => ({ play }));
+  const reset = () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.pause();
+    audio.currentTime = 0;
+    setPlaying(false);
+  };
+
+  useImperativeHandle(ref, () => ({ play, reset }));
 
   const pause = () => {
     const audio = audioRef.current;
@@ -95,9 +133,7 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
     if (!audio) {
       return;
     }
-    audio.pause();
-    audio.currentTime = 0;
-    setPlaying(false);
+    reset();
     await emitPlaybackEvent("PLAYBACK_STOPPED");
   };
 
@@ -114,7 +150,7 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button type="button" tone="secondary" onClick={() => void play()} disabled={!sourceUrl} data-testid="audio-play">
+          <Button type="button" tone="secondary" onClick={() => void play().catch(() => undefined)} disabled={!sourceUrl} data-testid="audio-play">
             再生
           </Button>
           <Button type="button" tone="ghost" onClick={pause} data-testid="audio-pause">
@@ -127,6 +163,7 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
 
         <audio
           ref={audioRef}
+          src={sourceUrl ?? undefined}
           className="hidden"
           preload="auto"
           data-testid="audio-element"
@@ -136,10 +173,12 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
           }}
           onError={() => {
             setPlaying(false);
+            setPlaybackError("音声アセットを読み込めませんでした。しばらく待ってから再試行してください。");
             void emitPlaybackEvent("SEGMENT_ERROR");
           }}
         />
 
+        {playbackError ? <p className="text-sm font-semibold text-rose-200" role="alert">{playbackError}</p> : null}
         <p className="text-sm leading-6 text-slate-200">
           {sourceUrl ? "現在の READY セグメントを再生できます。" : "再生可能な asset がまだありません。"}
         </p>
@@ -147,3 +186,15 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
     </Card>
   );
 });
+
+function playbackFailureMessage(cause: unknown) {
+  if (cause instanceof DOMException && cause.name === "NotAllowedError") {
+    return "ブラウザーが音声再生を許可しませんでした。画面を操作してから、もう一度再生してください。";
+  }
+  if (cause instanceof DOMException && cause.name === "NotSupportedError") {
+    return "この音声形式を再生できませんでした。別のセグメントをお試しください。";
+  }
+  return cause instanceof Error && cause.message
+    ? `音声を再生できませんでした: ${cause.message}`
+    : "音声を再生できませんでした。もう一度お試しください。";
+}

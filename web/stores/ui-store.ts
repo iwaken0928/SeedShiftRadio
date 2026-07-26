@@ -17,6 +17,7 @@ export type EventEntry = {
 
 export type UiStore = {
   clientId: string;
+  hasHydrated: boolean;
   selectedStationId: string | null;
   radioName: string;
   volume: number;
@@ -27,6 +28,7 @@ export type UiStore = {
   recentEvents: EventEntry[];
   localLetterSubmissions: LetterSubmissionRecord[];
   ensureClientId: () => string;
+  setHasHydrated: (hasHydrated: boolean) => void;
   setSelectedStationId: (stationId: string | null) => void;
   setRadioName: (radioName: string) => void;
   setVolume: (volume: number) => void;
@@ -81,7 +83,8 @@ export function getPersistedUiState(state: UiStore): PersistedUiState {
 }
 
 const createUiStoreState: StateCreator<UiStore, [], [], UiStore> = (set, get) => ({
-  clientId: createClientId(),
+  clientId: "",
+  hasHydrated: false,
   selectedStationId: null,
   radioName: "Midnight Echo Listener",
   volume: 0.8,
@@ -100,6 +103,7 @@ const createUiStoreState: StateCreator<UiStore, [], [], UiStore> = (set, get) =>
     set({ clientId: next });
     return next;
   },
+  setHasHydrated: (hasHydrated) => set({ hasHydrated }),
   setSelectedStationId: (selectedStationId) => set({ selectedStationId }),
   setRadioName: (radioName) => set({ radioName }),
   setVolume: (volume) => set({ volume: clampVolume(volume) }),
@@ -127,6 +131,10 @@ function createPersistedUiStore(storage?: StateStorage) {
     name: UI_STORE_STORAGE_KEY,
     ...(storage ? { storage: createJSONStorage(() => storage) } : {}),
     partialize: getPersistedUiState,
+    skipHydration: true,
+    onRehydrateStorage: () => (state) => {
+      state?.setHasHydrated(true);
+    },
   });
 }
 

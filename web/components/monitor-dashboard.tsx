@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useDeferredValue, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getHealth, getMonitorSummary, getRadioProgram } from "@/lib/api";
@@ -93,6 +94,12 @@ export function MonitorDashboard() {
             title="稼働状況サマリー"
             description="10秒ごとに再取得し、Provider、再生キュー、番組、生成ジョブの状態を追跡します。"
           />
+          <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-teal-200 bg-teal-50/80 px-4 py-3 text-sm text-slate-700 sm:flex-row sm:items-center sm:justify-between">
+            <p>ここに表示する再生状態は Server の正本です。実際のブラウザー音声はラジオ画面で開始・操作します。</p>
+            <Link href="/" className="interactive-control shrink-0 rounded-full bg-slate-950 px-4 py-2 text-center font-semibold text-white">
+              ラジオ画面を開く
+            </Link>
+          </div>
           {summary ? (
             <div className="space-y-6">
               <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">

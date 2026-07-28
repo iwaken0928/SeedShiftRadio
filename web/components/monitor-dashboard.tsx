@@ -348,6 +348,12 @@ function WorkerStatusCard({
         <Badge tone="accent">{details.adapter ?? "adapter unknown"}</Badge>
         {details.statsStatus ? <StatusBadge label="Stats" value={details.statsStatus} /> : null}
         {details.modelsStatus ? <StatusBadge label="Models" value={details.modelsStatus} /> : null}
+        {details.modelsInitialized != null ? (
+          <StatusBadge label="Model init" value={details.modelsInitialized ? "READY" : "NOT_READY"} />
+        ) : null}
+        {details.llmInitialized != null ? (
+          <StatusBadge label="LM init" value={details.llmInitialized ? "READY" : "NOT_READY"} />
+        ) : null}
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -360,7 +366,7 @@ function WorkerStatusCard({
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <DetailGroup
           label="既定モデル"
-          description={details.defaultModel ? details.defaultModel : "未取得"}
+          description={details.loadedModel ?? details.defaultModel ?? details.selectedModel ?? "未取得"}
           footer={details.defaultModelProfileId ? `profile: ${details.defaultModelProfileId}` : "default profile 未取得"}
         />
         <DetailGroup

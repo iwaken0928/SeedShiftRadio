@@ -16,6 +16,8 @@ import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.management.ManagementDtos.ManagementDashboardResponse;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
+import com.seedshiftradio.management.ManagementDtos.StationContentDeletionRequest;
+import com.seedshiftradio.management.ManagementDtos.StationContentDeletionResponse;
 import com.seedshiftradio.management.ManagementDtos.StationContentInventory;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -58,5 +60,14 @@ public class ManagementController {
 			@Valid @RequestBody PreGenerationRequest request) {
 		adminApiGuard.require(adminToken);
 		return managementService.requestPreGeneration(stationId, request);
+	}
+
+	@PostMapping("/stations/{stationId}/content/deletions")
+	public StationContentDeletionResponse deleteStationContent(
+			@PathVariable String stationId,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
+			@Valid @RequestBody StationContentDeletionRequest request) {
+		adminApiGuard.require(adminToken);
+		return managementService.deleteStationContent(stationId, request);
 	}
 }

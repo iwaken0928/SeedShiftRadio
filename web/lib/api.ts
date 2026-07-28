@@ -20,6 +20,8 @@ import {
   type ProgrammingPreviewResponse,
   type StationProgrammingResponse,
   type StationProgrammingUpdateRequest,
+  type StationContentDeletionRequest,
+  type StationContentDeletionResponse,
   type ProgramBlockSummary,
   type QueueSnapshot,
   type RadioStatus,
@@ -385,6 +387,17 @@ export function getManagementDashboard() {
 export function requestPreGeneration(stationId: string, body: PreGenerationRequest) {
   return requestJson<PreGenerationResponse>(
     `/api/management/stations/${encodeURIComponent(stationId)}/pre-generations`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: withAdminHeaders({ "Content-Type": "application/json" }),
+    },
+  );
+}
+
+export function deleteStationContent(stationId: string, body: StationContentDeletionRequest) {
+  return requestJson<StationContentDeletionResponse>(
+    `/api/management/stations/${encodeURIComponent(stationId)}/content/deletions`,
     {
       method: "POST",
       body: JSON.stringify(body),

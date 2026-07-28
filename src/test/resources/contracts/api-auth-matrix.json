@@ -10,6 +10,7 @@
   { "method": "POST", "path": "/api/letters/public/history", "access": "PUBLIC" },
   { "method": "GET", "path": "/api/management/dashboard", "access": "ADMIN" },
   { "method": "GET", "path": "/api/management/stations/{stationId}/content", "access": "ADMIN" },
+  { "method": "POST", "path": "/api/management/stations/{stationId}/content/deletions", "access": "ADMIN" },
   { "method": "POST", "path": "/api/management/stations/{stationId}/pre-generations", "access": "ADMIN" },
   { "method": "GET", "path": "/api/monitor/assets/consistency", "access": "ADMIN" },
   { "method": "GET", "path": "/api/monitor/logs", "access": "ADMIN" },

@@ -121,14 +121,16 @@ public class ProviderHealthService {
 				? lastFailure.payload().message()
 				: "defaultProvider " + primary.provider().providerKey()
 						+ " から fallback を試行しましたが利用できません。 " + lastFailure.payload().message();
-		return down(
+		return new SettingsDtos.ProviderHealthPayload(
 				providerTypeKey,
 				lastFailure.payload().providerKey(),
-				lastFailure.payload().baseUrl(),
-				message,
+				"DOWN",
 				lastFailure.payload().lastCheckedAt(),
 				lastFailure.payload().responseTimeMs(),
-				lastFailure.payload().capabilities());
+				message,
+				lastFailure.payload().capabilities(),
+				lastFailure.payload().baseUrl(),
+				lastFailure.payload().metadata());
 	}
 
 	private ProbeResult probeProvider(ProviderType providerType, ProviderRegistry.ResolvedProvider provider) {
@@ -145,19 +147,23 @@ public class ProviderHealthService {
 			if (apiKey != null && !apiKey.isBlank()) {
 				requestBuilder.header("Authorization", "Bearer " + apiKey);
 			}
-			HttpResponse<Void> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
+			HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
 			long responseTimeMs = elapsedMillis(startedAt);
 			if (response.statusCode() >= 200 && response.statusCode() < 300) {
-				Map<String, Object> metadata = enrichProviderMetadata(providerType, provider);
+				JsonNode healthBody = parseJson(response.body());
+				Map<String, Object> metadata = enrichProviderMetadata(providerType, provider, healthBody);
 				boolean selectedModelUnavailable = providerType == ProviderType.LLM
 						&& Boolean.FALSE.equals(metadata.get("selectedModelAvailable"));
+				String readinessFailure = providerReadinessFailure(providerType, provider, metadata);
 				return new ProbeResult(provider, new SettingsDtos.ProviderHealthPayload(
 						provider.providerGroupKey(),
 						provider.providerKey(),
-						selectedModelUnavailable ? "DEGRADED" : "UP",
+						readinessFailure != null ? "DOWN" : selectedModelUnavailable ? "DEGRADED" : "UP",
 						checkedAt,
 						responseTimeMs,
-						selectedModelUnavailable
+						readinessFailure != null
+								? readinessFailure
+								: selectedModelUnavailable
 								? "接続できましたが、指定した LLM モデル " + provider.defaultModelProfileId() + " が見つかりません。"
 								: "接続成功",
 						provider.capabilities(),
@@ -173,7 +179,7 @@ public class ProviderHealthService {
 					"HTTP " + response.statusCode(),
 					provider.capabilities(),
 					provider.baseUrl(),
-					enrichProviderMetadata(providerType, provider)));
+					enrichProviderMetadata(providerType, provider, objectMapper.createObjectNode())));
 		} catch (ProviderSecretException exception) {
 			return new ProbeResult(provider, down(provider.providerGroupKey(), provider.providerKey(), provider.baseUrl(), "PROVIDER_AUTH_FAILED", checkedAt, elapsedMillis(startedAt), provider.capabilities()));
 		} catch (IllegalArgumentException exception) {
@@ -188,7 +194,10 @@ public class ProviderHealthService {
 		}
 	}
 
-	private Map<String, Object> enrichProviderMetadata(ProviderType providerType, ProviderRegistry.ResolvedProvider provider) {
+	private Map<String, Object> enrichProviderMetadata(
+			ProviderType providerType,
+			ProviderRegistry.ResolvedProvider provider,
+			JsonNode healthBody) {
 		if (providerType == ProviderType.LLM) {
 			return enrichLlmProviderMetadata(provider);
 		}
@@ -209,9 +218,68 @@ public class ProviderHealthService {
 		if (!"ACE_STEP".equals(musicAdapter(provider)) && !provider.capabilities().contains("ACE_STEP")) {
 			return metadata;
 		}
+		readAceStepReadiness(provider, healthBody, metadata);
 		readAceStepStats(provider, metadata);
 		readAceStepModels(provider, metadata);
 		return metadata;
+	}
+
+	private void readAceStepReadiness(
+			ProviderRegistry.ResolvedProvider provider,
+			JsonNode healthBody,
+			Map<String, Object> metadata) {
+		JsonNode data = healthBody.path("data");
+		if (!data.isObject()) {
+			data = healthBody;
+		}
+		putBooleanIfPresent(metadata, "modelsInitialized", data.path("models_initialized"));
+		putBooleanIfPresent(metadata, "llmInitialized", data.path("llm_initialized"));
+		putTextIfPresent(metadata, "loadedModel", data.path("loaded_model"));
+		putTextIfPresent(metadata, "loadedLmModel", data.path("loaded_lm_model"));
+
+		SettingsDocument.MusicGenerationModelProfile profile = selectedMusicProfile(provider);
+		if (profile != null) {
+			metadata.put("selectedModel", profile.model());
+			metadata.put("selectedLmModel", profile.lmModel());
+			metadata.put("thinkingEnabled", profile.thinking());
+		}
+	}
+
+	private String providerReadinessFailure(
+			ProviderType providerType,
+			ProviderRegistry.ResolvedProvider provider,
+			Map<String, Object> metadata) {
+		if (providerType != ProviderType.MUSIC
+				|| (!"ACE_STEP".equals(musicAdapter(provider)) && !provider.capabilities().contains("ACE_STEP"))) {
+			return null;
+		}
+		if (Boolean.FALSE.equals(metadata.get("modelsInitialized"))) {
+			return "ACE-Step の音楽モデルが初期化されていません。Provider 側の起動設定とモデル読込状態を確認してください。";
+		}
+		SettingsDocument.MusicGenerationModelProfile profile = selectedMusicProfile(provider);
+		if (profile != null
+				&& Boolean.TRUE.equals(profile.thinking())
+				&& Boolean.FALSE.equals(metadata.get("llmInitialized"))) {
+			return "ACE-Step の 5Hz LM が初期化されていません。thinking を使う生成プロファイルには LLM の初期化が必要です。";
+		}
+		Object modelsValue = metadata.get("models");
+		if (profile != null && modelsValue instanceof List<?> models && !models.isEmpty() && !models.contains(profile.model())) {
+			return "ACE-Step に生成プロファイルのモデル " + profile.model() + " が読み込まれていません。";
+		}
+		return null;
+	}
+
+	private SettingsDocument.MusicGenerationModelProfile selectedMusicProfile(
+			ProviderRegistry.ResolvedProvider provider) {
+		if (provider.modelProfiles() == null || provider.modelProfiles().isEmpty()) {
+			return null;
+		}
+		SettingsDocument.MusicGenerationModelProfile profile =
+				provider.modelProfiles().get(provider.defaultModelProfileId());
+		if (profile == null) {
+			profile = provider.modelProfiles().values().stream().findFirst().orElse(null);
+		}
+		return profile == null ? null : profile.normalize();
 	}
 
 	private Map<String, Object> enrichTtsProviderMetadata(ProviderRegistry.ResolvedProvider provider) {
@@ -312,25 +380,40 @@ public class ProviderHealthService {
 	private void readAceStepModels(ProviderRegistry.ResolvedProvider provider, Map<String, Object> metadata) {
 		try {
 			JsonNode data = sendJsonProbe(provider, "/v1/models").path("data");
-			String defaultModel = textOrNull(data.path("default_model"));
+			String defaultModel = data.isObject() ? textOrNull(data.path("default_model")) : null;
 			if (defaultModel != null) {
 				metadata.put("defaultModel", defaultModel);
 			}
 			List<String> models = new ArrayList<>();
-			JsonNode modelNodes = data.path("models");
+			JsonNode modelNodes = data.isArray() ? data : data.path("models");
 			if (modelNodes.isArray()) {
 				for (JsonNode modelNode : modelNodes) {
 					String name = textOrNull(modelNode.path("name"));
+					if (name == null) {
+						name = textOrNull(modelNode.path("id"));
+					}
+					if (name == null) {
+						name = textOrNull(modelNode.path("model"));
+					}
 					if (name != null && !name.isBlank()) {
 						models.add(name);
 					}
 				}
 			}
-			if (!models.isEmpty()) {
-				metadata.put("models", List.copyOf(models));
-			}
+			metadata.put("models", List.copyOf(models));
 		} catch (RuntimeException exception) {
 			metadata.put("modelsStatus", "UNAVAILABLE");
+		}
+	}
+
+	private JsonNode parseJson(String body) {
+		if (body == null || body.isBlank()) {
+			return objectMapper.createObjectNode();
+		}
+		try {
+			return objectMapper.readTree(body);
+		} catch (IOException exception) {
+			return objectMapper.createObjectNode();
 		}
 	}
 
@@ -414,6 +497,19 @@ public class ProviderHealthService {
 			metadata.put(key, value.numberValue());
 		} else {
 			metadata.put(key, value.asText());
+		}
+	}
+
+	private void putBooleanIfPresent(Map<String, Object> metadata, String key, JsonNode value) {
+		if (value != null && !value.isMissingNode() && !value.isNull() && value.isBoolean()) {
+			metadata.put(key, value.asBoolean());
+		}
+	}
+
+	private void putTextIfPresent(Map<String, Object> metadata, String key, JsonNode value) {
+		String text = textOrNull(value);
+		if (text != null && !text.isBlank()) {
+			metadata.put(key, text);
 		}
 	}
 

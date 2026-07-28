@@ -19,6 +19,8 @@ import com.seedshiftradio.domain.PreGenerationRequestStatus;
 import com.seedshiftradio.management.ManagementDtos.ManagementDashboardResponse;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
+import com.seedshiftradio.management.ManagementDtos.StationContentDeletionRequest;
+import com.seedshiftradio.management.ManagementDtos.StationContentDeletionResponse;
 import com.seedshiftradio.management.ManagementDtos.StationContentInventory;
 import com.seedshiftradio.monitor.MonitorService;
 import com.seedshiftradio.monitor.OperationalEventService;
@@ -29,6 +31,7 @@ import com.seedshiftradio.radio.PlayoutSessionRepository;
 import com.seedshiftradio.radio.ProgramBlockRepository;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
+import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.settings.ProviderRuntimeException;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
@@ -41,6 +44,7 @@ public class ManagementService {
 	private final ProgramTemplateRepository programTemplateRepository;
 	private final ProgramBlockRepository programBlockRepository;
 	private final GeneratedAssetRepository generatedAssetRepository;
+	private final GeneratedAssetService generatedAssetService;
 	private final PreGenerationRequestRepository preGenerationRequestRepository;
 	private final PlayoutSessionRepository playoutSessionRepository;
 	private final ProgrammingService programmingService;
@@ -54,6 +58,7 @@ public class ManagementService {
 			ProgramTemplateRepository programTemplateRepository,
 			ProgramBlockRepository programBlockRepository,
 			GeneratedAssetRepository generatedAssetRepository,
+			GeneratedAssetService generatedAssetService,
 			PreGenerationRequestRepository preGenerationRequestRepository,
 			PlayoutSessionRepository playoutSessionRepository,
 			ProgrammingService programmingService,
@@ -65,6 +70,7 @@ public class ManagementService {
 		this.programTemplateRepository = programTemplateRepository;
 		this.programBlockRepository = programBlockRepository;
 		this.generatedAssetRepository = generatedAssetRepository;
+		this.generatedAssetService = generatedAssetService;
 		this.preGenerationRequestRepository = preGenerationRequestRepository;
 		this.playoutSessionRepository = playoutSessionRepository;
 		this.programmingService = programmingService;
@@ -141,6 +147,33 @@ public class ManagementService {
 		entity = preGenerationRequestRepository.save(entity);
 		eventPublisher.publishEvent(new PreGenerationRequested(entity.getId()));
 		return toResponse(entity);
+	}
+
+	@Transactional
+	public StationContentDeletionResponse deleteStationContent(
+			String stationId,
+			StationContentDeletionRequest request) {
+		stationRepository.findById(stationId)
+				.orElseThrow(() -> notFound("stationId", stationId));
+		GeneratedAssetService.StationContentDeletionResult result =
+				generatedAssetService.deletePreGeneratedStationContent(
+						stationId,
+						request.assetTypes() == null
+								? java.util.Set.of()
+								: java.util.Set.copyOf(request.assetTypes()));
+		operationalEventService.recordStationContentDeletion(
+				stationId,
+				result.deletedAssetCount(),
+				result.failedAssetCount(),
+				result.reclaimedBytes());
+		return new StationContentDeletionResponse(
+				result.stationId(),
+				result.executedAt(),
+				result.candidateAssetCount(),
+				result.deletedAssetCount(),
+				result.failedAssetCount(),
+				result.reclaimedBytes(),
+				result.deletedByType());
 	}
 
 	@Transactional

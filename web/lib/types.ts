@@ -432,6 +432,20 @@ export interface PreGenerationRequest {
   includeMusic: boolean;
 }
 
+export interface StationContentDeletionRequest {
+  assetTypes: GeneratedAssetType[];
+}
+
+export interface StationContentDeletionResponse {
+  stationId: string;
+  executedAt: string;
+  candidateAssetCount: number;
+  deletedAssetCount: number;
+  failedAssetCount: number;
+  reclaimedBytes: number;
+  deletedByType: Partial<Record<GeneratedAssetType, number>>;
+}
+
 export interface ArchiveMetricsSnapshot {
   eligibleArchiveCount: number;
   totalArchiveCount: number;

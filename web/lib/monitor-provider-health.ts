@@ -11,6 +11,13 @@ const WORKER_METADATA_KEYS = [
   "averageJobSeconds",
   "defaultModel",
   "models",
+  "modelsInitialized",
+  "llmInitialized",
+  "loadedModel",
+  "loadedLmModel",
+  "selectedModel",
+  "selectedLmModel",
+  "thinkingEnabled",
   "statsStatus",
   "modelsStatus",
 ] as const;
@@ -25,6 +32,13 @@ export interface WorkerStatusDetails {
   averageJobSeconds: number | null;
   defaultModel: string | null;
   models: string[];
+  modelsInitialized: boolean | null;
+  llmInitialized: boolean | null;
+  loadedModel: string | null;
+  loadedLmModel: string | null;
+  selectedModel: string | null;
+  selectedLmModel: string | null;
+  thinkingEnabled: boolean | null;
   statsStatus: string | null;
   modelsStatus: string | null;
 }
@@ -50,6 +64,13 @@ export function extractWorkerStatusDetails(health: ProviderHealthPayload): Worke
     averageJobSeconds: readNumber(metadata.averageJobSeconds),
     defaultModel: formatValue(metadata.defaultModel),
     models: readStringArray(metadata.models),
+    modelsInitialized: readBoolean(metadata.modelsInitialized),
+    llmInitialized: readBoolean(metadata.llmInitialized),
+    loadedModel: readString(metadata.loadedModel),
+    loadedLmModel: readString(metadata.loadedLmModel),
+    selectedModel: readString(metadata.selectedModel),
+    selectedLmModel: readString(metadata.selectedLmModel),
+    thinkingEnabled: readBoolean(metadata.thinkingEnabled),
     statsStatus: readString(metadata.statsStatus),
     modelsStatus: readString(metadata.modelsStatus),
   };
@@ -66,6 +87,12 @@ export function getProviderMetadataHighlights(health: ProviderHealthPayload): Pr
     workerStatus.queueSize != null ? { label: "Queue", value: String(workerStatus.queueSize) } : null,
     workerStatus.runningJobs != null ? { label: "Running", value: String(workerStatus.runningJobs) } : null,
     workerStatus.defaultModelProfileId ? { label: "Profile", value: workerStatus.defaultModelProfileId } : null,
+    workerStatus.modelsInitialized != null
+      ? { label: "Model init", value: workerStatus.modelsInitialized ? "READY" : "NOT_READY" }
+      : null,
+    workerStatus.llmInitialized != null
+      ? { label: "LM init", value: workerStatus.llmInitialized ? "READY" : "NOT_READY" }
+      : null,
   ].filter((value): value is ProviderMetadataHighlight => value != null);
 }
 
@@ -87,6 +114,16 @@ function readNumber(value: unknown): number | null {
   if (typeof value === "string" && value.trim().length > 0) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string" && /^(true|false)$/i.test(value.trim())) {
+    return value.trim().toLowerCase() === "true";
   }
   return null;
 }

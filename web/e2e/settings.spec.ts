@@ -92,6 +92,23 @@ test("settings: station inventory can request off-air pre-generation", async ({ 
   await expect(page.getByRole("status")).toContainText("事前生成を受け付けました");
 });
 
+test("settings: station inventory can delete selected pre-generated assets", async ({ page }) => {
+  const state = createSettingsState();
+  const contentDeletionRequests: RequestCapture[] = [];
+  await installSettingsRoutes(page, state, { contentDeletionRequests });
+
+  await page.goto(appUrl("/settings/content"));
+  await page.getByLabel("台本 (5 件)").uncheck();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "選択したデータを削除" }).click();
+
+  await expect.poll(() => contentDeletionRequests.length).toBe(1);
+  await expect(contentDeletionRequests[0]?.body).toEqual({
+    assetTypes: ["AUDIO", "MUSIC"],
+  });
+  await expect(page.getByRole("status")).toContainText("2 件を削除し、台帳容量を 4.00 KB 減らしました");
+});
+
 test("settings: Ollama connection method and model are editable with understandable URL validation", async ({ page }) => {
   const state = createSettingsState();
   const settingsUpdateRequests: RequestCapture[] = [];
@@ -596,6 +613,7 @@ async function installSettingsRoutes(
     templateCreateRequests?: RequestCapture[];
     templateUpdateRequests?: RequestCapture[];
     preGenerationRequests?: RequestCapture[];
+    contentDeletionRequests?: RequestCapture[];
     templateCreateFailure?: FailureResponse;
     templateUpdateFailure?: FailureResponse;
   },
@@ -624,6 +642,19 @@ async function installSettingsRoutes(
       completedAt: null,
       updatedAt: "2026-07-26T00:00:00Z",
     }, 202);
+  });
+  await page.route(apiRegExp("/api/management/stations/[^/]+/content/deletions$"), async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    captures.contentDeletionRequests?.push({ body, headers: route.request().headers() });
+    await fulfillJson(route, {
+      stationId: "station-night",
+      executedAt: "2026-07-28T12:00:00Z",
+      candidateAssetCount: 2,
+      deletedAssetCount: 2,
+      failedAssetCount: 0,
+      reclaimedBytes: 4096,
+      deletedByType: { AUDIO: 1, MUSIC: 1 },
+    });
   });
   await page.route(apiUrl("/api/settings"), async (route) => {
     if (route.request().method() === "PUT") {

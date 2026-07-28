@@ -183,6 +183,9 @@ class SeedShiftRadioApplicationTests {
 		insertGeneratedAsset("asset-inventory-music", "MUSIC", 4096);
 		insertGeneratedAsset("asset-inventory-audio", "AUDIO", 2048);
 		insertGeneratedAsset("asset-inventory-evicted", "MUSIC", 0);
+		jdbcTemplate.update(
+				"update generated_asset set archive_eligible = true where id = ?",
+				"asset-inventory-audio");
 
 		assertEquals(1L, programBlockRepository.countPreGeneratedByStationId("station-inventory-test"));
 		List<GeneratedAssetRepository.StationAssetStats> stats =
@@ -198,6 +201,10 @@ class SeedShiftRadioApplicationTests {
 				.findFirst()
 				.orElseThrow()
 				.getByteSize());
+		var deletable = generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(
+				"station-inventory-test",
+				List.of("MUSIC", "AUDIO"));
+		assertEquals(List.of("asset-inventory-music"), deletable.stream().map(asset -> asset.getId()).toList());
 	}
 
 	private void setUpdatedAt(String providerJobId, Instant updatedAt) {

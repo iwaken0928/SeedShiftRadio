@@ -121,10 +121,28 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 		HttpRequest request = authedRequest(provider, "/v1/models").GET().build();
 		JsonNode root = sendJson(request, provider, "models");
 		JsonNode data = root.path("data");
-		List<ModelInfo> models = objectMapper.convertValue(
-				data.path("models"),
-				objectMapper.getTypeFactory().constructCollectionType(List.class, ModelInfo.class));
-		return new ModelCatalog(models == null ? List.of() : models, textOrNull(data.path("default_model")));
+		JsonNode modelNodes = data.isArray() ? data : data.path("models");
+		List<ModelInfo> models = new java.util.ArrayList<>();
+		if (modelNodes.isArray()) {
+			for (JsonNode modelNode : modelNodes) {
+				String name = textOrNull(modelNode.path("name"));
+				if (name == null) {
+					name = textOrNull(modelNode.path("id"));
+				}
+				if (name == null) {
+					name = textOrNull(modelNode.path("model"));
+				}
+				if (name != null && !name.isBlank()) {
+					models.add(new ModelInfo(
+							name,
+							booleanOrNull(modelNode.path("is_default")),
+							booleanOrNull(modelNode.path("is_loaded"))));
+				}
+			}
+		}
+		return new ModelCatalog(
+				List.copyOf(models),
+				data.isObject() ? textOrNull(data.path("default_model")) : null);
 	}
 
 	@Override
@@ -458,6 +476,10 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 
 	private Double doubleOrNull(JsonNode node) {
 		return node == null || node.isNull() || node.isMissingNode() ? null : node.asDouble();
+	}
+
+	private Boolean booleanOrNull(JsonNode node) {
+		return node == null || node.isNull() || node.isMissingNode() ? null : node.asBoolean();
 	}
 
 	private String textOrNull(JsonNode node) {

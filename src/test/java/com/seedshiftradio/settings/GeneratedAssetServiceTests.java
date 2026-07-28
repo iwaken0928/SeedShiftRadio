@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -273,6 +274,50 @@ class GeneratedAssetServiceTests {
 		assertFalse((Boolean) expired.getMetadata().get("payloadFileDeleted"));
 		assertNull(expired.getCacheKey());
 		verify(generatedAssetRepository).save(expired);
+	}
+
+	@Test
+	void deletePreGeneratedStationContentRemovesOnlyRepositorySelectedPayloads() throws Exception {
+		Path scriptPath = tempDir.resolve("script.txt");
+		Path musicPath = tempDir.resolve("music.wav");
+		Files.writeString(scriptPath, "script");
+		Files.writeString(musicPath, "music");
+		GeneratedAssetEntity script = asset(
+				"asset-script",
+				GeneratedAssetType.SCRIPT,
+				scriptPath,
+				Files.size(scriptPath),
+				"cache-script",
+				Instant.parse("2026-08-20T09:00:00Z"),
+				false);
+		GeneratedAssetEntity music = asset(
+				"asset-music",
+				GeneratedAssetType.MUSIC,
+				musicPath,
+				Files.size(musicPath),
+				"cache-music",
+				Instant.parse("2026-08-20T09:00:00Z"),
+				false);
+		when(generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(
+				"station-night",
+				List.of("MUSIC", "SCRIPT")))
+				.thenReturn(List.of(script, music));
+
+		GeneratedAssetService.StationContentDeletionResult result =
+				generatedAssetService.deletePreGeneratedStationContent(
+						"station-night",
+						Set.of(GeneratedAssetType.SCRIPT, GeneratedAssetType.MUSIC));
+
+		assertFalse(Files.exists(scriptPath));
+		assertFalse(Files.exists(musicPath));
+		assertEquals(2, result.candidateAssetCount());
+		assertEquals(2, result.deletedAssetCount());
+		assertEquals(0, result.failedAssetCount());
+		assertEquals(1, result.deletedByType().get(GeneratedAssetType.SCRIPT));
+		assertEquals(1, result.deletedByType().get(GeneratedAssetType.MUSIC));
+		assertEquals("station-content-delete", script.getMetadata().get("evictionReason"));
+		assertEquals("DISABLED", music.getReuseScope());
+		assertEquals(0L, music.getByteSize());
 	}
 
 	@Test

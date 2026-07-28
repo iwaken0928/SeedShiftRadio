@@ -37,6 +37,7 @@
 | `POST` | `/api/letters/public/history` | `PUBLIC` |
 | `GET` | `/api/management/dashboard` | `ADMIN` |
 | `GET` | `/api/management/stations/{stationId}/content` | `ADMIN` |
+| `POST` | `/api/management/stations/{stationId}/content/deletions` | `ADMIN` |
 | `POST` | `/api/management/stations/{stationId}/pre-generations` | `ADMIN` |
 | `GET` | `/api/monitor/assets/consistency` | `ADMIN` |
 | `GET` | `/api/monitor/logs` | `ADMIN` |
@@ -452,6 +453,7 @@
 | `POST` | `/api/settings/test-connections` | Provider 接続テスト |
 | `GET` | `/api/management/dashboard` | 管理トップ向けの全体状況と局別コンテンツ集約 |
 | `GET` | `/api/management/stations/{stationId}/content` | 指定局の番組・台本・音声・曲 asset 保有量 |
+| `POST` | `/api/management/stations/{stationId}/content/deletions` | 指定局のオフエア事前生成 payload 削除 |
 | `POST` | `/api/management/stations/{stationId}/pre-generations` | オフエア事前生成 request 受付 |
 | `GET` | `/api/health` | ヘルス参照 |
 | `GET` | `/api/monitor/summary` | 監視サマリ参照 |
@@ -1192,7 +1194,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 ### 6.12 Provider Health
 
-`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。VOICEVOX では `adapter`, `responseFormat`, `streamingSupported=false` を返します。Irodori-TTS-Server 自体は `stream_format=sse` を提供しますが、現行 SeedShiftRadio adapter は完成 WAV だけを扱うため `streamingSupported=false` を返します。`capabilities` の `CHUNK_SSE_AVAILABLE` は upstream 能力、`streamingSupported` は現行 adapter の有効化状態を表します。Irodori-TTS の metadata には `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `voiceRefStatus`, `models` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
+`/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `modelsInitialized`, `llmInitialized`, `loadedModel`, `loadedLmModel`, `selectedModel`, `selectedLmModel`, `thinkingEnabled`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。`/health` が HTTP 200 でも `models_initialized=false`、または thinking profile 選択時に `llm_initialized=false` なら `DOWN` とする。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両方を読み取る。VOICEVOX では `adapter`, `responseFormat`, `streamingSupported=false` を返します。Irodori-TTS-Server 自体は `stream_format=sse` を提供しますが、現行 SeedShiftRadio adapter は完成 WAV だけを扱うため `streamingSupported=false` を返します。`capabilities` の `CHUNK_SSE_AVAILABLE` は upstream 能力、`streamingSupported` は現行 adapter の有効化状態を表します。Irodori-TTS の metadata には `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `voiceRefStatus`, `models` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
 
 ```json
 {
@@ -1342,6 +1344,20 @@ Response:
 `GET /api/management/stations/{stationId}/content` は 1 局分の `StationContentInventory` を返す。
 `programCount` は局の全 `program_block`、`preGeneratedProgramCount` は `playout_session.purpose=PRE_GENERATION` の block、`generatedAssetCount` / `generatedAssetBytes` と種別別件数はその block から生成された asset を表す。
 
+`POST /api/management/stations/{stationId}/content/deletions` は、指定した種別のオフエア事前生成 payload を局単位で削除する。
+
+```json
+{
+  "assetTypes": ["SCRIPT", "AUDIO", "MUSIC"]
+}
+```
+
+対象は `playout_session.purpose=PRE_GENERATION` に属し、`byte_size > 0` かつ `archive_eligible=false` の `generated_asset` に限定する。
+ライブ session、`program_block`、`queue_item`、`provider_job`、監査イベント、`broadcast_archive` と asset record 自体は物理削除しない。
+削除した asset record は eviction と同じく `byte_size=0`, `cache_key=null`, `reuse_scope=DISABLED` の tombstone として残し、同じ `storage_path` を active record が共有している場合は最後の active record になるまで payload file を残す。
+レスポンスは `stationId`, `executedAt`, `candidateAssetCount`, `deletedAssetCount`, `failedAssetCount`, `reclaimedBytes`, `deletedByType` を返す。
+この管理操作は同一 origin BFF の管理 session と CSRF を必須とし、局 ID、件数、回収容量だけを `station_content.deleted` 監査イベントへ記録する。
+
 `POST /api/management/stations/{stationId}/pre-generations` は次の request を受け付け、`202 Accepted` で `PreGenerationResponse` を返す。
 
 ```json
@@ -1431,7 +1447,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - 管理 API は `components.securitySchemes.adminToken` と operation 単位の `security` で `X-Admin-Token` 必須を表す
 - DTO は Server / Client 両方で再利用しやすいよう JSON naming を固定する
 - `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
-- 現在の OpenAPI snapshot SHA-256 は `d32c4a83b71b09096860d9835e19250babc088f43105965551c040e266cdf101` とする
+- 現在の OpenAPI snapshot SHA-256 は `f2cf3dd9deb112ee86a7ea2666556b30c9ceefcc9033c40315adf9e32298854a` とする
 - 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
 - GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

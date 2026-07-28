@@ -59,6 +59,27 @@ public class OperationalEventService {
 				message);
 	}
 
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void recordStationContentDeletion(
+			String stationId,
+			int deletedAssetCount,
+			int failedAssetCount,
+			long reclaimedBytes) {
+		save(
+				failedAssetCount == 0 ? "INFO" : "WARN",
+				"CONTENT_MANAGEMENT",
+				"station_content.deleted",
+				stationId,
+				null,
+				null,
+				null,
+				failedAssetCount == 0 ? null : "CONTENT_DELETE_PARTIAL_FAILURE",
+				"局別の事前生成コンテンツを削除しました。"
+						+ " deletedAssetCount=" + deletedAssetCount
+						+ ", failedAssetCount=" + failedAssetCount
+						+ ", reclaimedBytes=" + reclaimedBytes);
+	}
+
 	@Transactional(readOnly = true)
 	public List<MonitorDtos.OperationalEventSummary> recent(int limit) {
 		int effectiveLimit = Math.max(1, Math.min(200, limit));

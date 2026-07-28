@@ -238,7 +238,7 @@ ACE-Step profile は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTr
 
 ### 8.3 ACE-Step runtime probes
 
-ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。`/health` と `/v1/models` が匿名で成功する実装でも、保護対象の `/v1/stats`, `/release_task`, `/query_result`, `/v1/audio` に同じ Bearer token が必要なため、Server container へ `ACESTEP_API_KEY` を必ず注入する。監視 UI は生成本文ではなく、provider key、adapter、profile id、分類済み失敗理由だけを表示する。
+ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両方を読み取る。`/health` の HTTP status だけでは生成可能と判定せず、`models_initialized=true` を必須とし、選択 profile が `thinking=true` なら `llm_initialized=true` も必須とする。未初期化時は `musicGen=DOWN` とし、番組編成は `MUSIC_AI` を選ばずローカル音源や TALK へ縮退する。`/health` と `/v1/models` が匿名で成功する実装でも、保護対象の `/v1/stats`, `/release_task`, `/query_result`, `/v1/audio` に同じ Bearer token が必要なため、Server container へ `ACESTEP_API_KEY` を必ず注入する。監視 UI は生成本文ではなく、provider key、adapter、profile id、初期化状態、分類済み失敗理由だけを表示する。
 
 ### 8.4 TTS provider profile
 

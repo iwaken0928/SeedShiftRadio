@@ -85,6 +85,23 @@ public interface GeneratedAssetRepository extends JpaRepository<GeneratedAssetEn
 			""", nativeQuery = true)
 	List<StationAssetStats> summarizeByStationId(@Param("stationId") String stationId);
 
+	@Query(value = """
+			SELECT ga.*
+			FROM generated_asset ga
+			JOIN queue_item qi ON qi.id = ga.queue_item_id
+			JOIN program_block pb ON pb.id = qi.program_block_id
+			JOIN playout_session ps ON ps.id = qi.session_id
+			WHERE pb.station_id = :stationId
+				AND ps.purpose = 'PRE_GENERATION'
+				AND ga.asset_type IN (:assetTypes)
+				AND ga.byte_size > 0
+				AND ga.archive_eligible = FALSE
+			ORDER BY ga.created_at ASC
+			""", nativeQuery = true)
+	List<GeneratedAssetEntity> findDeletablePreGeneratedAssetsByStationId(
+			@Param("stationId") String stationId,
+			@Param("assetTypes") List<String> assetTypes);
+
 	interface AssetTypeStats {
 
 		GeneratedAssetType getAssetType();

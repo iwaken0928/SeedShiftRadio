@@ -252,6 +252,53 @@ public class GeneratedAssetService {
 		return accumulator.toResult(cacheMetrics(Instant.now()));
 	}
 
+	@Transactional
+	public StationContentDeletionResult deletePreGeneratedStationContent(
+			String stationId,
+			Set<GeneratedAssetType> assetTypes) {
+		if (stationId == null || stationId.isBlank()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"stationId を指定してください。",
+					Map.of("stationId", stationId == null ? "" : stationId));
+		}
+		if (assetTypes == null || assetTypes.isEmpty()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"削除する asset 種別を1件以上指定してください。",
+					Map.of("assetTypes", List.of()));
+		}
+
+		List<String> requestedTypes = assetTypes.stream()
+				.map(Enum::name)
+				.sorted()
+				.toList();
+		List<GeneratedAssetEntity> candidates = generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(
+				stationId,
+				requestedTypes);
+		Instant now = Instant.now();
+		EvictionAccumulator accumulator = new EvictionAccumulator(now);
+		Map<GeneratedAssetType, Integer> deletedByType = new EnumMap<>(GeneratedAssetType.class);
+		for (GeneratedAssetType assetType : assetTypes) {
+			deletedByType.put(assetType, 0);
+		}
+		for (GeneratedAssetEntity candidate : candidates) {
+			if (evictPayload(candidate, "station-content-delete", now, accumulator)) {
+				deletedByType.compute(candidate.getAssetType(), (ignored, count) -> count == null ? 1 : count + 1);
+			}
+		}
+		return new StationContentDeletionResult(
+				stationId,
+				now,
+				candidates.size(),
+				accumulator.evictedAssetCount,
+				accumulator.failedAssetCount,
+				accumulator.reclaimedBytes,
+				Map.copyOf(deletedByType));
+	}
+
 	@Transactional(readOnly = true)
 	public Optional<GeneratedAssetEntity> findReusableAsset(GeneratedAssetType assetType, String cacheKey) {
 		if (cacheKey == null || cacheKey.isBlank()) {
@@ -681,6 +728,16 @@ public class GeneratedAssetService {
 			int failedAssetCount,
 			long reclaimedBytes,
 			CacheMetricsSnapshot after) {
+	}
+
+	public record StationContentDeletionResult(
+			String stationId,
+			Instant executedAt,
+			int candidateAssetCount,
+			int deletedAssetCount,
+			int failedAssetCount,
+			long reclaimedBytes,
+			Map<GeneratedAssetType, Integer> deletedByType) {
 	}
 
 	public record AssetConsistencyReport(

@@ -24,7 +24,7 @@
 | `/settings/playout` | 再生・生成設定 | queue 先読み、生成量、cache、全局共通の編成既定値 |
 | `/settings/stations` | 局管理 | 局の作成、複製、基本情報、人格・音声、有効状態 |
 | `/settings/programming` | 番組編成 | 局別ポリシー、ProgramTemplate、ProgramRule、Programming Preview |
-| `/settings/content` | コンテンツ管理 | 局別の番組・台本・音声・曲 asset 台帳とオフエア事前生成 |
+| `/settings/content` | コンテンツ管理 | 局別の番組・台本・音声・曲 asset 台帳、オフエア事前生成、事前生成 payload 削除 |
 | `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
 | `/monitor/logs` | 運用ログ | 永続化した生成失敗、Provider error、request/job ID、相関 ID の検索 |
 
@@ -115,7 +115,7 @@
 | 再生・生成 | `/settings/playout` | `playout`, `cache`, 全局共通の `programming` 既定値 |
 | 局 | `/settings/stations` | Station の作成、複製、基本情報、人格、音声、有効状態 |
 | 番組編成 | `/settings/programming` | StationProgrammingPolicy, ProgramTemplate, ProgramRule, Programming Preview |
-| コンテンツ | `/settings/content` | StationContentInventory, PreGenerationRequest, 事前生成状況 |
+| コンテンツ | `/settings/content` | StationContentInventory, PreGenerationRequest, 事前生成状況、事前生成 payload 削除 |
 
 各編集画面の先頭にはカテゴリー名、設定の目的、反映タイミングを日本語で記載する。
 カテゴリー navigation には項目名だけでなく、利用者が「何を決めるページか」を判断できる 1 文の説明を常時表示する。
@@ -148,6 +148,8 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `/settings/content` は局ごとに `programCount`, `preGeneratedProgramCount`, `scriptAssetCount`, `audioAssetCount`, `musicAssetCount`, `musicAssetBytes`, `generatedAssetBytes` を表形式で表示する
 - 事前生成フォームは局、有効な任意の `ProgramTemplate` または自動選択、1 から 10 の番組数、台本・音声、曲の生成対象を指定できる
 - 事前生成はライブの局切替や再生 queue を変更しないことを操作前に明示し、受付後は `QUEUED`, `RUNNING`, `MATERIALIZED`, `FAILED` を色だけでなく文字でも表示する
+- 削除フォームは局と `SCRIPT`, `AUDIO`, `MUSIC` の対象種別を複数選択でき、実行前に確認ダイアログを表示する。対象がオフエア事前生成 payload に限られ、ライブデータ、番組 block、queue、Provider job、監査履歴、archive は残ることを明示する
+- 削除後は削除件数、失敗件数、回収容量を表示し、局別台帳を再取得する。対象種別が未選択なら送信しない
 - `MATERIALIZED` は MusicGen 完了ではなく、番組データ作成と非同期 job 投入完了を表す。曲生成の進行・失敗は管理トップまたは `/monitor` で確認する
 
 ### 7.3 初期実装範囲
@@ -172,7 +174,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
 - `Voice Profiles` の作成/編集 UI は後続実装対象とする。Irodori 取り込みの第一段では seed / DB migration と既存 station の `defaultVoiceProfileId` 差し替えで、チャンネルごとに別 voice id / style preset を割り当てられる状態を優先する
 - `/letters` の管理 inbox、`/settings`、`/monitor` は公開 UI と分離し、server-side session を確立した利用者だけが表示・操作できるようにする。`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` と legacy browser token 導線は廃止し、公開 build、Cookie、browser storage へ管理 API 用トークンを含めない
-- `/settings/content` も同じ管理 session と CSRF 契約を使い、browser は `X-Admin-Token` を生成しない。`POST /api/management/stations/{stationId}/pre-generations` は同一 origin BFF 経由だけで送る
+- `/settings/content` も同じ管理 session と CSRF 契約を使い、browser は `X-Admin-Token` を生成しない。`POST /api/management/stations/{stationId}/pre-generations` と `POST /api/management/stations/{stationId}/content/deletions` は同一 origin BFF 経由だけで送る
 
 ## 8. 監視画面
 
@@ -190,7 +192,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 監視画面は MVP では簡易版とし、全文ログ参照ではなくサマリ表示を原則とする。`provider_job` の running / recent result / failed 一覧と SSE 履歴由来の audit events を併記し、詳細な全文監査ログではなく要約を出す。
 - `/monitor` の `PLAYING` は Server の再生状態であり、ブラウザー音声の再生有無そのものではない。監視画面にはラジオ画面への明示導線を置き、ブラウザー音声の開始・停止操作と混同させない
 - summary は定期 refresh し、provider status, generated asset cache, archive metrics, job, audit event を画面内で絞り込めるようにする
-- worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `selectedModel`, `selectedModelAvailable`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
+- worker status detail は `providerHealth.metadata` のうち `adapter`, `defaultModelProfileId`, `modelProfileIds`, `modelsInitialized`, `llmInitialized`, `loadedModel`, `loadedLmModel`, `selectedModel`, `selectedLmModel`, `thinkingEnabled`, `selectedModelAvailable`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models`, `statsStatus`, `modelsStatus` の短い状態値だけを整形して表示し、prompt / lyrics / letter body / radioName / secret は出さない
 - Irodori-TTS の provider health では `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `maxConcurrentSynthesis`, `voiceRefStatus`, `streamingSupported` など短い状態値だけを表示し、参照音声 path や個人名は redaction する。upstream の chunk-level SSE 対応と現行 SeedShiftRadio adapter の有効化状態は分けて表示する
 - `providerHealth.message`, `baseUrl`, `provider_job.externalRef`, audit `summary` は分類済みの短い表示に限り、秘密値や本文らしい key-value / credential URL は Web 側でも `[redacted]` に置き換える
 
@@ -233,8 +235,8 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `/settings` / `/monitor` の provider health 表示 helper は Vitest で、metadata/message/object fallback に prompt / lyrics / letter body / radioName / secret が混ざっても露出しないことを確認する
 - `/settings` の station 基本情報更新は API client test で、CSRF header、JSON body、URL encode を確認し、browser が `X-Admin-Token` を生成しないことを固定する
 - `/settings` の station programming policy 更新は API client test で、CSRF header、JSON body、URL encode を確認し、管理 token 注入は BFF test で固定する
-- 管理ダッシュボードは Vitest で byte 表示と管理 API proxy 分類を確認し、`/settings/content` の事前生成 request は API client test で CSRF header、URL encode、JSON body を固定する
+- 管理ダッシュボードは Vitest で byte 表示と管理 API proxy 分類を確認し、`/settings/content` の事前生成 request と削除 request は API client test で CSRF header、URL encode、JSON body を固定する
 - `/monitor/logs` は `GET /api/monitor/logs` と `GET /api/monitor/summary` を 5 秒間隔で再取得し、Provider job SSE 受信時にも再取得する。待機・実行中・成功・失敗を日本語で表示し、level、category、error code、Provider、source/request ID、correlation ID で絞り込む。prompt、本文、秘密値、生の Provider 応答は表示しない
-- Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID`、`/settings` の管理カテゴリー遷移、`/settings/content` の台帳表示と事前生成 request を mock API / mock stream / audio stub で確認する
+- Playwright E2E では `/` の `Tune -> Play -> audio event`、`/letters` の `投稿 -> ローカル履歴 -> 公開採用履歴`、SSE の `subtitle.updated` と reconnect 時 `Last-Event-ID`、`/settings` の管理カテゴリー遷移、`/settings/content` の台帳表示、事前生成 request、削除種別選択と確認ダイアログを mock API / mock stream / audio stub で確認する
 - E2E selector は role と label を基本にしつつ、接続状態、queue item、audio console、投稿 toast、ローカル履歴、採用履歴など揺れやすい要素だけ `data-testid` を補助利用する
 - Playwright では 390px viewport の header 高さ、44px 以上の navigation target、横 overflow、`aria-current`、reduced motion 時の opacity-only entrance を確認する

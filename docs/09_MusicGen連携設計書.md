@@ -68,6 +68,8 @@ ACE-Step 1.5 は次の REST API を使う。
 
 iwaken-server の production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server は host network で動作するため `baseUrl=http://127.0.0.1:8001` を使い、ACE-Step の host port `8001` へ接続する。
 
+`/health` が HTTP 200 でも生成 model がロード済みとは限らない。SeedShiftRadio は `models_initialized=true` を必須とし、`thinking=true` の profile では `llm_initialized=true` も必須として、それ以外を `DOWN` と判定する。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両形式を扱う。ACE-Step 側は起動時に生成 model を初期化し、thinking profile を使う production では `ACESTEP_INIT_LLM=true` または同等の `--init-llm` 起動指定で LM も初期化する。ACE-Step container の healthcheck も HTTP status だけでなく `models_initialized=true`、必要なら `llm_initialized=true` を検査する。
+
 HTTP `401/403` は `PROVIDER_AUTH_FAILED`、`408/504` と通信 timeout は `PROVIDER_TIMEOUT`、`429/503` は `PROVIDER_RESOURCE_EXHAUSTED`、その他 4xx と安全性ポリシーによる拒否は `PROVIDER_REJECTED`、接続不能は `PROVIDER_UNREACHABLE`、その他 5xx / JSON 不正 / 空応答 / 未知状態は `PROVIDER_BAD_RESPONSE` に分類する。Server 側の中断は `PROVIDER_INTERRUPTED` とする。外部 Provider または Worker が未知の error code を返した場合も `PROVIDER_BAD_RESPONSE` へ正規化する。分類は縮退判断に使い、Provider 応答本文を標準ログへそのまま残さない。
 
 ## 5. ACE-Step model profiles
@@ -144,6 +146,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 ## 10. テスト方針
 
 - ACE-Step request mapping で `lyricsLanguage=ja` が `vocal_language=ja` になり、`thinking=true` と profile model が送られること
+- `/health` が HTTP 200 でも `models_initialized=false`、または thinking profile で `llm_initialized=false` の場合は `DOWN` となり、`/v1/models` の OpenAI 互換配列を解析できること
 - `/query_result` の result JSON string / array / object を parse し、audio URL、seed、model、metas、失敗状態を取り出せること
 - `429`, timeout, provider down で `DEGRADED` へ進み、playout が止まらないこと
 - Worker が返す既知 error code は共通分類を維持し、未知 error code は `PROVIDER_BAD_RESPONSE` へ正規化すること

@@ -2,12 +2,15 @@ package com.seedshiftradio.management;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
+import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.PreGenerationRequestStatus;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 
 public final class ManagementDtos {
@@ -49,6 +52,20 @@ public final class ManagementDtos {
 			@Min(1) @Max(10) int targetProgramCount,
 			@NotNull Boolean includeSpeech,
 			@NotNull Boolean includeMusic) {
+	}
+
+	public record StationContentDeletionRequest(
+			@NotEmpty List<GeneratedAssetType> assetTypes) {
+	}
+
+	public record StationContentDeletionResponse(
+			String stationId,
+			Instant executedAt,
+			int candidateAssetCount,
+			int deletedAssetCount,
+			int failedAssetCount,
+			long reclaimedBytes,
+			Map<GeneratedAssetType, Integer> deletedByType) {
 	}
 
 	public record PreGenerationResponse(

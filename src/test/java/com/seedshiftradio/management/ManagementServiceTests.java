@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -22,9 +23,11 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.PreGenerationRequestStatus;
 import com.seedshiftradio.domain.ProviderErrorCode;
+import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.management.ManagementDtos.ManagementDashboardResponse;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
+import com.seedshiftradio.management.ManagementDtos.StationContentDeletionRequest;
 import com.seedshiftradio.monitor.MonitorService;
 import com.seedshiftradio.monitor.OperationalEventService;
 import com.seedshiftradio.programming.ProgramTemplateRepository;
@@ -35,6 +38,7 @@ import com.seedshiftradio.radio.ProgramBlockRepository;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.ScriptGenerationException;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
+import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
 
@@ -46,6 +50,7 @@ class ManagementServiceTests {
 	@Mock ProgramTemplateRepository programTemplateRepository;
 	@Mock ProgramBlockRepository programBlockRepository;
 	@Mock GeneratedAssetRepository generatedAssetRepository;
+	@Mock GeneratedAssetService generatedAssetService;
 	@Mock PreGenerationRequestRepository preGenerationRequestRepository;
 	@Mock PlayoutSessionRepository playoutSessionRepository;
 	@Mock ProgrammingService programmingService;
@@ -63,6 +68,7 @@ class ManagementServiceTests {
 				programTemplateRepository,
 				programBlockRepository,
 				generatedAssetRepository,
+				generatedAssetService,
 				preGenerationRequestRepository,
 				playoutSessionRepository,
 				programmingService,
@@ -147,6 +153,35 @@ class ManagementServiceTests {
 						new PreGenerationRequest(null, 1, false, false)));
 
 		assertEquals("VALIDATION_ERROR", error.getCode());
+	}
+
+	@Test
+	void deletionIsLimitedToRequestedStationAndAssetTypes() {
+		StationEntity station = org.mockito.Mockito.mock(StationEntity.class);
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station));
+		when(generatedAssetService.deletePreGeneratedStationContent(
+				"station-night",
+				java.util.Set.of(GeneratedAssetType.SCRIPT, GeneratedAssetType.MUSIC)))
+				.thenReturn(new GeneratedAssetService.StationContentDeletionResult(
+						"station-night",
+						Instant.parse("2026-07-28T12:00:00Z"),
+						3,
+						3,
+						0,
+						12_345L,
+						Map.of(GeneratedAssetType.SCRIPT, 2, GeneratedAssetType.MUSIC, 1)));
+
+		ManagementDtos.StationContentDeletionResponse response = service.deleteStationContent(
+				"station-night",
+				new StationContentDeletionRequest(List.of(GeneratedAssetType.SCRIPT, GeneratedAssetType.MUSIC)));
+
+		assertEquals(3, response.deletedAssetCount());
+		assertEquals(12_345L, response.reclaimedBytes());
+		assertEquals(2, response.deletedByType().get(GeneratedAssetType.SCRIPT));
+		verify(generatedAssetService).deletePreGeneratedStationContent(
+				"station-night",
+				java.util.Set.of(GeneratedAssetType.SCRIPT, GeneratedAssetType.MUSIC));
+		verify(operationalEventService).recordStationContentDeletion("station-night", 3, 0, 12_345L);
 	}
 
 	@Test

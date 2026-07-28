@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiRequestError, getManagementDashboard, listProgramTemplates, requestPreGeneration } from "@/lib/api";
+import { ApiRequestError, deleteStationContent, getManagementDashboard, listProgramTemplates, requestPreGeneration } from "@/lib/api";
+import type { GeneratedAssetType } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Input, Label, Metric, SectionHeader } from "@/components/ui";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { formatBytes } from "@/components/management-dashboard";
@@ -20,6 +21,7 @@ export function StationContentManagement() {
   const [targetProgramCount, setTargetProgramCount] = useState(1);
   const [includeSpeech, setIncludeSpeech] = useState(true);
   const [includeMusic, setIncludeMusic] = useState(true);
+  const [deletionAssetTypes, setDeletionAssetTypes] = useState<GeneratedAssetType[]>(["SCRIPT", "AUDIO", "MUSIC"]);
 
   useEffect(() => {
     if (!stationId && dashboardQuery.data?.stations.length) {
@@ -44,6 +46,29 @@ export function StationContentManagement() {
       await queryClient.invalidateQueries({ queryKey: ["management-dashboard"] });
     },
   });
+  const deletionMutation = useMutation({
+    mutationFn: () => deleteStationContent(stationId, { assetTypes: deletionAssetTypes }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["management-dashboard"] });
+    },
+  });
+
+  const toggleDeletionAssetType = (assetType: GeneratedAssetType) => {
+    setDeletionAssetTypes((current) =>
+      current.includes(assetType)
+        ? current.filter((candidate) => candidate !== assetType)
+        : [...current, assetType],
+    );
+  };
+
+  const confirmDeletion = () => {
+    if (!selectedStation || deletionAssetTypes.length === 0) return;
+    const labels = deletionAssetTypes.map((assetType) => assetTypeLabel(assetType)).join("・");
+    const confirmed = window.confirm(
+      `${selectedStation.stationName} の事前生成済み ${labels} を削除します。番組・queue・監査履歴は残ります。続行しますか？`,
+    );
+    if (confirmed) deletionMutation.mutate();
+  };
 
   if (dashboardQuery.isLoading || templatesQuery.isLoading) {
     return <EmptyState title="コンテンツ台帳を読み込んでいます" />;
@@ -164,6 +189,52 @@ export function StationContentManagement() {
             </div>
           </Card>
         </div>
+
+        <Card className="border-rose-200 bg-rose-50">
+          <SectionHeader
+            eyebrow="Content cleanup"
+            title="事前生成コンテンツを削除"
+            description="選択中の局に属するオフエア事前生成 asset の payload を削除します。ライブ再生、番組 block、queue、Provider job、監査履歴、archive 対象は削除しません。"
+          />
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div>
+              <p className="text-sm font-semibold text-rose-950">
+                対象局: {selectedStation?.stationName ?? "局を選択してください"}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-4">
+                {(["SCRIPT", "AUDIO", "MUSIC"] as GeneratedAssetType[]).map((assetType) => (
+                  <label key={assetType} className="flex items-center gap-2 text-sm text-rose-950">
+                    <input
+                      type="checkbox"
+                      checked={deletionAssetTypes.includes(assetType)}
+                      onChange={() => toggleDeletionAssetType(assetType)}
+                    />
+                    {assetTypeLabel(assetType)} ({selectedAssetCount(selectedStation, assetType)} 件)
+                  </label>
+                ))}
+              </div>
+              <p className="mt-3 text-xs leading-6 text-rose-900">
+                同じファイルを別 asset が共有している場合、最後の参照が残る間は実ファイルを保持します。削除済み metadata は参照整合性と監査のため tombstone として残ります。
+              </p>
+            </div>
+            <Button
+              tone="danger"
+              disabled={!stationId || deletionAssetTypes.length === 0 || deletionMutation.isPending}
+              onClick={confirmDeletion}
+            >
+              {deletionMutation.isPending ? "削除しています…" : "選択したデータを削除"}
+            </Button>
+          </div>
+          {deletionMutation.data ? (
+            <p role="status" className="mt-4 text-sm font-semibold text-rose-950">
+              {deletionMutation.data.deletedAssetCount} 件を削除し、台帳容量を {formatBytes(deletionMutation.data.reclaimedBytes)} 減らしました。
+              {deletionMutation.data.failedAssetCount > 0 ? ` ${deletionMutation.data.failedAssetCount} 件は削除できませんでした。` : ""}
+            </p>
+          ) : null}
+          {deletionMutation.error ? (
+            <p role="alert" className="mt-4 text-sm font-semibold text-rose-950">{errorMessage(deletionMutation.error)}</p>
+          ) : null}
+        </Card>
       </PanelColumn>
     </PanelGrid>
   );
@@ -171,5 +242,29 @@ export function StationContentManagement() {
 
 function errorMessage(error: Error) {
   if (error instanceof ApiRequestError) return error.message;
-  return "事前生成を開始できませんでした。";
+  return "管理操作を完了できませんでした。";
+}
+
+function assetTypeLabel(assetType: GeneratedAssetType) {
+  return {
+    SCRIPT: "台本",
+    AUDIO: "音声",
+    MUSIC: "曲",
+  }[assetType];
+}
+
+function selectedAssetCount(
+  station: {
+    scriptAssetCount: number;
+    audioAssetCount: number;
+    musicAssetCount: number;
+  } | null,
+  assetType: GeneratedAssetType,
+) {
+  if (!station) return 0;
+  return {
+    SCRIPT: station.scriptAssetCount,
+    AUDIO: station.audioAssetCount,
+    MUSIC: station.musicAssetCount,
+  }[assetType];
 }

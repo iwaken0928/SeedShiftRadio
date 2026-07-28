@@ -20,7 +20,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.seedshiftradio.common.security.AdminApiGuard;
 import com.seedshiftradio.domain.PreGenerationRequestStatus;
+import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
+import com.seedshiftradio.management.ManagementDtos.StationContentDeletionResponse;
 
 @ExtendWith(MockitoExtension.class)
 class ManagementControllerTests {
@@ -64,6 +66,38 @@ class ManagementControllerTests {
 				.andExpect(jsonPath("$.status").value("QUEUED"))
 				.andExpect(jsonPath("$.prompt").doesNotExist())
 				.andExpect(jsonPath("$.lyrics").doesNotExist());
+
+		verify(adminApiGuard).require("test-admin-token");
+	}
+
+	@Test
+	void stationContentDeletionRequiresAdminAndReturnsDeletionSummary() throws Exception {
+		when(managementService.deleteStationContent(
+				org.mockito.ArgumentMatchers.eq("station-night"),
+				any(ManagementDtos.StationContentDeletionRequest.class)))
+				.thenReturn(new StationContentDeletionResponse(
+						"station-night",
+						Instant.parse("2026-07-28T12:00:00Z"),
+						4,
+						4,
+						0,
+						8_192L,
+						java.util.Map.of(GeneratedAssetType.AUDIO, 3, GeneratedAssetType.MUSIC, 1)));
+
+		mockMvc.perform(post("/api/management/stations/station-night/content/deletions")
+						.header(AdminApiGuard.HEADER_NAME, "test-admin-token")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "assetTypes": ["AUDIO", "MUSIC"]
+								}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.stationId").value("station-night"))
+				.andExpect(jsonPath("$.deletedAssetCount").value(4))
+				.andExpect(jsonPath("$.reclaimedBytes").value(8192))
+				.andExpect(jsonPath("$.deletedByType.AUDIO").value(3))
+				.andExpect(jsonPath("$.deletedByType.MUSIC").value(1));
 
 		verify(adminApiGuard).require("test-admin-token");
 	}

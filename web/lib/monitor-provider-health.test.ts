@@ -29,6 +29,13 @@ describe("monitor-provider-health", () => {
         averageJobSeconds: "7.5",
         defaultModel: { model: "musicgen-medium" },
         models: ["musicgen-medium", { name: "musicgen-large" }, false, {}],
+        modelsInitialized: true,
+        llmInitialized: "false",
+        loadedModel: "acestep-v15-turbo",
+        loadedLmModel: "acestep-5Hz-lm-0.6B",
+        selectedModel: "acestep-v15-turbo",
+        selectedLmModel: "acestep-5Hz-lm-0.6B",
+        thinkingEnabled: true,
         statsStatus: "UP",
         modelsStatus: "SYNCED",
       }),
@@ -44,6 +51,13 @@ describe("monitor-provider-health", () => {
       averageJobSeconds: 7.5,
       defaultModel: "musicgen-medium",
       models: ["musicgen-medium", "musicgen-large", "false"],
+      modelsInitialized: true,
+      llmInitialized: false,
+      loadedModel: "acestep-v15-turbo",
+      loadedLmModel: "acestep-5Hz-lm-0.6B",
+      selectedModel: "acestep-v15-turbo",
+      selectedLmModel: "acestep-5Hz-lm-0.6B",
+      thinkingEnabled: true,
       statsStatus: "UP",
       modelsStatus: "SYNCED",
     });
@@ -61,6 +75,8 @@ describe("monitor-provider-health", () => {
         queueSize: "4",
         runningJobs: 2,
         defaultModelProfileId: "profile-a",
+        modelsInitialized: false,
+        llmInitialized: true,
       }),
     );
 
@@ -69,6 +85,8 @@ describe("monitor-provider-health", () => {
       { label: "Queue", value: "4" },
       { label: "Running", value: "2" },
       { label: "Profile", value: "profile-a" },
+      { label: "Model init", value: "NOT_READY" },
+      { label: "LM init", value: "READY" },
     ]);
   });
 

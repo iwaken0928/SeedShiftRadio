@@ -413,6 +413,39 @@ class MusicGenWorkerGatewayTests {
 	}
 
 	@Test
+	void aceStepModelCatalogAcceptsOpenAiCompatibleDataArray() throws IOException {
+		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/v1/models", exchange -> {
+			byte[] body = """
+					{
+					  "object": "list",
+					  "data": [
+					    {"id": "acestep-v15-turbo", "object": "model"},
+					    {"id": "acestep-v15-sft", "object": "model"}
+					  ]
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.start();
+		try {
+			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+
+			MusicGenWorkerGateway.ModelCatalog catalog = gateway.listModels(aceProvider(baseUrl));
+
+			assertEquals(
+					List.of("acestep-v15-turbo", "acestep-v15-sft"),
+					catalog.models().stream().map(MusicGenWorkerGateway.ModelInfo::name).toList());
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
 	void awaitCompletionNormalizesUnknownWorkerErrorCode() throws IOException {
 		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/music/jobs/job-unknown", exchange -> {

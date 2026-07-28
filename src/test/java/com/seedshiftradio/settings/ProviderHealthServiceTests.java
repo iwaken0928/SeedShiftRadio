@@ -166,6 +166,74 @@ class ProviderHealthServiceTests {
 	}
 
 	@Test
+	void aceStepHealthIsDownWhenApiIsAliveButModelsAreNotInitialized() {
+		httpServer.createContext("/uninitialized/health", new FixedResponseHandler(
+				200,
+				"""
+						{"data":{
+						  "status":"ok",
+						  "models_initialized":false,
+						  "llm_initialized":false,
+						  "loaded_model":"acestep-v15-turbo",
+						  "loaded_lm_model":null
+						}}
+						"""));
+		httpServer.createContext("/uninitialized/v1/models", new FixedResponseHandler(
+				200,
+				"{\"object\":\"list\",\"data\":[]}"));
+		httpServer.createContext("/uninitialized/v1/stats", new FixedResponseHandler(
+				200,
+				"{\"data\":{\"queue_size\":0,\"jobs\":{\"queued\":0,\"running\":0}}}"));
+		SettingsDocument defaults = SettingsDocument.defaults();
+		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/uninitialized";
+		SettingsDocument configured = new SettingsDocument(
+				defaults.version(),
+				defaults.schemaVersion(),
+				defaults.updatedAt(),
+				defaults.server(),
+				defaults.paths(),
+				defaults.playout(),
+				defaults.cache(),
+				defaults.programming(),
+				new SettingsDocument.ProviderCatalog(
+						defaults.providers().llm(),
+						defaults.providers().tts(),
+						new SettingsDocument.ProviderGroup(
+								"ace-step",
+								List.of(),
+								Map.of("ace-step", new SettingsDocument.ProviderEndpoint(
+										baseUrl,
+										"/health",
+										1_000,
+										List.of("MUSIC_GEN", "ACE_STEP"),
+										"ACE_STEP",
+										null,
+										"ace-ja-fast",
+										SettingsDocument.MusicGenerationModelProfile.defaultAceStepProfiles())))),
+				defaults.security(),
+				defaults.features()).normalize();
+		ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+		RadioSettingsStore store = new RadioSettingsStore(
+				objectMapper,
+				new RadioConfigProperties(tempDir.resolve("uninitialized-ace-config.json").toString()));
+		store.save(configured);
+		ProviderHealthService service = new ProviderHealthService(
+				new ProviderRegistry(store),
+				new StreamEventService(),
+				objectMapper);
+
+		SettingsDtos.ProviderHealthPayload health = service.refreshHealth().get("musicGen");
+
+		assertEquals("DOWN", health.status());
+		assertEquals(false, health.metadata().get("modelsInitialized"));
+		assertEquals(false, health.metadata().get("llmInitialized"));
+		assertEquals(List.of(), health.metadata().get("models"));
+		assertEquals(
+				"ACE-Step の音楽モデルが初期化されていません。Provider 側の起動設定とモデル読込状態を確認してください。",
+				health.message());
+	}
+
+	@Test
 	void metadataOnlyChangeIsMeaningfulForProviderHealthEvents() throws Exception {
 		Instant checkedAt = Instant.parse("2026-07-21T00:00:00Z");
 		SettingsDtos.ProviderHealthPayload before = new SettingsDtos.ProviderHealthPayload(

@@ -234,6 +234,76 @@ class ProviderHealthServiceTests {
 	}
 
 	@Test
+	void aceStepHealthAcceptsCurrentOpenAiCompatibleModelDisplayName() {
+		httpServer.createContext("/current-ace/health", new FixedResponseHandler(
+				200,
+				"""
+						{"data":{
+						  "status":"ok",
+						  "models_initialized":true,
+						  "llm_initialized":true,
+						  "loaded_model":"acestep-v15-turbo",
+						  "loaded_lm_model":"acestep-5Hz-lm-0.6B"
+						}}
+						"""));
+		httpServer.createContext("/current-ace/v1/models", new FixedResponseHandler(
+				200,
+				"""
+						{"object":"list","data":[{
+						  "id":"acestep/acestep-v15-turbo",
+						  "name":"ACE-Step acestep-v15-turbo"
+						}]}
+						"""));
+		httpServer.createContext("/current-ace/v1/stats", new FixedResponseHandler(
+				200,
+				"{\"data\":{\"queue_size\":0,\"jobs\":{\"queued\":0,\"running\":0}}}"));
+		SettingsDocument defaults = SettingsDocument.defaults();
+		String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/current-ace";
+		SettingsDocument configured = new SettingsDocument(
+				defaults.version(),
+				defaults.schemaVersion(),
+				defaults.updatedAt(),
+				defaults.server(),
+				defaults.paths(),
+				defaults.playout(),
+				defaults.cache(),
+				defaults.programming(),
+				new SettingsDocument.ProviderCatalog(
+						defaults.providers().llm(),
+						defaults.providers().tts(),
+						new SettingsDocument.ProviderGroup(
+								"ace-step",
+								List.of(),
+								Map.of("ace-step", new SettingsDocument.ProviderEndpoint(
+										baseUrl,
+										"/health",
+										1_000,
+										List.of("MUSIC_GEN", "ACE_STEP"),
+										"ACE_STEP",
+										null,
+										"ace-ja-fast",
+										SettingsDocument.MusicGenerationModelProfile.defaultAceStepProfiles())))),
+				defaults.security(),
+				defaults.features()).normalize();
+		ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+		RadioSettingsStore store = new RadioSettingsStore(
+				objectMapper,
+				new RadioConfigProperties(tempDir.resolve("current-ace-config.json").toString()));
+		store.save(configured);
+		ProviderHealthService service = new ProviderHealthService(
+				new ProviderRegistry(store),
+				new StreamEventService(),
+				objectMapper);
+
+		SettingsDtos.ProviderHealthPayload health = service.refreshHealth().get("musicGen");
+
+		assertEquals("UP", health.status());
+		assertEquals("接続成功", health.message());
+		assertEquals(List.of("ACE-Step acestep-v15-turbo"), health.metadata().get("models"));
+		assertEquals("acestep-v15-turbo", health.metadata().get("loadedModel"));
+	}
+
+	@Test
 	void metadataOnlyChangeIsMeaningfulForProviderHealthEvents() throws Exception {
 		Instant checkedAt = Instant.parse("2026-07-21T00:00:00Z");
 		SettingsDtos.ProviderHealthPayload before = new SettingsDtos.ProviderHealthPayload(

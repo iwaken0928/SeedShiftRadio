@@ -263,10 +263,22 @@ public class ProviderHealthService {
 			return "ACE-Step の 5Hz LM が初期化されていません。thinking を使う生成プロファイルには LLM の初期化が必要です。";
 		}
 		Object modelsValue = metadata.get("models");
-		if (profile != null && modelsValue instanceof List<?> models && !models.isEmpty() && !models.contains(profile.model())) {
+		if (profile != null
+				&& modelsValue instanceof List<?> models
+				&& !models.isEmpty()
+				&& models.stream().noneMatch(model -> aceStepModelMatches(model, profile.model()))) {
 			return "ACE-Step に生成プロファイルのモデル " + profile.model() + " が読み込まれていません。";
 		}
 		return null;
+	}
+
+	private boolean aceStepModelMatches(Object catalogModel, String selectedModel) {
+		if (!(catalogModel instanceof String model) || selectedModel == null || selectedModel.isBlank()) {
+			return false;
+		}
+		return model.equals(selectedModel)
+				|| model.endsWith("/" + selectedModel)
+				|| model.endsWith(" " + selectedModel);
 	}
 
 	private SettingsDocument.MusicGenerationModelProfile selectedMusicProfile(

@@ -29,6 +29,7 @@ variables:
   PODMAN_TEST_PYTHON_IMAGE: "docker.io/python:3.12-slim"
   PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
   PODMAN_TEST_RUBY_IMAGE: "docker.io/ruby:3.3-alpine"
+  PODMAN_SMOKE_CURL_IMAGE: "docker.io/curlimages/curl:8.15.0"
   SEEDSHIFT_LOCAL_IMAGE_REPOSITORY: "localhost/seedshift-radio"
   SEEDSHIFT_RADIO_DB_NAME: "seedshift_radio"
   SEEDSHIFT_RADIO_DB_USERNAME: "seedshift"
@@ -417,9 +418,12 @@ smoke-production:
     - export SEEDSHIFT_SMOKE_API_BASE_URL="${SEEDSHIFT_SMOKE_API_BASE_URL:-http://127.0.0.1:8080}"
     - export SEEDSHIFT_SMOKE_WEB_BASE_URL="${SEEDSHIFT_SMOKE_WEB_BASE_URL:-http://127.0.0.1:3000}"
     - export SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL="${SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL:-http://127.0.0.1:3000/api-proxy}"
+    - podman --remote pull "${PODMAN_SMOKE_CURL_IMAGE}"
     - |
       for attempt in $(seq 1 30); do
-        if curl -fsS "${SEEDSHIFT_SMOKE_API_BASE_URL}/api/health" >/dev/null; then
+        if podman --remote run --rm --pull=never --network=host \
+          "${PODMAN_SMOKE_CURL_IMAGE}" \
+          --fail --silent --show-error "${SEEDSHIFT_SMOKE_API_BASE_URL}/api/health" >/dev/null; then
           break
         fi
         if [ "${attempt}" -eq 30 ]; then
@@ -428,9 +432,26 @@ smoke-production:
         fi
         sleep 2
       done
-    - curl -fsS "${SEEDSHIFT_SMOKE_WEB_BASE_URL}/" >/dev/null
-    - curl -fsS "${SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL}/api/health" >/dev/null
-    - SEEDSHIFT_SMOKE_REQUIRE_SECURE_COOKIE=true sh scripts/smoke-admin-session.sh
+    - >
+      podman --remote run --rm --pull=never --network=host
+      "${PODMAN_SMOKE_CURL_IMAGE}"
+      --fail --silent --show-error "${SEEDSHIFT_SMOKE_WEB_BASE_URL}/" >/dev/null
+    - >
+      podman --remote run --rm --pull=never --network=host
+      "${PODMAN_SMOKE_CURL_IMAGE}"
+      --fail --silent --show-error "${SEEDSHIFT_SMOKE_WEB_API_PROXY_BASE_URL}/api/health" >/dev/null
+    - >
+      podman --remote run --rm --pull=never
+      --network=host
+      --security-opt=label=disable
+      -e SEEDSHIFT_SMOKE_WEB_BASE_URL
+      -e SEEDSHIFT_WEB_ADMIN_PASSWORD
+      -e SEEDSHIFT_SMOKE_REQUIRE_SECURE_COOKIE=false
+      -v "${CI_PROJECT_DIR}:/workspace:ro"
+      -w /workspace
+      --entrypoint sh
+      "${PODMAN_SMOKE_CURL_IMAGE}"
+      scripts/smoke-admin-session.sh
     - podman --remote ps --filter "name=${SEEDSHIFT_SERVER_CONTAINER_NAME:-seedshift-radio-server}"
     - podman --remote ps --filter "name=${SEEDSHIFT_WEB_CONTAINER_NAME:-seedshift-radio-web}"
 

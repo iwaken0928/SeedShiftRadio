@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferLlmAdapter, validateProviderCatalog } from "@/components/settings-dashboard";
+import { aceStepModelMatches, inferLlmAdapter, validateProviderCatalog } from "@/components/settings-dashboard";
 import type { ProviderCatalog, ProviderEndpoint } from "@/lib/types";
 
 const ollamaEndpoint: ProviderEndpoint = {
@@ -15,6 +15,12 @@ const ollamaEndpoint: ProviderEndpoint = {
 describe("Provider 設定入力", () => {
   it("Ollama の既存 endpoint から接続方式を補完する", () => {
     expect(inferLlmAdapter("ollama", { ...ollamaEndpoint, adapter: undefined })).toBe("OLLAMA");
+  });
+
+  it("ACE-Stepのnamespace付きIDと表示名を生成プロファイルのモデルへ照合する", () => {
+    expect(aceStepModelMatches("acestep/acestep-v15-turbo", "acestep-v15-turbo")).toBe(true);
+    expect(aceStepModelMatches("ACE-Step acestep-v15-turbo", "acestep-v15-turbo")).toBe(true);
+    expect(aceStepModelMatches("acestep-v15-xl-turbo", "acestep-v15-turbo")).toBe(false);
   });
 
   it("誤った URL と未指定モデルを対象 Provider が分かる日本語で検出する", () => {

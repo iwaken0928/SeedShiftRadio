@@ -93,4 +93,27 @@ public final class SettingsDtos {
 			providers = providers == null ? Map.of() : Map.copyOf(new LinkedHashMap<>(providers));
 		}
 	}
+
+	public record AceStepModelLoadRequest(
+			@NotBlank String profileId,
+			Integer slot) {
+	}
+
+	public record AceStepModelLoadResponse(
+			String providerKey,
+			String profileId,
+			Integer slot,
+			String loadedModel,
+			String loadedLmModel,
+			List<String> models,
+			List<String> lmModels,
+			Boolean llmInitialized,
+			String message,
+			Instant loadedAt) {
+
+		public AceStepModelLoadResponse {
+			models = models == null ? List.of() : List.copyOf(models);
+			lmModels = lmModels == null ? List.of() : List.copyOf(lmModels);
+		}
+	}
 }

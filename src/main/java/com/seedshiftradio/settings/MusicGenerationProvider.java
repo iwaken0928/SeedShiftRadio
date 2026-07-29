@@ -12,5 +12,10 @@ public interface MusicGenerationProvider {
 
 	MusicGenWorkerGateway.ModelCatalog listModels(MusicGenWorkerGateway.ResolvedMusicProvider provider);
 
+	MusicGenWorkerGateway.ModelInitializationResult initializeModel(
+			MusicGenWorkerGateway.ResolvedMusicProvider provider,
+			SettingsDocument.MusicGenerationModelProfile profile,
+			int slot);
+
 	MusicGenWorkerGateway.RuntimeStats stats(MusicGenWorkerGateway.ResolvedMusicProvider provider);
 }

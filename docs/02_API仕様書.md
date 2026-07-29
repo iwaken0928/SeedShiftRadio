@@ -60,6 +60,7 @@
 | `GET` | `/api/settings` | `ADMIN` |
 | `PUT` | `/api/settings` | `ADMIN` |
 | `POST` | `/api/settings/test-connections` | `ADMIN` |
+| `POST` | `/api/settings/providers/music-gen/{providerKey}/model-loads` | `ADMIN` |
 | `GET` | `/api/stations` | `PUBLIC` |
 | `POST` | `/api/stations` | `ADMIN` |
 | `GET` | `/api/stations/{id}` | `PUBLIC` |
@@ -451,6 +452,7 @@
 | `GET` | `/api/settings` | 設定取得 |
 | `PUT` | `/api/settings` | 設定更新 |
 | `POST` | `/api/settings/test-connections` | Provider 接続テスト |
+| `POST` | `/api/settings/providers/music-gen/{providerKey}/model-loads` | ACE-Step model profile の明示ロード |
 | `GET` | `/api/management/dashboard` | 管理トップ向けの全体状況と局別コンテンツ集約 |
 | `GET` | `/api/management/stations/{stationId}/content` | 指定局の番組・台本・音声・曲 asset 保有量 |
 | `POST` | `/api/management/stations/{stationId}/content/deletions` | 指定局のオフエア事前生成 payload 削除 |
@@ -1188,11 +1190,41 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 }
 ```
 
-### 6.11 `GET /api/assets/audio/{assetId}.wav`
+### 6.11 `POST /api/settings/providers/music-gen/{providerKey}/model-loads`
+
+保存済みの `providers.musicGen.providers.{providerKey}.modelProfiles` から `profileId` を解決し、対象が `ACE_STEP` adapter の場合だけ ACE-Step `POST /v1/init` を呼び出します。設定保存や接続確認とは自動連動せず、管理者の明示操作だけで実行します。`slot` は省略時 `1`、指定時は `1` から `3` に限定します。
+
+```json
+{
+  "profileId": "ace-ja-xl-fast",
+  "slot": 1
+}
+```
+
+Server は profile の `model`, `thinking`, `lmModel` を ACE-Step の `model`, `init_llm`, `lm_model_path` へ写像します。`thinking=false` の場合は `init_llm=false` とし、`lm_model_path` は送りません。処理は高遅延になり得るため request timeout は最大 10 分とし、Web は実行中表示と二重送信抑止を行います。
+
+```json
+{
+  "providerKey": "ace-step",
+  "profileId": "ace-ja-xl-fast",
+  "slot": 1,
+  "loadedModel": "acestep-v15-xl-turbo",
+  "loadedLmModel": "acestep-5Hz-lm-1.7B",
+  "models": ["acestep-v15-turbo", "acestep-v15-xl-turbo"],
+  "lmModels": ["acestep-5Hz-lm-1.7B"],
+  "llmInitialized": true,
+  "message": "Model initialization completed",
+  "loadedAt": "2026-07-29T05:00:00Z"
+}
+```
+
+未知の `providerKey` / `profileId`、ACE-Step 以外の adapter、不正な `slot` は `400 VALIDATION_ERROR` とします。ACE-Step の認証失敗、到達不能、timeout、異常応答は共通 Provider error 契約で `503 PROVIDER_UNAVAILABLE` に正規化し、response、SSE、標準ログへ API key や upstream response body を出しません。
+
+### 6.12 `GET /api/assets/audio/{assetId}.wav`
 
 生成済み audio asset がある場合は `generated_asset.storage_path` を優先して `audio/wav` で返し、見つからない場合のみ `features.streaming.placeholderEnabled` に従って placeholder を返します。TALK / LETTER の server-side TTS は `providers.tts.defaultProvider` から `fallbackProviders` の順に VOICEVOX または Irodori OpenAI TTS を試行し、成功した WAV を `queue_item.assetId` / `assetUrl` と `generated_asset` に紐づけます。TTS audio metadata は本文を含まず、`normalizedTextHash`, `providerKey`, `adapter`, `voiceHint`, `speakerKey` / `voiceId`, `fallbackErrorCode` などの短い値に限定します。
 
-### 6.12 Provider Health
+### 6.13 Provider Health
 
 `/api/monitor/summary` と `/api/health` は station/queue 情報に加えて、最新の provider health snapshot を `providerHealth` map として返します。key は `llm`, `tts`, `musicGen` で、各値は `ProviderHealthPayload` です。`status` は `UP/DEGRADED/DOWN`、`lastCheckedAt`、`responseTimeMs`、`message`、`capabilities`、`metadata` を含み、SSE `provider.health.changed` でも同じ map 形式を送るためクライアントが再利用しやすくなっています。ACE-Step では `metadata` に `adapter`, `defaultModelProfileId`, `modelProfileIds`, `modelsInitialized`, `llmInitialized`, `loadedModel`, `loadedLmModel`, `selectedModel`, `selectedLmModel`, `thinkingEnabled`, `queueSize`, `queuedJobs`, `runningJobs`, `averageJobSeconds`, `defaultModel`, `models` などの短い状態値だけを入れます。`/health` が HTTP 200 でも `models_initialized=false`、または thinking profile 選択時に `llm_initialized=false` なら `DOWN` とする。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両方を読み取る。VOICEVOX では `adapter`, `responseFormat`, `streamingSupported=false` を返します。Irodori-TTS-Server 自体は `stream_format=sse` を提供しますが、現行 SeedShiftRadio adapter は完成 WAV だけを扱うため `streamingSupported=false` を返します。`capabilities` の `CHUNK_SSE_AVAILABLE` は upstream 能力、`streamingSupported` は現行 adapter の有効化状態を表します。Irodori-TTS の metadata には `adapter`, `model`, `responseFormat`, `chunkingEnabled`, `voiceRefStatus`, `models` のような診断値だけを入れ、参照音声の path、個人名、本文、秘密値は含めません。
 
@@ -1214,7 +1246,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 }
 ```
 
-### 6.13 Music Generation Job Contract
+### 6.14 Music Generation Job Contract
 
 音楽生成ジョブの submit / poll / download は Server 内部の `MusicGenerationProvider` 契約で扱い、Web / C# Client は通常 `queue_item`, `generated_asset`, `provider_job`, `/api/assets/audio/{assetId}.wav`, `/api/monitor/summary` を通じて状態を参照します。外部公開 API として prompt / lyrics 本文を返さない方針を維持します。
 
@@ -1224,7 +1256,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 `provider_job.status` は `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` に限定し、`DEGRADED` は Provider health と playout state だけで表します。Provider 失敗時の `errorCode` は共通の `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_REJECTED`, `PROVIDER_RESOURCE_EXHAUSTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED`、または TTS 固有の `VOICE_REF_NOT_FOUND`, `VOICE_CONSENT_REQUIRED` とします。外部 Provider または Worker の未知 code は `PROVIDER_BAD_RESPONSE` へ正規化します。
 
-### 6.14 MonitorSummary
+### 6.15 MonitorSummary
 
 `GET /api/monitor/summary` は `ProviderHealth` に加えて、READY queue の合計 duration、generated asset cache の集約値、archive pool / replay 集約値、`provider_job` から復元した `runningJobs` / `recentJobs` / `recentErrors`、SSE 履歴から抽出した `auditEvents` を返します。`cache` と `archive` は prompt や本文を含まず、件数、byte 数、hit/replay rate などの数値だけを返します。`runningJobs` は `RUNNING` の provider job、`recentJobs` は状態を問わず直近 20 件、`recentErrors` は `FAILED` の provider job を新しい順で返し、`auditEvents` は `radio.status.changed`, `queue.updated`, `program.changed`, `subtitle.updated`, `provider.health.changed`, `buffer.warning`, `letter.updated`, `provider.job.*` を要約したものです。
 
@@ -1298,7 +1330,7 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
 
 `auditEvents` は監査用の要約であり、レター本文全文やプロンプト全文は含めません。
 
-### 6.15 Asset Consistency
+### 6.16 Asset Consistency
 
 `GET /api/monitor/assets/consistency` は管理者向けの read-only 検査 API として、`generated_asset` の DB metadata と `dataRoot/assets/{audio,scripts,music}` 配下の payload file の不整合を返します。`byteSize=0` の asset は eviction 済み payload として扱い、missing file には数えません。
 
@@ -1335,7 +1367,7 @@ Response:
 - `issues` は最大 100 件のサンプルとし、超過時は `issuesTruncated=true` を返す
 - raw metadata、prompt、lyrics、letter body、radioName、API key、管理トークンは返さない
 
-### 6.16 Management Dashboard / Pre-generation
+### 6.17 Management Dashboard / Pre-generation
 
 `GET /api/management/dashboard` は管理画面トップ向けの集約 API とする。
 既存 `MonitorSummaryResponse` を `system` として再利用し、局数、有効局数、番組テンプレート数、局別 `StationContentInventory`、直近 10 件の `PreGenerationResponse` を返す。
@@ -1379,7 +1411,7 @@ Response:
 - MusicGen の成否は既存 `provider_job`, `/api/monitor/summary`, 局別 asset 集計で確認する
 - Provider 起因の例外を特定できた場合は `PROVIDER_TIMEOUT`, `PROVIDER_UNREACHABLE`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` などの共通 code を `errorCode` に保存する。分類できない内部例外だけを `PRE_GENERATION_FAILED` とし、例外本文や生成入力は返さない
 
-### 6.17 Operational Logs
+### 6.18 Operational Logs
 
 `GET /api/monitor/logs?limit=100` は、再起動後も参照できる管理者向けの構造化運用ログを新しい順で返す。
 `limit` は 1 から 200 に丸める。

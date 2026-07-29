@@ -31,6 +31,7 @@ import com.seedshiftradio.domain.ProviderType;
 public class MusicGenWorkerGateway implements MusicGenerationProvider {
 
 	private static final Duration JOB_TIMEOUT = Duration.ofSeconds(180);
+	private static final Duration MODEL_INITIALIZATION_TIMEOUT = Duration.ofMinutes(10);
 	private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 	private static final String ADAPTER_ACE_STEP = "ACE_STEP";
 	private static final String ADAPTER_MUSICGEN_WORKER = "MUSICGEN_WORKER";
@@ -59,6 +60,24 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			throw new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "音楽生成 provider が設定されていません。");
 		}
 		return providers;
+	}
+
+	public ResolvedMusicProvider resolveProvider(String providerKey) {
+		return providerRegistry.resolveChain(ProviderType.MUSIC, providerKey).stream()
+				.filter(provider -> provider.providerKey().equals(providerKey))
+				.findFirst()
+				.map(provider -> new ResolvedMusicProvider(
+						provider.providerKey(),
+						provider.baseUrl(),
+						provider.timeoutMs(),
+						provider.capabilities(),
+						provider.adapter(),
+						provider.apiKeyRef(),
+						provider.defaultModelProfileId(),
+						provider.modelProfiles()))
+				.orElseThrow(() -> new MusicGenWorkerException(
+						"PROVIDER_BAD_RESPONSE",
+						"指定した音楽生成 provider が設定されていません。"));
 	}
 
 	public SubmittedMusicJob submitWithFallback(List<ResolvedMusicProvider> providers, MusicJobRequest request) {
@@ -143,6 +162,41 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 		return new ModelCatalog(
 				List.copyOf(models),
 				data.isObject() ? textOrNull(data.path("default_model")) : null);
+	}
+
+	@Override
+	public ModelInitializationResult initializeModel(
+			ResolvedMusicProvider provider,
+			SettingsDocument.MusicGenerationModelProfile rawProfile,
+			int slot) {
+		if (!provider.isAceStep()) {
+			throw new MusicGenWorkerException("PROVIDER_REJECTED", "モデルの初期化は ACE-Step provider だけで実行できます。");
+		}
+		SettingsDocument.MusicGenerationModelProfile profile = rawProfile.normalize();
+		Map<String, Object> payload = new LinkedHashMap<>();
+		payload.put("model", profile.model());
+		payload.put("slot", slot);
+		payload.put("init_llm", profile.thinking());
+		if (profile.thinking()) {
+			payload.put("lm_model_path", profile.lmModel());
+		}
+		HttpRequest request = authedRequest(provider, "/v1/init")
+				.timeout(MODEL_INITIALIZATION_TIMEOUT)
+				.header("Content-Type", "application/json")
+				.POST(HttpRequest.BodyPublishers.ofString(serialize(payload)))
+				.build();
+		JsonNode data = sendJson(request, provider, "model initialization").path("data");
+		if (!data.isObject()) {
+			throw new MusicGenWorkerException("PROVIDER_BAD_RESPONSE", "ACE-Step がモデル初期化結果を返しませんでした。");
+		}
+		return new ModelInitializationResult(
+				textOrNull(data.path("message")),
+				intOrNull(data.path("slot")),
+				textOrNull(data.path("loaded_model")),
+				textOrNull(data.path("loaded_lm_model")),
+				readModelNames(data.path("models")),
+				readModelNames(data.path("lm_models")),
+				booleanOrNull(data.path("llm_initialized")));
 	}
 
 	@Override
@@ -482,6 +536,26 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 		return node == null || node.isNull() || node.isMissingNode() ? null : node.asBoolean();
 	}
 
+	private List<String> readModelNames(JsonNode nodes) {
+		if (nodes == null || !nodes.isArray()) {
+			return List.of();
+		}
+		List<String> names = new java.util.ArrayList<>();
+		for (JsonNode node : nodes) {
+			String name = node.isTextual() ? node.asText() : textOrNull(node.path("name"));
+			if (name == null) {
+				name = textOrNull(node.path("id"));
+			}
+			if (name == null) {
+				name = textOrNull(node.path("model"));
+			}
+			if (name != null && !name.isBlank()) {
+				names.add(name);
+			}
+		}
+		return List.copyOf(names);
+	}
+
 	private String textOrNull(JsonNode node) {
 		return node == null || node.isNull() || node.isMissingNode() ? null : node.asText();
 	}
@@ -614,6 +688,16 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 	}
 
 	public record ModelInfo(String name, Boolean is_default, Boolean is_loaded) {
+	}
+
+	public record ModelInitializationResult(
+			String message,
+			Integer slot,
+			String loadedModel,
+			String loadedLmModel,
+			List<String> models,
+			List<String> lmModels,
+			Boolean llmInitialized) {
 	}
 
 	public record RuntimeStats(Integer queuedJobs, Integer runningJobs, Integer queueSize, Double averageJobSeconds) {

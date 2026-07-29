@@ -83,6 +83,12 @@ HTTP `401/403` は `PROVIDER_AUTH_FAILED`、`408/504` と通信 timeout は `PRO
 | `ace-ja-xl-fast` | `acestep-v15-xl-turbo` | `acestep-5Hz-lm-1.7B` | 20GB 前後 VRAM 以上の高品質枠 |
 | `ace-ja-xl-quality` | `acestep-v15-xl-sft` | `acestep-5Hz-lm-4B` | 24GB 以上またはオフライン生成向け |
 
+### 5.1 ACE-Step model load
+
+`modelProfiles` は SeedShiftRadio 側の名前付き設定であり、ACE-Step 側に同名 profile を登録するものではない。通常生成では選択 profile を `/release_task` の `model`, `lm_model_path`, `thinking` へ展開する。管理者が ACE-Step のロード済み model を切り替える場合だけ、SeedShiftRadio 管理 API `POST /api/settings/providers/music-gen/{providerKey}/model-loads` から ACE-Step `POST /v1/init` を呼ぶ。
+
+`/v1/init` には profile の `model`、`slot`、`thinking` を写像した `init_llm`、thinking profile の `lmModel` を写像した `lm_model_path` を送る。Web 初期実装では `slot=1` とし、ACE-Step `/v1/models` で検出できた model を持つ保存済み profile だけを選択できる。設定保存、接続確認、Server 起動時には自動実行しない。モデルロード中の request timeout は最大 10 分とし、二重実行を避ける。完了後は接続確認を再実行し、`models_initialized`, `llm_initialized`, loaded/selected model の一致を確認する。
+
 各 profile は `thinking=true`, `lyricsLanguage=ja`, `lyricsTransliterationMode=native`, `outputFormat=wav` を既定とする。互換/品質対策として `lyricsTransliterationMode` は `native | kana | romaji` を持つが、日本語歌詞の既定は日本語本文をそのまま送る `native` とする。
 
 ## 6. 日本語歌詞生成
@@ -146,6 +152,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 ## 10. テスト方針
 
 - ACE-Step request mapping で `lyricsLanguage=ja` が `vocal_language=ja` になり、`thinking=true` と profile model が送られること
+- ACE-Step model load で保存済み profile が `/v1/init` の `model`, `slot`, `init_llm`, `lm_model_path` へ写像され、未知 profile、ACE-Step 以外の adapter、不正 slot が送信前に拒否されること
 - `/health` が HTTP 200 でも `models_initialized=false`、または thinking profile で `llm_initialized=false` の場合は `DOWN` となり、`/v1/models` の OpenAI 互換配列を解析できること
 - `/query_result` の result JSON string / array / object を parse し、audio URL、seed、model、metas、失敗状態を取り出せること
 - `429`, timeout, provider down で `DEGRADED` へ進み、playout が止まらないこと

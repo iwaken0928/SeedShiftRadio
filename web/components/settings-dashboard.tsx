@@ -10,6 +10,7 @@ import {
   getSettings,
   getStation,
   getStationProgramming,
+  loadAceStepModel,
   listProgramTemplates,
   listStations,
   previewProgramming,
@@ -32,6 +33,7 @@ import {
   type ProgramTemplateEditorDraft,
 } from "@/lib/template-editor";
 import type {
+  AceStepModelLoadResponse,
   ConstraintMode,
   ConnectionsTestResponse,
   ProgramTemplateDetail,
@@ -168,6 +170,13 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
 
   const connectionsMutation = useMutation({
     mutationFn: testConnections,
+  });
+  const aceStepModelLoadMutation = useMutation({
+    mutationFn: ({ providerKey, profileId }: { providerKey: string; profileId: string }) =>
+      loadAceStepModel(providerKey, { profileId, slot: 1 }),
+    onSuccess: () => {
+      connectionsMutation.mutate();
+    },
   });
 
   const stationsQuery = useQuery({
@@ -953,6 +962,14 @@ export function SettingsDashboard({ page }: { page: SettingsPage }) {
                       groupKey={groupKey}
                       group={draft.providers[groupKey]}
                       health={connectionsMutation.data?.providers[groupKey]}
+                      hasUnsavedChanges={isDirty}
+                      modelLoadResult={aceStepModelLoadMutation.data}
+                      modelLoadError={aceStepModelLoadMutation.error}
+                      loadingModelProfile={aceStepModelLoadMutation.variables}
+                      isModelLoadPending={aceStepModelLoadMutation.isPending}
+                      onLoadAceStepProfile={(providerKey, profileId) =>
+                        aceStepModelLoadMutation.mutate({ providerKey, profileId })
+                      }
                       onDefaultChange={(providerKey) =>
                         updateDraft((current) => ({
                           ...current,
@@ -1448,6 +1465,12 @@ function ProviderGroupEditor({
   groupKey,
   group,
   health,
+  hasUnsavedChanges,
+  modelLoadResult,
+  modelLoadError,
+  loadingModelProfile,
+  isModelLoadPending,
+  onLoadAceStepProfile,
   onDefaultChange,
   onFallbackToggle,
   onEndpointChange,
@@ -1455,6 +1478,12 @@ function ProviderGroupEditor({
   groupKey: keyof ProviderCatalog;
   group: ProviderGroup;
   health?: ProviderHealthPayload;
+  hasUnsavedChanges: boolean;
+  modelLoadResult?: AceStepModelLoadResponse;
+  modelLoadError: Error | null;
+  loadingModelProfile?: { providerKey: string; profileId: string };
+  isModelLoadPending: boolean;
+  onLoadAceStepProfile: (providerKey: string, profileId: string) => void;
   onDefaultChange: (providerKey: string) => void;
   onFallbackToggle: (providerKey: string, checked: boolean) => void;
   onEndpointChange: (providerKey: string, field: ProviderEndpointField, value: ProviderEndpointValue) => void;
@@ -1518,6 +1547,11 @@ function ProviderGroupEditor({
           const profileEntries = Object.entries(endpoint.modelProfiles ?? {});
           const sameHostPreset = getSameHostProviderPreset(groupKey, providerKey, endpoint);
           const detectedModels = getDetectedProviderModels(health, providerKey);
+          const isAceStep =
+            groupKey === "musicGen"
+            && (endpoint.adapter === "ACE_STEP" || endpoint.capabilities.includes("ACE_STEP"));
+          const resultForProvider = modelLoadResult?.providerKey === providerKey ? modelLoadResult : undefined;
+          const errorForProvider = loadingModelProfile?.providerKey === providerKey ? modelLoadError : null;
           return (
             <div key={providerKey} className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -1621,25 +1655,76 @@ function ProviderGroupEditor({
                       placeholder="ace-ja-fast"
                       onChange={(value) => onEndpointChange(providerKey, "defaultModelProfileId", value.trim() ? value : null)}
                     />
+                    {isAceStep ? (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-950 md:col-span-2">
+                        <div className="font-semibold">ACE-Step のロード済みモデルを切り替える</div>
+                        <div className="mt-1">
+                          下の生成プロファイルから、接続確認でACE-Step側に検出されたモデルを明示的にロードできます。
+                          この操作は保存済み設定を使い、実行中の生成へ影響する可能性があります。
+                        </div>
+                        {hasUnsavedChanges ? (
+                          <div className="mt-2 font-semibold">未保存の変更があります。先にこのカテゴリーの変更を保存してください。</div>
+                        ) : detectedModels.length === 0 ? (
+                          <div className="mt-2 font-semibold">先に「保存済み設定で接続を確認」を実行してモデル一覧を取得してください。</div>
+                        ) : (
+                          <div className="mt-2 text-xs">ACE-Step検出モデル: {detectedModels.join(", ")}</div>
+                        )}
+                        {resultForProvider ? (
+                          <div className="mt-2 rounded-xl bg-white/80 px-3 py-2" role="status">
+                            ロード完了: {resultForProvider.loadedModel ?? resultForProvider.profileId}
+                            {resultForProvider.loadedLmModel ? ` / ${resultForProvider.loadedLmModel}` : ""}
+                            {`（slot ${resultForProvider.slot}）`}
+                          </div>
+                        ) : null}
+                        {errorForProvider ? (
+                          <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-red-800" role="alert">
+                            {formatSafeDisplayText(errorForProvider.message)}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-sm leading-6 text-slate-600 md:col-span-2">
                       <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">利用可能な生成プロファイル</div>
                       {profileEntries.length > 0 ? (
                         <div className="grid gap-2 lg:grid-cols-2">
-                          {profileEntries.map(([profileId, profile]) => (
-                            <div key={profileId} className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                              <div className="font-semibold text-slate-950">{profileId}</div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {profile.model} / {profile.lmModel}
+                          {profileEntries.map(([profileId, profile]) => {
+                            const modelDetected = detectedModels.some((model) => aceStepModelMatches(model, profile.model));
+                            const isThisProfileLoading =
+                              isModelLoadPending
+                              && loadingModelProfile?.providerKey === providerKey
+                              && loadingModelProfile.profileId === profileId;
+                            return (
+                              <div key={profileId} className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                                <div className="font-semibold text-slate-950">{profileId}</div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {profile.model} / {profile.lmModel}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <Badge tone="accent">{profile.lyricsLanguage}</Badge>
+                                  <Badge tone="accent">{profile.lyricsTransliterationMode}</Badge>
+                                  <Badge tone="accent">{profile.outputFormat}</Badge>
+                                  <Badge tone={profile.thinking ? "success" : "warning"}>{profile.thinking ? "thinking" : "no thinking"}</Badge>
+                                  <Badge tone="accent">max {profile.maxDurationSeconds}s</Badge>
+                                  {isAceStep ? (
+                                    <Badge tone={modelDetected ? "success" : "warning"}>
+                                      {modelDetected ? "ACE-Step検出済み" : "ACE-Step未検出"}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                {isAceStep ? (
+                                  <Button
+                                    type="button"
+                                    tone="secondary"
+                                    className="mt-3"
+                                    disabled={hasUnsavedChanges || !modelDetected || isModelLoadPending}
+                                    onClick={() => onLoadAceStepProfile(providerKey, profileId)}
+                                  >
+                                    {isThisProfileLoading ? "ACE-Stepでロード中..." : "このプロファイルをACE-Stepへロード"}
+                                  </Button>
+                                ) : null}
                               </div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <Badge tone="accent">{profile.lyricsLanguage}</Badge>
-                                <Badge tone="accent">{profile.lyricsTransliterationMode}</Badge>
-                                <Badge tone="accent">{profile.outputFormat}</Badge>
-                                <Badge tone={profile.thinking ? "success" : "warning"}>{profile.thinking ? "thinking" : "no thinking"}</Badge>
-                                <Badge tone="accent">max {profile.maxDurationSeconds}s</Badge>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div>保存済み設定に生成プロファイル情報がありません。</div>
@@ -3536,6 +3621,15 @@ function getDetectedProviderModels(health: ProviderHealthPayload | undefined, pr
     return [];
   }
   return health.metadata.models.filter((model): model is string => typeof model === "string");
+}
+
+export function aceStepModelMatches(catalogModel: string, selectedModel: string) {
+  if (!catalogModel.trim() || !selectedModel.trim()) {
+    return false;
+  }
+  return catalogModel === selectedModel
+    || catalogModel.endsWith(`/${selectedModel}`)
+    || catalogModel.endsWith(` ${selectedModel}`);
 }
 
 function getApiFieldErrorMessages(error: unknown) {

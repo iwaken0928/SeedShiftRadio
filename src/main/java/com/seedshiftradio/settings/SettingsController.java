@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.seedshiftradio.common.config.OpenApiConfig;
@@ -23,10 +24,15 @@ import jakarta.validation.Valid;
 public class SettingsController {
 
 	private final SettingsService settingsService;
+	private final AceStepModelService aceStepModelService;
 	private final AdminApiGuard adminApiGuard;
 
-	public SettingsController(SettingsService settingsService, AdminApiGuard adminApiGuard) {
+	public SettingsController(
+			SettingsService settingsService,
+			AceStepModelService aceStepModelService,
+			AdminApiGuard adminApiGuard) {
 		this.settingsService = settingsService;
+		this.aceStepModelService = aceStepModelService;
 		this.adminApiGuard = adminApiGuard;
 	}
 
@@ -48,5 +54,14 @@ public class SettingsController {
 	public SettingsDtos.ConnectionTestResponse testConnections(@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
 		adminApiGuard.require(adminToken);
 		return settingsService.testConnections();
+	}
+
+	@PostMapping("/providers/music-gen/{providerKey}/model-loads")
+	public SettingsDtos.AceStepModelLoadResponse loadAceStepModel(
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
+			@PathVariable String providerKey,
+			@Valid @RequestBody SettingsDtos.AceStepModelLoadRequest request) {
+		adminApiGuard.require(adminToken);
+		return aceStepModelService.loadProfile(providerKey, request);
 	}
 }

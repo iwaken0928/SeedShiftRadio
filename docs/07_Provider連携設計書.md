@@ -240,6 +240,8 @@ ACE-Step profile は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTr
 
 ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両方を読み取る。`/health` の HTTP status だけでは生成可能と判定せず、`models_initialized=true` を必須とし、選択 profile が `thinking=true` なら `llm_initialized=true` も必須とする。未初期化時は `musicGen=DOWN` とし、番組編成は `MUSIC_AI` を選ばずローカル音源や TALK へ縮退する。`/health` と `/v1/models` が匿名で成功する実装でも、保護対象の `/v1/stats`, `/release_task`, `/query_result`, `/v1/audio` に同じ Bearer token が必要なため、Server container へ `ACESTEP_API_KEY` を必ず注入する。監視 UI は生成本文ではなく、provider key、adapter、profile id、初期化状態、分類済み失敗理由だけを表示する。
 
+管理者が保存済み生成プロファイルを明示的にロードする場合、Server は管理 API `POST /api/settings/providers/music-gen/{providerKey}/model-loads` を受け、ACE-Step `POST /v1/init` へ `model`, `slot`, `init_llm`, `lm_model_path` を送る。SeedShiftRadio の profile id は ACE-Step へ送らず、profile を具体的な DiT / LM 設定へ解決するための Server 内部識別子として扱う。設定保存や接続確認では `/v1/init` を呼ばず、実行中生成へ影響し得る高遅延操作を管理者の明示操作に限定する。Web は `/v1/models` で検出済みの model と一致する profile だけを操作可能にし、Server は profile / adapter / slot を再検証する。
+
 ### 8.4 TTS provider profile
 
 `providers.tts.providers.{providerKey}` は通常 endpoint に加え、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持つ。TTS 固有の細かい request option は provider endpoint ではなく `VoiceProfileEntity.providerOptions` に寄せ、station/persona ごとの差し替えをしやすくする。永続化済み option は `TtsRuntimeProfileResolver` の scope・同意・速度検証後に `HttpTtsProvider` へ渡し、allowlist 済み field だけを runtime request へ反映する。
@@ -336,7 +338,7 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 - Ollama fake HTTP server で `/api/tags`, `/api/chat` の request mapping、strict JSON response、空応答、malformed response、timeout、429/503 を再現する
 - OpenAI 互換 fake HTTP server で `/v1/models`, `/v1/chat/completions` の request mapping、Bearer 認証、401/403、空 choices、malformed response を再現する
 - LLM fallback test では失敗試行と成功試行が別 `provider_job` になり、同じ `correlationId` を持つこと、全滅時に `TemplateScriptProvider` へ縮退することを確認する
-- ACE-Step fake HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現する
+- ACE-Step fake HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑と、`/v1/init` の model / LM / slot request mapping、初期化応答、timeout、認証失敗を再現する
 - Irodori fake HTTP server で `/health`, `/v1/models`, `/v1/audio/speech` の成功、503 queue timeout、401 auth failed、voice not found、bad audio bytes を再現する
 - タイムアウト、異常応答、空応答、部分成功を再現できるようにする
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に出ないことを確認する

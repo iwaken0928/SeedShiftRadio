@@ -20,7 +20,7 @@
 | `/letters` | レター画面 | 投稿、一覧、状態確認 |
 | `/settings` | 管理ダッシュボード | システム全体、Provider、queue、生成 job、局別コンテンツ保有量の把握 |
 | `/settings/system` | システム設定 | Server 待受、保存先、管理認証、縮退配信、設定 JSON の入出力 |
-| `/settings/providers` | AI・音声接続 | LLM / TTS / MusicGen の接続先、優先順、接続確認 |
+| `/settings/providers` | AI・音声接続 | LLM / TTS / MusicGen の接続先、優先順、接続確認、ACE-Step model profile の明示ロード |
 | `/settings/playout` | 再生・生成設定 | queue 先読み、生成量、cache、全局共通の編成既定値 |
 | `/settings/stations` | 局管理 | 局の作成、複製、基本情報、人格・音声、有効状態 |
 | `/settings/programming` | 番組編成 | 局別ポリシー、ProgramTemplate、ProgramRule、Programming Preview |
@@ -142,6 +142,8 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - Import は即時保存せず draft に読み込み、内容確認後に `Save Settings` で既存の settings validation を通す
 - Export 前にも `apiKeyRef` と `adminTokenRef` が `env:` / `file:` 参照であることを検証し、raw secret らしい draft は JSON download しない
 - `Connection Test` の provider health 表示は metadata と message を Web 表示層で redaction し、prompt / lyrics / letter body / radioName / secret / raw response をそのまま描画しない
+- ACE-Step endpoint では接続確認で取得した model 一覧と保存済み生成プロファイルの `model` を照合し、検出できたプロファイルだけに「このプロファイルをACE-Stepへロード」を表示する。ロードは `POST /api/settings/providers/music-gen/{providerKey}/model-loads` を使い、設定保存や接続確認へ自動連動させない
+- ACE-Step model load は未保存 draft がある間と処理実行中は開始できないようにする。実行前に高遅延かつ実行中生成へ影響し得ることを表示し、成功時は model / LM / slot、失敗時は redaction 済みの分類済み error を表示してから接続確認を再実行する
 - `Voice Profiles` では `scope`, `stationId`, `engineType`, `providerKey`, `speakerKey`, `styleKey`, `speed`, `pitch`, `playbackMode` を表示し、局ごとに別の声を選べるようにする。Irodori-TTS の場合は承認済み `referenceVoiceRef` / `consentPolicyRef` の有無と style preset だけを表示する。参照音声の実ファイル path、個人名、音声本文、raw provider option は表示しない
 - Irodori-TTS の参照音声を扱う UI は初期では管理者が配置した `voices/` の id 選択までに留め、任意 upload は同意・ライセンス台帳と file validation が実装されるまで追加しない
 - 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
@@ -163,6 +165,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - URL、adapter、model / profile の保存前検証は内部 JSON path をそのまま表示せず、対象 Provider と修正例を日本語で示す
 - TTS provider は `VOICEVOX` と `IRODORI_OPENAI_TTS` の default/fallback 切替を扱えるようにする。Irodori の `apiKeyRef` は `env:` / `file:` 参照のみ表示・編集し、bearer token の実値は扱わない
 - `Test Connections` は未保存 draft ではなく、保存済み設定に対して実行する
+- ACE-Step の model load も保存済み設定だけを使い、接続確認で ACE-Step 側に存在すると確認できた `model` を持つ生成プロファイルだけを明示操作で送信する。`slot=1` を Web 初期実装の既定とし、複数 slot の高度な運用は API 利用に限定する
 - LLM の接続確認は health/model inventory の確認であり、実モデルのコールドスタート時間や構造化台本生成の成功を保証しない。`timeoutMs` が実生成時間より短い場合は、接続成功でも生成時に `PROVIDER_TIMEOUT` になり得ることを画面と運用ログで判断できるようにする
 - 管理 session がない場合は Settings / Monitor 導線を非表示にし、`/settings`、`/monitor` を直接開いた時は `/admin/login` へ遷移する
 - `/admin/login` は Web 管理用パスワードだけを一時入力として受け取り、成功時に server-side で署名した `HttpOnly` session Cookie を確立する。管理 API 用トークンとは別資格情報とし、入力値を browser storage や標準ログへ残さない

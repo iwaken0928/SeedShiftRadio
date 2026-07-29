@@ -1,4 +1,6 @@
 import {
+  type AceStepModelLoadRequest,
+  type AceStepModelLoadResponse,
   type ClientCapabilitiesRequest,
   type ClientCapabilitiesResponse,
   type ConnectionsTestResponse,
@@ -429,6 +431,17 @@ export function testConnections() {
     method: "POST",
     headers: withAdminHeaders(),
   });
+}
+
+export function loadAceStepModel(providerKey: string, body: AceStepModelLoadRequest) {
+  return requestJson<AceStepModelLoadResponse>(
+    `/api/settings/providers/music-gen/${encodeURIComponent(providerKey)}/model-loads`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: withAdminHeaders({ "Content-Type": "application/json" }),
+    },
+  );
 }
 
 export function previewProgramming(stationId: string, body: ProgrammingPreviewRequest) {

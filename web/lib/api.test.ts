@@ -8,6 +8,7 @@ import {
   createStation,
   deleteStationContent,
   listLetters,
+  loadAceStepModel,
   previewProgramming,
   requestJson,
   requestPreGeneration,
@@ -104,6 +105,42 @@ describe("api helpers", () => {
         "X-CSRF-Token": "csrf-from-session",
       },
     });
+  });
+
+  it("ACE-Step model load request は provider と profile を管理 API へ送る", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/auth/session") {
+        return Response.json({ authenticated: true, csrfToken: "csrf-from-session" });
+      }
+      return Response.json({
+        providerKey: "ace-step/primary",
+        profileId: "ace-ja-xl-fast",
+        slot: 1,
+        loadedModel: "acestep-v15-xl-turbo",
+        loadedLmModel: "acestep-5Hz-lm-1.7B",
+        models: ["acestep-v15-xl-turbo"],
+        lmModels: ["acestep-5Hz-lm-1.7B"],
+        llmInitialized: true,
+        message: "Model initialization completed",
+        loadedAt: "2026-07-29T00:00:00Z",
+      });
+    });
+
+    await loadAceStepModel("ace-step/primary", { profileId: "ace-ja-xl-fast", slot: 1 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api-proxy/api/settings/providers/music-gen/ace-step%2Fprimary/model-loads",
+      {
+        cache: "no-store",
+        method: "POST",
+        body: JSON.stringify({ profileId: "ace-ja-xl-fast", slot: 1 }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf-from-session",
+        },
+      },
+    );
   });
 
   it("局別コンテンツ削除 request は管理 BFF へ局 ID と asset 種別を送る", async () => {

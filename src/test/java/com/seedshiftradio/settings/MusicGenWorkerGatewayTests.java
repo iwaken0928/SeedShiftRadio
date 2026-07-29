@@ -446,6 +446,57 @@ class MusicGenWorkerGatewayTests {
 	}
 
 	@Test
+	void aceStepModelInitializationMapsProfileAndReadsLoadedModels() throws IOException {
+		AtomicReference<String> requestBody = new AtomicReference<>();
+		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/v1/init", exchange -> {
+			requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+			byte[] body = """
+					{
+					  "data": {
+					    "message": "Model initialization completed",
+					    "slot": 2,
+					    "loaded_model": "acestep-v15-xl-turbo",
+					    "loaded_lm_model": "acestep-5Hz-lm-1.7B",
+					    "models": [
+					      {"name": "acestep-v15-turbo", "is_loaded": true},
+					      {"name": "acestep-v15-xl-turbo", "is_loaded": true}
+					    ],
+					    "lm_models": ["acestep-5Hz-lm-1.7B"],
+					    "llm_initialized": true
+					  }
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.start();
+		try {
+			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+			SettingsDocument.MusicGenerationModelProfile profile =
+					SettingsDocument.MusicGenerationModelProfile.defaultAceStepProfiles().get("ace-ja-xl-fast");
+
+			MusicGenWorkerGateway.ModelInitializationResult result =
+					gateway.initializeModel(aceProvider(baseUrl), profile, 2);
+
+			JsonNode payload = new ObjectMapper().readTree(requestBody.get());
+			assertEquals("acestep-v15-xl-turbo", payload.path("model").asText());
+			assertEquals(2, payload.path("slot").asInt());
+			assertTrue(payload.path("init_llm").asBoolean());
+			assertEquals("acestep-5Hz-lm-1.7B", payload.path("lm_model_path").asText());
+			assertEquals("acestep-v15-xl-turbo", result.loadedModel());
+			assertEquals(List.of("acestep-v15-turbo", "acestep-v15-xl-turbo"), result.models());
+			assertEquals(List.of("acestep-5Hz-lm-1.7B"), result.lmModels());
+			assertTrue(result.llmInitialized());
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
 	void awaitCompletionNormalizesUnknownWorkerErrorCode() throws IOException {
 		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/music/jobs/job-unknown", exchange -> {

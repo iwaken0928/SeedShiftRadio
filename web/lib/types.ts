@@ -674,6 +674,24 @@ export interface ConnectionsTestResponse {
   providers: Record<string, ProviderHealthPayload>;
 }
 
+export interface AceStepModelLoadRequest {
+  profileId: string;
+  slot?: number;
+}
+
+export interface AceStepModelLoadResponse {
+  providerKey: string;
+  profileId: string;
+  slot: number;
+  loadedModel: string | null;
+  loadedLmModel: string | null;
+  models: string[];
+  lmModels: string[];
+  llmInitialized: boolean | null;
+  message: string | null;
+  loadedAt: string;
+}
+
 export interface EventMessage<T = unknown> {
   id: string | null;
   event: string;

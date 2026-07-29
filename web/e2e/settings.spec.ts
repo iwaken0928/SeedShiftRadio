@@ -143,6 +143,56 @@ test("settings: Ollama connection method and model are editable with understanda
   });
 });
 
+test("settings: detected ACE-Step model profile can be loaded explicitly", async ({ page }) => {
+  const state = createSettingsState();
+  const providerGroups = state.settings.providers as unknown as Record<string, unknown>;
+  providerGroups.musicGen = {
+    defaultProvider: "ace-step",
+    fallbackProviders: [],
+    providers: {
+      "ace-step": {
+        baseUrl: "http://127.0.0.1:8001",
+        healthPath: "/health",
+        timeoutMs: 10000,
+        capabilities: ["MUSIC_GEN", "ACE_STEP"],
+        adapter: "ACE_STEP",
+        apiKeyRef: "env:ACESTEP_API_KEY",
+        defaultModelProfileId: "ace-ja-fast",
+        modelProfiles: {
+          "ace-ja-fast": {
+            model: "acestep-v15-turbo",
+            lmModel: "acestep-5Hz-lm-0.6B",
+            thinking: true,
+            lyricsLanguage: "ja",
+            lyricsTransliterationMode: "native",
+            outputFormat: "wav",
+            maxDurationSeconds: 120,
+          },
+        },
+      },
+    },
+  };
+  const aceStepModelLoadRequests: RequestCapture[] = [];
+  await installSettingsRoutes(page, state, { aceStepModelLoadRequests });
+  await page.goto(appUrl("/settings/providers"));
+
+  const fastProfileCard = page.getByText("ace-ja-fast", { exact: true }).locator("..");
+  const loadButton = fastProfileCard.getByRole("button", { name: "このプロファイルをACE-Stepへロード", exact: true });
+  await expect(loadButton).toBeDisabled();
+
+  await page.getByRole("button", { name: "保存済み設定で接続を確認", exact: true }).click();
+  await expect(loadButton).toBeEnabled();
+  await loadButton.click();
+
+  await expect.poll(() => aceStepModelLoadRequests.length).toBe(1);
+  expectBrowserAdminHeaders(aceStepModelLoadRequests[0]?.headers);
+  await expect(aceStepModelLoadRequests[0]?.body).toEqual({
+    profileId: "ace-ja-fast",
+    slot: 1,
+  });
+  await expect(page.getByText("ロード完了: acestep-v15-turbo", { exact: false })).toBeVisible();
+});
+
 test("settings: existing station programming policy save", async ({ page }) => {
   const state = createSettingsState();
   const programmingUpdateRequests: RequestCapture[] = [];
@@ -614,10 +664,71 @@ async function installSettingsRoutes(
     templateUpdateRequests?: RequestCapture[];
     preGenerationRequests?: RequestCapture[];
     contentDeletionRequests?: RequestCapture[];
+    aceStepModelLoadRequests?: RequestCapture[];
     templateCreateFailure?: FailureResponse;
     templateUpdateFailure?: FailureResponse;
   },
 ) {
+  await page.route(apiUrl("/api/settings/test-connections"), async (route) => {
+    await fulfillJson(route, {
+      checkedAt: "2026-07-29T05:00:00Z",
+      providers: {
+        llm: {
+          providerType: "llm",
+          providerKey: "ollama",
+          status: "UP",
+          lastCheckedAt: "2026-07-29T05:00:00Z",
+          responseTimeMs: 15,
+          message: "接続成功",
+          capabilities: ["SCRIPT_GEN"],
+          baseUrl: "http://127.0.0.1:11434",
+          metadata: { models: ["qwen3:8b"] },
+        },
+        tts: {
+          providerType: "tts",
+          providerKey: "voicevox",
+          status: "UP",
+          lastCheckedAt: "2026-07-29T05:00:00Z",
+          responseTimeMs: 10,
+          message: "接続成功",
+          capabilities: ["TTS_GEN"],
+          baseUrl: "http://127.0.0.1:50021",
+          metadata: {},
+        },
+        musicGen: {
+          providerType: "musicGen",
+          providerKey: "ace-step",
+          status: "UP",
+          lastCheckedAt: "2026-07-29T05:00:00Z",
+          responseTimeMs: 25,
+          message: "接続成功",
+          capabilities: ["MUSIC_GEN", "ACE_STEP"],
+          baseUrl: "http://127.0.0.1:8001",
+          metadata: {
+            models: ["acestep/acestep-v15-turbo", "acestep/acestep-v15-sft"],
+            loadedModel: "acestep-v15-turbo",
+            loadedLmModel: "acestep-5Hz-lm-0.6B",
+          },
+        },
+      },
+    });
+  });
+  await page.route(apiRegExp("/api/settings/providers/music-gen/[^/]+/model-loads$"), async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    captures.aceStepModelLoadRequests?.push({ body, headers: route.request().headers() });
+    await fulfillJson(route, {
+      providerKey: "ace-step",
+      profileId: body.profileId,
+      slot: body.slot ?? 1,
+      loadedModel: "acestep-v15-turbo",
+      loadedLmModel: "acestep-5Hz-lm-0.6B",
+      models: ["acestep-v15-turbo"],
+      lmModels: ["acestep-5Hz-lm-0.6B"],
+      llmInitialized: true,
+      message: "Model initialization completed",
+      loadedAt: "2026-07-29T05:01:00Z",
+    });
+  });
   await page.route(apiUrl("/api/management/dashboard"), async (route) => {
     await fulfillJson(route, buildManagementDashboard());
   });

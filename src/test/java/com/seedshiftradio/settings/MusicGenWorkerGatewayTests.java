@@ -1,6 +1,7 @@
 package com.seedshiftradio.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -230,8 +231,10 @@ class MusicGenWorkerGatewayTests {
 	@Test
 	void aceStepSubmitMapsJapaneseLyricsAndProfile() throws IOException {
 		AtomicReference<String> requestBody = new AtomicReference<>();
+		AtomicReference<String> upgradeHeader = new AtomicReference<>();
 		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/release_task", exchange -> {
+			upgradeHeader.set(exchange.getRequestHeaders().getFirst("Upgrade"));
 			requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
 			byte[] body = "{\"data\":{\"task_id\":\"ace-task-001\",\"status\":\"queued\"}}".getBytes(StandardCharsets.UTF_8);
 			exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -262,6 +265,7 @@ class MusicGenWorkerGatewayTests {
 					"wav"));
 
 			assertEquals("ace-task-001", submitted.jobId());
+			assertNull(upgradeHeader.get(), "ACE-Step POST で h2c upgrade を要求してはいけません。");
 			JsonNode payload = new ObjectMapper().readTree(requestBody.get());
 			assertEquals("ja", payload.path("vocal_language").asText());
 			assertEquals(true, payload.path("thinking").asBoolean());

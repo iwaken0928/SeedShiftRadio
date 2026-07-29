@@ -66,6 +66,8 @@ ACE-Step 1.5 は次の REST API を使う。
 - `/v1/audio?path=...`: 成功 result 内の file URL を Server が download し、asset pipeline に登録する
 - `GET /health`, `GET /v1/models`, `GET /v1/stats`: settings / monitor から接続状態、model 一覧、queue size、平均処理時間を確認する
 
+ACE-Step adapter の JDK `HttpClient` は `HTTP_1_1` を明示する。ACE-Step の Uvicorn HTTP/1.1 server に対して平文 HTTP の `h2c` upgrade を試みると、GET probe は成功しても JSON POST body が `Malformed JSON payload` になる場合がある。submit、poll、model load、model/stats取得、audio downloadの全経路で同じHTTP/1.1 client policyを適用する。
+
 iwaken-server の production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server は host network で動作するため `baseUrl=http://127.0.0.1:8001` を使い、ACE-Step の host port `8001` へ接続する。
 
 `/health` が HTTP 200 でも生成 model がロード済みとは限らない。SeedShiftRadio は `models_initialized=true` を必須とし、`thinking=true` の profile では `llm_initialized=true` も必須として、それ以外を `DOWN` と判定する。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両形式を扱う。ACE-Step 側は起動時に生成 model を初期化し、thinking profile を使う production では `ACESTEP_INIT_LLM=true` または同等の `--init-llm` 起動指定で LM も初期化する。ACE-Step container の healthcheck も HTTP status だけでなく `models_initialized=true`、必要なら `llm_initialized=true` を検査する。
@@ -161,7 +163,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 - stale 閾値を超えた `RUNNING` job は `FAILED / PROVIDER_INTERRUPTED` へ一度だけ条件付き更新され、worker への再送なしで `provider.job.failed` と monitor summary に反映されること
 - config validation で未知 profile、不正 duration、秘密値直書き、`wav` / `wav32` 以外の outputFormat を検出すること
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に生で出ないこと
-- fake ACE-Step HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑を再現すること
+- fake ACE-Step HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑と、POST request に `Upgrade: h2c` が含まれないことを再現すること
 - FastAPI worker contract test で `/health`, `POST /music/jobs`, `GET /music/jobs/{jobId}` の `RUNNING/SUCCEEDED/FAILED` 応答に safe metadata だけが含まれ、prompt / lyrics 本文が response に出ないことを固定すること
 
 ## 11. ライセンスと運用注意

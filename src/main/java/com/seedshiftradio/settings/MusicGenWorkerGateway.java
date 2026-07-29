@@ -435,9 +435,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 
 	private String sendString(HttpRequest request, ResolvedMusicProvider provider, String operation) {
 		try {
-			HttpClient client = HttpClient.newBuilder()
-					.connectTimeout(Duration.ofMillis(provider.timeoutMs()))
-					.build();
+			HttpClient client = httpClient(provider);
 			HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				throw httpFailure(operation, response.statusCode());
@@ -455,9 +453,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 
 	private HttpResponse<byte[]> sendBytes(HttpRequest request, ResolvedMusicProvider provider, String operation) {
 		try {
-			HttpClient client = HttpClient.newBuilder()
-					.connectTimeout(Duration.ofMillis(provider.timeoutMs()))
-					.build();
+			HttpClient client = httpClient(provider);
 			HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				throw httpFailure(operation, response.statusCode());
@@ -471,6 +467,13 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			Thread.currentThread().interrupt();
 			throw new MusicGenWorkerException("PROVIDER_INTERRUPTED", "音楽生成 provider の待機中に割り込みが発生しました。", exception);
 		}
+	}
+
+	private HttpClient httpClient(ResolvedMusicProvider provider) {
+		return HttpClient.newBuilder()
+				.version(HttpClient.Version.HTTP_1_1)
+				.connectTimeout(Duration.ofMillis(provider.timeoutMs()))
+				.build();
 	}
 
 	private String serialize(Object value) {

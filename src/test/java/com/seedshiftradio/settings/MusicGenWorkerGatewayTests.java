@@ -1,6 +1,7 @@
 package com.seedshiftradio.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -368,6 +369,41 @@ class MusicGenWorkerGatewayTests {
 			assertEquals("24680", status.seed());
 			assertTrue(Path.of(status.assetPath()).toFile().exists());
 			assertTrue(status.providerFingerprint().contains("acestep-v15-sft"));
+		} finally {
+			server.stop(0);
+		}
+	}
+
+	@Test
+	void aceStepPollClassifiesCudaOutOfMemoryFromProgressText() throws IOException {
+		HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		server.createContext("/query_result", exchange -> {
+			byte[] body = """
+					{
+					  "data": [
+					    {
+					      "status": 2,
+					      "result": "[{\\"status\\":\\"failed\\",\\"progress\\":100}]",
+					      "progress_text": "Music generation failed: torch.OutOfMemoryError: CUDA out of memory"
+					    }
+					  ]
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, body.length);
+			try (OutputStream outputStream = exchange.getResponseBody()) {
+				outputStream.write(body);
+			}
+		});
+		server.start();
+		try {
+			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+			MusicGenWorkerGateway.MusicJobStatus status = gateway.poll(aceProvider(baseUrl), "ace-task-oom");
+
+			assertEquals("FAILED", status.status());
+			assertEquals("PROVIDER_RESOURCE_EXHAUSTED", status.errorCode());
+			assertEquals("ACE-Step の GPU またはメモリ資源が不足しています。", status.message());
+			assertFalse(status.message().contains("CUDA"));
 		} finally {
 			server.stop(0);
 		}

@@ -72,6 +72,7 @@ class HttpScriptProviderTests {
 		assertEquals("qwen3:8b", requestBody.get().path("model").asText());
 		assertFalse(requestBody.get().path("stream").asBoolean(true));
 		assertEquals("json", requestBody.get().path("format").asText());
+		assertEquals(0, requestBody.get().path("keep_alive").asInt(-1));
 		assertEquals("system", requestBody.get().path("messages").get(0).path("role").asText());
 		assertEquals("user", requestBody.get().path("messages").get(1).path("role").asText());
 		assertTrue(requestBody.get().path("messages").get(1).path("content").asText().contains("深夜番組の導入"));

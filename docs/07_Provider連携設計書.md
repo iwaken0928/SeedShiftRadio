@@ -69,7 +69,7 @@ LLM は `OLLAMA` と `OPENAI_COMPATIBLE` の 2 adapter を持つ。現行の `Ht
 
 | adapter | 生成 endpoint | health endpoint | request の要点 | response 抽出元 |
 |---|---|---|---|---|
-| `OLLAMA` | `POST /api/chat` | `GET /api/tags` | `model`, `messages`, `stream=false`, strict JSON format | `message.content` |
+| `OLLAMA` | `POST /api/chat` | `GET /api/tags` | `model`, `messages`, `stream=false`, strict JSON format, `keep_alive=0` | `message.content` |
 | `OPENAI_COMPATIBLE` | `POST /v1/chat/completions` | `GET /v1/models` | `model`, `messages`, `stream=false`, JSON object response format | `choices[0].message.content` |
 
 model 名には `providers.llm.providers.{providerKey}.defaultModelProfileId` を使う。LLM ではこの field を Music Generation の profile map 参照として解釈せず、実 Provider へ送る model 名そのものとして扱う。`adapter`, `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `defaultModelProfileId` は必須とし、`OPENAI_COMPATIBLE` で認証が必要な場合だけ `apiKeyRef` を設定する。既定 timeout は、Ollama のモデルロードを含む初回生成を考慮して 120 秒とする。
@@ -77,6 +77,8 @@ model 名には `providers.llm.providers.{providerKey}.defaultModelProfileId` �
 LLM へ渡す `messages` は system prompt と `ScriptGenerationContext.prompt`、局・personality、信頼しないレター source data から作る。レター本文は `untrustedLetter` として分離し、system instruction として扱わない。adapter は response body が strict structured JSON であることを確認し、`text` と `safetyFlags` 以外の field を拒否してから `GeneratedScript` へ正規化する。`text` は 1 文字以上 20000 文字以下、`safetyFlags` は 32 件以下、各 flag は 1 文字以上 128 文字以下とする。空応答、非 JSON、必須 field 欠落、未知 field、型不正、上限超過は `PROVIDER_BAD_RESPONSE` とする。
 
 LLM の Provider 試行は 1 試行ごとに `provider_job` を作り、同じ論理生成要求では `correlationId` を継承する。回復可能な `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` だけを次 Provider へ送る。`PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` は別 Provider へ同じ prompt を送らない。外部 Provider で成功しなかった場合は `TemplateScriptProvider` の安全な定型台本へ縮退し、この fallback も `providerKey=template-script` の別 `provider_job` として記録する。
+
+SeedShiftRadio の標準生成パイプラインでは台本生成後に Music Generation が続き、production では Ollama と ACE-Step が同一 GPU を共有する。そのため Ollama adapter は応答後の model 常駐より後続処理の VRAM 確保を優先し、request ごとに `keep_alive=0` を指定する。
 
 Provider が有効な構造化台本を返し、Server の台本正規化と品質検査まで完了した時点で
 その Provider 試行の `provider_job` は `SUCCEEDED` とする。
@@ -242,6 +244,8 @@ ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/m
 
 ACE-Step の FastAPI / Uvicorn HTTP/1.1 endpoint へは JDK `HttpClient` を `HTTP_1_1` 固定で接続する。平文 HTTP で既定の HTTP/2 negotiation を使うと `h2c` upgrade header が付与され、GET の health probe が成功しても JSON body 付き POST が `Malformed JSON payload` として拒否される実装があるため、`/release_task`, `/query_result`, `/v1/init` と audio download を含む MusicGen gateway 全体で同じ transport policy を使う。
 
+`/query_result` が HTTP 200 で `status=2` を返した場合も、adapter は `progress_text` と result の安全な分類だけを行う。`out of memory`, `OutOfMemoryError`, `CUDA OOM`, `resource exhausted` を検出した失敗は `PROVIDER_RESOURCE_EXHAUSTED`、それ以外の未知失敗は `PROVIDER_BAD_RESPONSE` とし、上流の traceback、prompt、lyrics は monitor や標準ログへ露出しない。
+
 管理者が保存済み生成プロファイルを明示的にロードする場合、Server は管理 API `POST /api/settings/providers/music-gen/{providerKey}/model-loads` を受け、ACE-Step `POST /v1/init` へ `model`, `slot`, `init_llm`, `lm_model_path` を送る。SeedShiftRadio の profile id は ACE-Step へ送らず、profile を具体的な DiT / LM 設定へ解決するための Server 内部識別子として扱う。設定保存や接続確認では `/v1/init` を呼ばず、実行中生成へ影響し得る高遅延操作を管理者の明示操作に限定する。Web は `/v1/models` で検出済みの model と一致する profile だけを操作可能にし、Server は profile / adapter / slot を再検証する。
 
 ### 8.4 TTS provider profile
@@ -337,10 +341,10 @@ Health は `/api/health` と `/api/monitor/summary` に集約する。
 
 - Provider ごとの contract test を用意する
 - mock provider を標準実装として持つ
-- Ollama fake HTTP server で `/api/tags`, `/api/chat` の request mapping、strict JSON response、空応答、malformed response、timeout、429/503 を再現する
+- Ollama fake HTTP server で `/api/tags`, `/api/chat` の request mapping、`keep_alive=0`、strict JSON response、空応答、malformed response、timeout、429/503 を再現する
 - OpenAI 互換 fake HTTP server で `/v1/models`, `/v1/chat/completions` の request mapping、Bearer 認証、401/403、空 choices、malformed response を再現する
 - LLM fallback test では失敗試行と成功試行が別 `provider_job` になり、同じ `correlationId` を持つこと、全滅時に `TemplateScriptProvider` へ縮退することを確認する
-- ACE-Step fake HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑と、`/v1/init` の model / LM / slot request mapping、初期化応答、timeout、認証失敗、POST に `Upgrade: h2c` を付与しないことを再現する
+- ACE-Step fake HTTP server で `release_task -> query_result -> audio download` の成功/失敗/混雑、`progress_text` の CUDA OOM 分類と、`/v1/init` の model / LM / slot request mapping、初期化応答、timeout、認証失敗、POST に `Upgrade: h2c` を付与しないことを再現する
 - Irodori fake HTTP server で `/health`, `/v1/models`, `/v1/audio/speech` の成功、503 queue timeout、401 auth failed、voice not found、bad audio bytes を再現する
 - タイムアウト、異常応答、空応答、部分成功を再現できるようにする
 - prompt / lyrics / API key / radioName / letter body が通常ログ、SSE、API response に出ないことを確認する

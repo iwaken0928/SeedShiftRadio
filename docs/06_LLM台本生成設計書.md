@@ -9,6 +9,7 @@
 - Java 側は `ScriptProvider` で LLM 呼び出しを抽象化し、HTTP adapter と安全な定型台本を同じ上位契約から利用する
 - 現行 HTTP adapter は JDK `HttpClient` を使い、新しい Spring AI 依存は追加しない。Spring AI は将来の adapter 差し替え候補に留め、上位層をその API へ直接依存させない
 - ローカル LLM は `Ollama` を第一候補とする
+- Ollama と Music Generation が同一 GPU を共有する構成では、`POST /api/chat` に `keep_alive=0` を指定し、台本生成応答後に LLM model を直ちにアンロードする。次回台本生成は再ロードを伴うが、後続の ACE-Step が必要な VRAM を確保できることを優先する
 - 出力は構造化 JSON を基本とし、その後に読み上げ向け整形を行う
 - 日本語品質改善はプロンプト任せにせず、後段の正規化コンポーネントで補う
 - TTS の style control は LLM に自由記述させない。現行 LLM 応答は `text` と `safetyFlags` だけに限定し、`emotion`, `tempo`, `speaker` は既存の後段 component が局・persona 設定から解決する。Irodori-TTS の emoji style など engine 固有表現は後段で allowlist 変換する

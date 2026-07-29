@@ -308,7 +308,11 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			return new MusicJobStatus(jobId, "RUNNING", null, null, null, null, null, null, null, null, null, null);
 		}
 		if (status == 2) {
-			return new MusicJobStatus(jobId, "FAILED", null, null, null, null, null, "PROVIDER_BAD_RESPONSE", "ACE-Step task failed", null, null, null);
+			ProviderErrorCode errorCode = classifyAceStepTaskFailure(first);
+			String message = errorCode == ProviderErrorCode.PROVIDER_RESOURCE_EXHAUSTED
+					? "ACE-Step の GPU またはメモリ資源が不足しています。"
+					: "ACE-Step task failed";
+			return new MusicJobStatus(jobId, "FAILED", null, null, null, null, null, errorCode.name(), message, null, null, null);
 		}
 		JsonNode result = parseAceResult(first.path("result"));
 		String audioUrl = textOrNull(result.path("file"));
@@ -467,6 +471,21 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			Thread.currentThread().interrupt();
 			throw new MusicGenWorkerException("PROVIDER_INTERRUPTED", "音楽生成 provider の待機中に割り込みが発生しました。", exception);
 		}
+	}
+
+	private ProviderErrorCode classifyAceStepTaskFailure(JsonNode task) {
+		String diagnosticText = (
+				task.path("progress_text").asText("")
+						+ "\n"
+						+ task.path("result").toString())
+				.toLowerCase(Locale.ROOT);
+		if (diagnosticText.contains("out of memory")
+				|| diagnosticText.contains("outofmemory")
+				|| diagnosticText.contains("cuda oom")
+				|| diagnosticText.contains("resource exhausted")) {
+			return ProviderErrorCode.PROVIDER_RESOURCE_EXHAUSTED;
+		}
+		return ProviderErrorCode.PROVIDER_BAD_RESPONSE;
 	}
 
 	private HttpClient httpClient(ResolvedMusicProvider provider) {

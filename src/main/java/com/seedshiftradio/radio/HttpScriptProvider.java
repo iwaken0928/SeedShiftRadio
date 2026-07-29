@@ -76,6 +76,7 @@ public class HttpScriptProvider implements ScriptProvider {
 		body.put("model", model);
 		body.put("stream", false);
 		body.put("format", "json");
+		body.put("keep_alive", 0);
 		body.put("messages", messages(userPrompt));
 		return body;
 	}

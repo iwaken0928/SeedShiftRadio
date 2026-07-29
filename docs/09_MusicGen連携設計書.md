@@ -68,6 +68,10 @@ ACE-Step 1.5 は次の REST API を使う。
 
 ACE-Step adapter の JDK `HttpClient` は `HTTP_1_1` を明示する。ACE-Step の Uvicorn HTTP/1.1 server に対して平文 HTTP の `h2c` upgrade を試みると、GET probe は成功しても JSON POST body が `Malformed JSON payload` になる場合がある。submit、poll、model load、model/stats取得、audio downloadの全経路で同じHTTP/1.1 client policyを適用する。
 
+`status=2` の失敗理由は `result` だけでなく `progress_text` に格納される実装がある。adapter は両方を分類対象とし、CUDA / device の out-of-memory を `PROVIDER_RESOURCE_EXHAUSTED`、未知失敗を `PROVIDER_BAD_RESPONSE` とする。診断本文は Provider job、monitor、標準ログへ保存せず、安全な日本語メッセージだけを上位へ返す。
+
+Ollama と ACE-Step が同一 GPU を共有する production では、先行する Ollama `/api/chat` に `keep_alive=0` を指定し、台本生成後に LLM model をアンロードしてから音楽生成へ進む。
+
 iwaken-server の production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server は host network で動作するため `baseUrl=http://127.0.0.1:8001` を使い、ACE-Step の host port `8001` へ接続する。
 
 `/health` が HTTP 200 でも生成 model がロード済みとは限らない。SeedShiftRadio は `models_initialized=true` を必須とし、`thinking=true` の profile では `llm_initialized=true` も必須として、それ以外を `DOWN` と判定する。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両形式を扱う。ACE-Step 側は起動時に生成 model を初期化し、thinking profile を使う production では `ACESTEP_INIT_LLM=true` または同等の `--init-llm` 起動指定で LM も初期化する。ACE-Step container の healthcheck も HTTP status だけでなく `models_initialized=true`、必要なら `llm_initialized=true` を検査する。
@@ -156,7 +160,7 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 - ACE-Step request mapping で `lyricsLanguage=ja` が `vocal_language=ja` になり、`thinking=true` と profile model が送られること
 - ACE-Step model load で保存済み profile が `/v1/init` の `model`, `slot`, `init_llm`, `lm_model_path` へ写像され、未知 profile、ACE-Step 以外の adapter、不正 slot が送信前に拒否されること
 - `/health` が HTTP 200 でも `models_initialized=false`、または thinking profile で `llm_initialized=false` の場合は `DOWN` となり、`/v1/models` の OpenAI 互換配列を解析できること
-- `/query_result` の result JSON string / array / object を parse し、audio URL、seed、model、metas、失敗状態を取り出せること
+- `/query_result` の result JSON string / array / object を parse し、audio URL、seed、model、metas、失敗状態を取り出し、`progress_text` の CUDA OOM を `PROVIDER_RESOURCE_EXHAUSTED` に分類できること
 - `429`, timeout, provider down で `DEGRADED` へ進み、playout が止まらないこと
 - Worker が返す既知 error code は共通分類を維持し、未知 error code は `PROVIDER_BAD_RESPONSE` へ正規化すること
 - `PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では Provider chain の fallback を行わず、同じ prompt / lyrics を再送しないこと

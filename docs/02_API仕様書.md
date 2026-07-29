@@ -1479,7 +1479,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - 管理 API は `components.securitySchemes.adminToken` と operation 単位の `security` で `X-Admin-Token` 必須を表す
 - DTO は Server / Client 両方で再利用しやすいよう JSON naming を固定する
 - `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
-- 現在の OpenAPI snapshot SHA-256 は `f2cf3dd9deb112ee86a7ea2666556b30c9ceefcc9033c40315adf9e32298854a` とする
+- 現在の OpenAPI snapshot SHA-256 は `4b5802eca90fd1bfd41609f7c5097b807f5118105898e200b348a468f2c2bef9` とする
 - 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
 - GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

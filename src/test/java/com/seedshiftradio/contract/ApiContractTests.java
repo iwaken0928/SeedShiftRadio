@@ -61,6 +61,7 @@ import com.seedshiftradio.radio.PlayHistoryController;
 import com.seedshiftradio.radio.PlayHistoryQueryService;
 import com.seedshiftradio.radio.RadioController;
 import com.seedshiftradio.radio.RadioService;
+import com.seedshiftradio.settings.AceStepModelService;
 import com.seedshiftradio.settings.AssetService;
 import com.seedshiftradio.settings.SettingsController;
 import com.seedshiftradio.settings.SettingsService;
@@ -124,6 +125,9 @@ class ApiContractTests {
 
 	@MockitoBean
 	RadioService radioService;
+
+	@MockitoBean
+	AceStepModelService aceStepModelService;
 
 	@MockitoBean
 	SettingsService settingsService;

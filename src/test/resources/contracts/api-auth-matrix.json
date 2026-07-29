@@ -32,6 +32,7 @@
   { "method": "POST", "path": "/api/radio/tune", "access": "PUBLIC" },
   { "method": "GET", "path": "/api/settings", "access": "ADMIN" },
   { "method": "PUT", "path": "/api/settings", "access": "ADMIN" },
+  { "method": "POST", "path": "/api/settings/providers/music-gen/{providerKey}/model-loads", "access": "ADMIN" },
   { "method": "POST", "path": "/api/settings/test-connections", "access": "ADMIN" },
   { "method": "GET", "path": "/api/stations", "access": "PUBLIC" },
   { "method": "POST", "path": "/api/stations", "access": "ADMIN" },

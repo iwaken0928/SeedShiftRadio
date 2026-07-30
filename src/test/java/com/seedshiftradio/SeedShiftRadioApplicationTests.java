@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
@@ -124,7 +125,7 @@ class SeedShiftRadioApplicationTests {
 
 	@Test
 	@Transactional
-	void stationContentInventoryQueriesUsePurposeAndOnlyCountStoredPayloads() {
+	void stationContentInventoryCountsStoredPayloadsAndDeletionIncludesTombstones() {
 		jdbcTemplate.update("""
 				insert into station (
 					id, name, frequency_mhz, genre, language_persona_id,
@@ -204,7 +205,9 @@ class SeedShiftRadioApplicationTests {
 		var deletable = generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(
 				"station-inventory-test",
 				List.of("MUSIC", "AUDIO"));
-		assertEquals(List.of("asset-inventory-music"), deletable.stream().map(asset -> asset.getId()).toList());
+		assertEquals(
+				Set.of("asset-inventory-music", "asset-inventory-evicted"),
+				Set.copyOf(deletable.stream().map(asset -> asset.getId()).toList()));
 	}
 
 	private void setUpdatedAt(String providerJobId, Instant updatedAt) {

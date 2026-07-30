@@ -403,14 +403,20 @@ public record SettingsDocument(
 		}
 	}
 
-	public record FeatureSettings(StreamingFeatureSettings streaming) {
+	public record FeatureSettings(
+			StreamingFeatureSettings streaming,
+			JobExecutionSettings jobExecution) {
 
 		public FeatureSettings normalize() {
-			return new FeatureSettings(streaming == null ? StreamingFeatureSettings.defaults() : streaming.normalize());
+			return new FeatureSettings(
+					streaming == null ? StreamingFeatureSettings.defaults() : streaming.normalize(),
+					jobExecution == null ? JobExecutionSettings.defaults() : jobExecution.normalize());
 		}
 
 		static FeatureSettings defaults() {
-			return new FeatureSettings(StreamingFeatureSettings.defaults());
+			return new FeatureSettings(
+					StreamingFeatureSettings.defaults(),
+					JobExecutionSettings.defaults());
 		}
 	}
 
@@ -422,6 +428,72 @@ public record SettingsDocument(
 
 		static StreamingFeatureSettings defaults() {
 			return new StreamingFeatureSettings(true);
+		}
+	}
+
+	public record JobExecutionSettings(
+			Boolean singleGpuMode,
+			String resourceGroup,
+			Boolean requireAceStepCpuOffload,
+			JobExecutionPolicy manual,
+			JobExecutionPolicy automatic) {
+
+		public JobExecutionSettings normalize() {
+			return new JobExecutionSettings(
+					singleGpuMode == null ? Boolean.TRUE : singleGpuMode,
+					(resourceGroup == null || resourceGroup.isBlank()) ? "gpu-0" : resourceGroup.trim(),
+					requireAceStepCpuOffload == null ? Boolean.TRUE : requireAceStepCpuOffload,
+					manual == null ? JobExecutionPolicy.manualDefaults() : manual.normalize(true),
+					automatic == null ? JobExecutionPolicy.automaticDefaults() : automatic.normalize(false));
+		}
+
+		static JobExecutionSettings defaults() {
+			return new JobExecutionSettings(
+					true,
+					"gpu-0",
+					true,
+					JobExecutionPolicy.manualDefaults(),
+					JobExecutionPolicy.automaticDefaults());
+		}
+	}
+
+	public record JobExecutionPolicy(
+			String waitStrategy,
+			Integer resourceWaitTimeoutSeconds,
+			Integer providerIdleTimeoutSeconds,
+			Integer modelLoadTimeoutSeconds,
+			Integer jobTimeoutSeconds,
+			Integer pollIntervalMillis,
+			Boolean unloadOllamaBeforeMusic,
+			Boolean waitForAceStepIdleBeforeLlm) {
+
+		public JobExecutionPolicy normalize(boolean manual) {
+			JobExecutionPolicy defaults = manual ? manualDefaults() : automaticDefaults();
+			String normalizedStrategy = waitStrategy == null ? "" : waitStrategy.trim().toUpperCase();
+			if (!"WAIT".equals(normalizedStrategy) && !"FAIL_FAST".equals(normalizedStrategy)) {
+				normalizedStrategy = defaults.waitStrategy();
+			}
+			return new JobExecutionPolicy(
+					normalizedStrategy,
+					positiveOrDefault(resourceWaitTimeoutSeconds, defaults.resourceWaitTimeoutSeconds()),
+					positiveOrDefault(providerIdleTimeoutSeconds, defaults.providerIdleTimeoutSeconds()),
+					positiveOrDefault(modelLoadTimeoutSeconds, defaults.modelLoadTimeoutSeconds()),
+					positiveOrDefault(jobTimeoutSeconds, defaults.jobTimeoutSeconds()),
+					positiveOrDefault(pollIntervalMillis, defaults.pollIntervalMillis()),
+					unloadOllamaBeforeMusic == null ? defaults.unloadOllamaBeforeMusic() : unloadOllamaBeforeMusic,
+					waitForAceStepIdleBeforeLlm == null ? defaults.waitForAceStepIdleBeforeLlm() : waitForAceStepIdleBeforeLlm);
+		}
+
+		static JobExecutionPolicy manualDefaults() {
+			return new JobExecutionPolicy("WAIT", 900, 900, 900, 1_800, 1_000, true, true);
+		}
+
+		static JobExecutionPolicy automaticDefaults() {
+			return new JobExecutionPolicy("WAIT", 1_800, 900, 900, 1_800, 1_000, true, true);
+		}
+
+		private static Integer positiveOrDefault(Integer value, Integer defaultValue) {
+			return value == null || value < 1 ? defaultValue : value;
 		}
 	}
 }

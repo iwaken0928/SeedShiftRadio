@@ -34,4 +34,9 @@ export const SETTINGS_PAGES = [
     label: "コンテンツ",
     description: "局別の番組・音声・曲データ量を確認し、事前生成を依頼します。",
   },
+  {
+    href: "/settings/jobs",
+    label: "ジョブ実行",
+    description: "共有 GPU の排他、Provider 待機、モデルロードと生成 timeout を管理します。",
+  },
 ] as const;

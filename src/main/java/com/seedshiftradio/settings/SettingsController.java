@@ -25,14 +25,17 @@ public class SettingsController {
 
 	private final SettingsService settingsService;
 	private final AceStepModelService aceStepModelService;
+	private final GpuExecutionCoordinator gpuExecutionCoordinator;
 	private final AdminApiGuard adminApiGuard;
 
 	public SettingsController(
 			SettingsService settingsService,
 			AceStepModelService aceStepModelService,
+			GpuExecutionCoordinator gpuExecutionCoordinator,
 			AdminApiGuard adminApiGuard) {
 		this.settingsService = settingsService;
 		this.aceStepModelService = aceStepModelService;
+		this.gpuExecutionCoordinator = gpuExecutionCoordinator;
 		this.adminApiGuard = adminApiGuard;
 	}
 
@@ -54,6 +57,13 @@ public class SettingsController {
 	public SettingsDtos.ConnectionTestResponse testConnections(@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
 		adminApiGuard.require(adminToken);
 		return settingsService.testConnections();
+	}
+
+	@GetMapping("/job-execution/status")
+	public GpuExecutionCoordinator.ExecutionStatus getJobExecutionStatus(
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
+		adminApiGuard.require(adminToken);
+		return gpuExecutionCoordinator.status();
 	}
 
 	@PostMapping("/providers/music-gen/{providerKey}/model-loads")

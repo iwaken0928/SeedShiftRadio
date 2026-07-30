@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,8 +25,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderType;
+import com.seedshiftradio.settings.GpuExecutionCoordinator;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.ExecutionOrigin;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.InferenceWorkload;
 import com.seedshiftradio.settings.ProviderErrorClassifier;
+import com.seedshiftradio.settings.InferenceExecutionContext;
 import com.seedshiftradio.settings.ProviderRegistry;
+import com.seedshiftradio.settings.ProviderRuntimeException;
 
 @Component
 public class HttpScriptProvider implements ScriptProvider {
@@ -44,9 +50,16 @@ public class HttpScriptProvider implements ScriptProvider {
 			""";
 
 	private final ObjectMapper objectMapper;
+	private final GpuExecutionCoordinator gpuExecutionCoordinator;
 
-	public HttpScriptProvider(ObjectMapper objectMapper) {
+	@Autowired
+	public HttpScriptProvider(ObjectMapper objectMapper, GpuExecutionCoordinator gpuExecutionCoordinator) {
 		this.objectMapper = objectMapper;
+		this.gpuExecutionCoordinator = gpuExecutionCoordinator;
+	}
+
+	HttpScriptProvider(ObjectMapper objectMapper) {
+		this(objectMapper, null);
 	}
 
 	@Override
@@ -55,6 +68,29 @@ public class HttpScriptProvider implements ScriptProvider {
 			throw failure(ProviderErrorCode.PROVIDER_BAD_RESPONSE, "LLM provider が解決されていません。");
 		}
 		String adapter = requireAdapter(provider.adapter());
+		if (ADAPTER_OLLAMA.equals(adapter) && gpuExecutionCoordinator != null) {
+			ExecutionOrigin origin = context != null
+					&& context.session() != null
+					&& context.session().isPreGeneration()
+							? ExecutionOrigin.MANUAL
+							: ExecutionOrigin.AUTOMATIC;
+			try {
+				return gpuExecutionCoordinator.execute(
+						origin,
+						InferenceWorkload.LLM,
+						provider.providerKey(),
+						() -> generateWithoutCoordination(provider, context, adapter));
+			} catch (ProviderRuntimeException exception) {
+				throw failure(exception.providerErrorCode(), exception.getMessage(), exception);
+			}
+		}
+		return generateWithoutCoordination(provider, context, adapter);
+	}
+
+	private GeneratedScript generateWithoutCoordination(
+			ProviderRegistry.ResolvedProvider provider,
+			ScriptGenerationContext context,
+			String adapter) {
 		String model = requireModel(provider.defaultModelProfileId());
 		String userPrompt = buildUserPrompt(context);
 		Map<String, Object> requestBody = switch (adapter) {
@@ -282,7 +318,9 @@ public class HttpScriptProvider implements ScriptProvider {
 	}
 
 	private Duration timeout(ProviderRegistry.ResolvedProvider provider) {
-		return Duration.ofMillis(Math.max(100, provider.timeoutMs()));
+		Duration providerTimeout = Duration.ofMillis(Math.max(100, provider.timeoutMs()));
+		Duration modelLoadTimeout = InferenceExecutionContext.modelLoadTimeout(providerTimeout);
+		return modelLoadTimeout.compareTo(providerTimeout) > 0 ? modelLoadTimeout : providerTimeout;
 	}
 
 	private void putIfPresent(Map<String, Object> target, String key, String value) {

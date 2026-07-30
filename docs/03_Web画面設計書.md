@@ -25,6 +25,7 @@
 | `/settings/stations` | 局管理 | 局の作成、複製、基本情報、人格・音声、有効状態 |
 | `/settings/programming` | 番組編成 | 局別ポリシー、ProgramTemplate、ProgramRule、Programming Preview |
 | `/settings/content` | コンテンツ管理 | 局別の番組・台本・音声・曲 asset 台帳、オフエア事前生成、事前生成 payload 削除 |
+| `/settings/jobs` | ジョブ実行制御 | 共有 GPU の排他、手動/自動ポリシー、Provider idle、モデルロードと生成 timeout |
 | `/monitor` | 監視画面 | Provider health, worker status detail, buffer, generated asset cache, running jobs, recent errors, audit events |
 | `/monitor/logs` | 運用ログ | 永続化した生成失敗、Provider error、request/job ID、相関 ID の検索 |
 
@@ -116,6 +117,7 @@
 | 局 | `/settings/stations` | Station の作成、複製、基本情報、人格、音声、有効状態 |
 | 番組編成 | `/settings/programming` | StationProgrammingPolicy, ProgramTemplate, ProgramRule, Programming Preview |
 | コンテンツ | `/settings/content` | StationContentInventory, PreGenerationRequest, 事前生成状況、事前生成 payload 削除 |
+| ジョブ実行 | `/settings/jobs` | `features.jobExecution`, 現在の GPU 実行権と待機ジョブ |
 
 各編集画面の先頭にはカテゴリー名、設定の目的、反映タイミングを日本語で記載する。
 カテゴリー navigation には項目名だけでなく、利用者が「何を決めるページか」を判断できる 1 文の説明を常時表示する。
@@ -148,15 +150,18 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - Irodori-TTS の参照音声を扱う UI は初期では管理者が配置した `voices/` の id 選択までに留め、任意 upload は同意・ライセンス台帳と file validation が実装されるまで追加しない
 - 実行中の番組 block へ影響する変更は「次の番組から反映」と明示する
 - `/settings/content` は局ごとに `programCount`, `preGeneratedProgramCount`, `scriptAssetCount`, `audioAssetCount`, `musicAssetCount`, `musicAssetBytes`, `generatedAssetBytes` を表形式で表示する
+- 局を選択した後は `GET /api/management/stations/{stationId}/content/programs` を取得し、番組ごとの通常放送/事前生成、segment 状態、asset 種別・容量を表示する。直近 100 番組から 1 番組を選び、各 queue item の status と `contentOrigin` を確認できるようにする
 - 事前生成フォームは局、有効な任意の `ProgramTemplate` または自動選択、1 から 10 の番組数、台本・音声、曲の生成対象を指定できる
 - 事前生成はライブの局切替や再生 queue を変更しないことを操作前に明示し、受付後は `QUEUED`, `RUNNING`, `MATERIALIZED`, `FAILED` を色だけでなく文字でも表示する
-- 削除フォームは局と `SCRIPT`, `AUDIO`, `MUSIC` の対象種別を複数選択でき、実行前に確認ダイアログを表示する。対象がオフエア事前生成 payload に限られ、ライブデータ、番組 block、queue、Provider job、監査履歴、archive は残ることを明示する
+- 削除フォームは局または事前生成番組と `SCRIPT`, `AUDIO`, `MUSIC` の対象種別を複数選択でき、実行前に確認ダイアログを表示する。対象がオフエア事前生成 asset に限られ、ライブデータ、番組 block、queue、Provider job、監査履歴、archive は残す一方、選択した generated asset record と queue の asset 参照は残さないことを明示する
 - 削除後は削除件数、失敗件数、回収容量を表示し、局別台帳を再取得する。対象種別が未選択なら送信しない
+- `/settings/jobs` は `GET /api/settings` と `PUT /api/settings` で `features.jobExecution` を編集し、`GET /api/settings/job-execution/status` を 3 秒間隔で再取得する。単一 GPU mode、resource group、ACE-Step CPU offload 前提、手動/自動それぞれの wait strategy、4 種の timeout、poll interval、Ollama unload、ACE-Step idle wait を分けて表示する
+- 手動ポリシーはコンテンツ事前生成と ACE-Step model load、自動ポリシーは放送キューのバックグラウンド生成に適用されることを画面内で説明する。設定画面は prompt、lyrics、秘密値を表示しない
 - `MATERIALIZED` は MusicGen 完了ではなく、番組データ作成と非同期 job 投入完了を表す。曲生成の進行・失敗は管理トップまたは `/monitor` で確認する
 
 ### 7.3 初期実装範囲
 
-- `/settings` を管理ダッシュボードとし、編集機能は `system`, `providers`, `playout`, `stations`, `programming`, `content` のカテゴリーへ分割する
+- `/settings` を管理ダッシュボードとし、編集機能は `system`, `providers`, `playout`, `stations`, `programming`, `content`, `jobs` のカテゴリーへ分割する
 - `PUT /api/settings` の契約は分割後も共通とし、`system`, `providers`, `playout` は取得済み設定全体を draft として保持しつつ、現在のカテゴリーに属する項目だけを表示して一括保存する
 - `stations` と `programming` は PostgreSQL を正本とする既存の Station / Programming API を使い、`/api/settings` の保存操作とは分離する
 - `providers` は `defaultProvider`, `fallbackProviders` に加え、既存 endpoint の `baseUrl`, `healthPath`, `timeoutMs`, `capabilities`, `adapter`, model / profile を編集できるようにする
@@ -177,7 +182,7 @@ API / JSON の識別子は必要な箇所に残すが、操作名、入力ラベ
 - `Stations` は概要表示に加えて station 基本情報の新規作成/複製/編集保存と station programming policy の編集保存を実装する。`Program Templates` は create/duplicate/edit/slot 編集まで扱い、`Programming Preview` は保存済み policy に加えて未保存 policy/template draft を含めた preview も実行できる
 - `Voice Profiles` の作成/編集 UI は後続実装対象とする。Irodori 取り込みの第一段では seed / DB migration と既存 station の `defaultVoiceProfileId` 差し替えで、チャンネルごとに別 voice id / style preset を割り当てられる状態を優先する
 - `/letters` の管理 inbox、`/settings`、`/monitor` は公開 UI と分離し、server-side session を確立した利用者だけが表示・操作できるようにする。`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` と legacy browser token 導線は廃止し、公開 build、Cookie、browser storage へ管理 API 用トークンを含めない
-- `/settings/content` も同じ管理 session と CSRF 契約を使い、browser は `X-Admin-Token` を生成しない。`POST /api/management/stations/{stationId}/pre-generations` と `POST /api/management/stations/{stationId}/content/deletions` は同一 origin BFF 経由だけで送る
+- `/settings/content` と `/settings/jobs` も同じ管理 session と CSRF 契約を使い、browser は `X-Admin-Token` を生成しない。事前生成、局/番組単位削除、ジョブ実行設定保存は同一 origin BFF 経由だけで送る
 
 ## 8. 監視画面
 

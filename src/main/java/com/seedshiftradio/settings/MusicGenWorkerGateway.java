@@ -108,7 +108,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 	}
 
 	public MusicJobStatus awaitCompletion(ResolvedMusicProvider provider, String jobId) {
-		Instant deadline = Instant.now().plus(JOB_TIMEOUT);
+		Instant deadline = Instant.now().plus(InferenceExecutionContext.jobTimeout(JOB_TIMEOUT));
 		while (true) {
 			MusicJobStatus status = poll(provider, jobId);
 			switch (status.status()) {
@@ -181,7 +181,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 			payload.put("lm_model_path", profile.lmModel());
 		}
 		HttpRequest request = authedRequest(provider, "/v1/init")
-				.timeout(MODEL_INITIALIZATION_TIMEOUT)
+				.timeout(InferenceExecutionContext.modelLoadTimeout(MODEL_INITIALIZATION_TIMEOUT))
 				.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(serialize(payload)))
 				.build();
@@ -535,7 +535,7 @@ public class MusicGenWorkerGateway implements MusicGenerationProvider {
 
 	private void sleep() {
 		try {
-			Thread.sleep(POLL_INTERVAL);
+			Thread.sleep(InferenceExecutionContext.pollIntervalMillis(POLL_INTERVAL.toMillis()));
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			throw new MusicGenWorkerException("PROVIDER_INTERRUPTED", "音楽生成 provider の待機中に割り込みが発生しました。", exception);

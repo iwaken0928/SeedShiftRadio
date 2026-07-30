@@ -47,6 +47,7 @@ test("settings: category navigation separates each responsibility", async ({ pag
   await expect(settingsNavigation.locator('a[href="/settings/stations"]')).toContainText("局");
   await expect(settingsNavigation.getByRole("link", { name: /番組編成/ })).toHaveAttribute("href", "/settings/programming");
   await expect(settingsNavigation.getByRole("link", { name: /コンテンツ/ })).toHaveAttribute("href", "/settings/content");
+  await expect(settingsNavigation.getByRole("link", { name: /ジョブ実行/ })).toHaveAttribute("href", "/settings/jobs");
 
   await page.goto(appUrl("/settings/system"));
   await expect(page.getByRole("heading", { name: "システム設定" })).toBeVisible();
@@ -107,6 +108,66 @@ test("settings: station inventory can delete selected pre-generated assets", asy
     assetTypes: ["AUDIO", "MUSIC"],
   });
   await expect(page.getByRole("status")).toContainText("2 件を削除し、台帳容量を 4.00 KB 減らしました");
+});
+
+test("settings: station inventory shows program details and deletes only that program", async ({ page }) => {
+  const state = createSettingsState();
+  const programContentDeletionRequests: RequestCapture[] = [];
+  await installSettingsRoutes(page, state, { programContentDeletionRequests });
+
+  await page.goto(appUrl("/settings/content"));
+
+  await expect(page.getByRole("heading", { name: "Nocturne FM の番組詳細" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "深夜の事前生成番組" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "オープニングトーク" })).toBeVisible();
+  await expect(page.getByText("音声 2.00 KB")).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "この番組から選択データを削除" }).click();
+
+  await expect.poll(() => programContentDeletionRequests.length).toBe(1);
+  await expect(programContentDeletionRequests[0]?.body).toEqual({
+    assetTypes: ["SCRIPT", "AUDIO", "MUSIC"],
+  });
+  await expect(page.getByRole("status")).toContainText("1 件を削除しました");
+});
+
+test("settings: job execution policies can be managed separately for manual and automatic jobs", async ({ page }) => {
+  const state = createSettingsState();
+  const settingsUpdateRequests: RequestCapture[] = [];
+  await installSettingsRoutes(page, state, { settingsUpdateRequests });
+
+  await page.goto(appUrl("/settings/jobs"));
+
+  await expect(page.getByRole("heading", { name: "ジョブ実行制御" })).toBeVisible();
+  await expect(page.getByText("IDLE", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "手動ジョブ" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "自動ジョブ" })).toBeVisible();
+  await expect(page.getByText("ACESTEP_OFFLOAD_TO_CPU=true")).toBeVisible();
+
+  await page.locator("#job-resource-group").fill("shared-gpu-0");
+  await page.locator('[id="手動ジョブ-wait-strategy"]').selectOption("FAIL_FAST");
+  await page.getByRole("button", { name: "ジョブ実行設定を保存" }).click();
+
+  await expect.poll(() => settingsUpdateRequests.length).toBe(1);
+  await expect(settingsUpdateRequests[0]?.body).toMatchObject({
+    features: {
+      jobExecution: {
+        singleGpuMode: true,
+        resourceGroup: "shared-gpu-0",
+        requireAceStepCpuOffload: true,
+        manual: {
+          waitStrategy: "FAIL_FAST",
+          resourceWaitTimeoutSeconds: 900,
+        },
+        automatic: {
+          waitStrategy: "WAIT",
+          resourceWaitTimeoutSeconds: 1800,
+        },
+      },
+    },
+  });
+  await expect(page.getByRole("status")).toContainText("ジョブ実行設定を保存しました");
 });
 
 test("settings: Ollama connection method and model are editable with understandable URL validation", async ({ page }) => {
@@ -664,6 +725,7 @@ async function installSettingsRoutes(
     templateUpdateRequests?: RequestCapture[];
     preGenerationRequests?: RequestCapture[];
     contentDeletionRequests?: RequestCapture[];
+    programContentDeletionRequests?: RequestCapture[];
     aceStepModelLoadRequests?: RequestCapture[];
     templateCreateFailure?: FailureResponse;
     templateUpdateFailure?: FailureResponse;
@@ -732,6 +794,53 @@ async function installSettingsRoutes(
   await page.route(apiUrl("/api/management/dashboard"), async (route) => {
     await fulfillJson(route, buildManagementDashboard());
   });
+  await page.route(apiRegExp("/api/management/stations/[^/]+/content/programs$"), async (route) => {
+    await fulfillJson(route, {
+      stationId: "station-night",
+      stationName: "Nocturne FM",
+      programs: [{
+        programBlockId: "block-pregen-001",
+        sessionId: "playout-pregen-001",
+        programTemplateId: "tmpl-night",
+        programTemplateVersion: 3,
+        title: "深夜の事前生成番組",
+        status: "READY",
+        preGenerated: true,
+        plannedDurationMs: 600_000,
+        startedAt: "2026-07-30T00:00:00Z",
+        endedAt: null,
+        segmentCount: 1,
+        plannedSegmentCount: 0,
+        generatingSegmentCount: 0,
+        readySegmentCount: 1,
+        failedSegmentCount: 0,
+        generatedAssetCount: 1,
+        generatedAssetBytes: 2048,
+        scriptAssetCount: 0,
+        audioAssetCount: 1,
+        musicAssetCount: 0,
+        latestAssetAt: "2026-07-30T00:01:00Z",
+        segments: [{
+          queueItemId: "queue-pregen-001",
+          sequenceNo: 1,
+          segmentType: "TALK",
+          slotRole: "TALK",
+          title: "オープニングトーク",
+          status: "READY",
+          contentOrigin: "LIVE_GEN",
+          durationMs: 30_000,
+          primaryAssetId: "asset-audio-001",
+          assets: [{
+            assetId: "asset-audio-001",
+            assetType: "AUDIO",
+            byteSize: 2048,
+            createdAt: "2026-07-30T00:01:00Z",
+          }],
+        }],
+      }],
+      updatedAt: "2026-07-30T00:00:00Z",
+    });
+  });
   await page.route(apiRegExp("/api/management/stations/[^/]+/pre-generations$"), async (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     captures.preGenerationRequests?.push({ body, headers: route.request().headers() });
@@ -767,6 +876,19 @@ async function installSettingsRoutes(
       deletedByType: { AUDIO: 1, MUSIC: 1 },
     });
   });
+  await page.route(apiRegExp("/api/management/stations/[^/]+/programs/[^/]+/content/deletions$"), async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    captures.programContentDeletionRequests?.push({ body, headers: route.request().headers() });
+    await fulfillJson(route, {
+      stationId: "station-night",
+      executedAt: "2026-07-30T00:02:00Z",
+      candidateAssetCount: 1,
+      deletedAssetCount: 1,
+      failedAssetCount: 0,
+      reclaimedBytes: 2048,
+      deletedByType: { AUDIO: 1 },
+    });
+  });
   await page.route(apiUrl("/api/settings"), async (route) => {
     if (route.request().method() === "PUT") {
       const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
@@ -781,6 +903,22 @@ async function installSettingsRoutes(
       return;
     }
     await fulfillJson(route, state.settings);
+  });
+  await page.route(apiUrl("/api/settings/job-execution/status"), async (route) => {
+    await fulfillJson(route, {
+      singleGpuMode: true,
+      resourceGroup: "gpu-0",
+      phase: "IDLE",
+      waitingJobs: 0,
+      executionId: null,
+      origin: null,
+      workload: null,
+      providerKey: null,
+      startedAt: null,
+      lastCompletedAt: null,
+      lastOutcome: "IDLE",
+      aceStepCpuOffloadRequired: true,
+    });
   });
 
   await page.route(apiUrl("/api/stations"), async (route) => {

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import com.seedshiftradio.domain.QueueItemStatus;
 import com.seedshiftradio.settings.MusicGenWorkerException;
 import com.seedshiftradio.settings.MusicGenerationRuntimeService;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.ExecutionOrigin;
 
 @Component
 public class GenerateMusicJob {
@@ -36,9 +37,13 @@ public class GenerateMusicJob {
 		}
 
 		try {
-			MusicGenerationRuntimeService.GeneratedMusicAsset generatedAsset = musicGenerationRuntimeService.generate(session.getStationId(), item);
+			MusicGenerationRuntimeService.GeneratedMusicAsset generatedAsset = musicGenerationRuntimeService.generate(
+					session.getStationId(),
+					item,
+					session.isPreGeneration() ? ExecutionOrigin.MANUAL : ExecutionOrigin.AUTOMATIC);
 			QueueItemEntity latestItem = queueItemRepository.findById(queueItemId).orElse(item);
 			if (latestItem.getStatus() != QueueItemStatus.GENERATING) {
+				musicGenerationRuntimeService.discardGeneratedAsset(generatedAsset.assetId());
 				return;
 			}
 			latestItem.setAssetId(generatedAsset.assetId());

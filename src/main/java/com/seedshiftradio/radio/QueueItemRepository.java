@@ -13,6 +13,14 @@ public interface QueueItemRepository extends JpaRepository<QueueItemEntity, Stri
 
 	List<QueueItemEntity> findBySessionIdOrderBySequenceNoAsc(String sessionId);
 
+	List<QueueItemEntity> findByProgramBlockIdOrderBySequenceNoAsc(String programBlockId);
+
+	List<QueueItemEntity> findByProgramBlockIdInOrderByProgramBlockIdAscSequenceNoAsc(List<String> programBlockIds);
+
+	List<QueueItemEntity> findByAssetIdIn(List<String> assetIds);
+
+	boolean existsByAssetId(String assetId);
+
 	long countBySessionIdAndStatus(String sessionId, QueueItemStatus status);
 
 	@Query("""

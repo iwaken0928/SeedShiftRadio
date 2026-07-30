@@ -10,6 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
@@ -17,6 +18,8 @@ import com.seedshiftradio.domain.ProviderErrorCode;
 import com.seedshiftradio.domain.ProviderJobType;
 import com.seedshiftradio.domain.ProviderType;
 import com.seedshiftradio.domain.SlotRole;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.ExecutionOrigin;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.InferenceWorkload;
 import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport;
 import com.seedshiftradio.programming.ProgrammingPolicyProfileSupport.PreGenerationProfile;
 import com.seedshiftradio.programming.StationProgrammingPolicyRepository;
@@ -34,23 +37,51 @@ public class MusicGenerationRuntimeService {
 	private final RadioSettingsStore settingsStore;
 	private final StationRepository stationRepository;
 	private final StationProgrammingPolicyRepository programmingPolicyRepository;
+	private final GpuExecutionCoordinator gpuExecutionCoordinator;
 
+	@Autowired
 	public MusicGenerationRuntimeService(
 			MusicGenWorkerGateway musicGenWorkerGateway,
 			ProviderJobService providerJobService,
 			GeneratedAssetService generatedAssetService,
 			RadioSettingsStore settingsStore,
 			StationRepository stationRepository,
-			StationProgrammingPolicyRepository programmingPolicyRepository) {
+			StationProgrammingPolicyRepository programmingPolicyRepository,
+			GpuExecutionCoordinator gpuExecutionCoordinator) {
 		this.musicGenWorkerGateway = musicGenWorkerGateway;
 		this.providerJobService = providerJobService;
 		this.generatedAssetService = generatedAssetService;
 		this.settingsStore = settingsStore;
 		this.stationRepository = stationRepository;
 		this.programmingPolicyRepository = programmingPolicyRepository;
+		this.gpuExecutionCoordinator = gpuExecutionCoordinator;
+	}
+
+	MusicGenerationRuntimeService(
+			MusicGenWorkerGateway musicGenWorkerGateway,
+			ProviderJobService providerJobService,
+			GeneratedAssetService generatedAssetService,
+			RadioSettingsStore settingsStore,
+			StationRepository stationRepository,
+			StationProgrammingPolicyRepository programmingPolicyRepository) {
+		this(
+				musicGenWorkerGateway,
+				providerJobService,
+				generatedAssetService,
+				settingsStore,
+				stationRepository,
+				programmingPolicyRepository,
+				null);
 	}
 
 	public GeneratedMusicAsset generate(String stationId, QueueItemEntity item) {
+		return generate(stationId, item, ExecutionOrigin.AUTOMATIC);
+	}
+
+	public GeneratedMusicAsset generate(
+			String stationId,
+			QueueItemEntity item,
+			ExecutionOrigin origin) {
 		List<MusicGenWorkerGateway.ResolvedMusicProvider> providers = musicGenWorkerGateway.resolveProviders();
 		MusicGenerationRequest request = buildRequest(stationId, item);
 		String reuseScope = settingsStore.load().cache().musicReuseScope();
@@ -79,34 +110,60 @@ public class MusicGenerationRuntimeService {
 						null,
 						"CACHE_REUSED");
 			}
-			MusicGenWorkerGateway.SubmittedMusicJob submittedJob = musicGenWorkerGateway.submitWithFallback(providers, request);
-			providerJobService.markRunning(providerJob.getId(), submittedJob.provider().providerKey(), submittedJob.jobId());
-			MusicGenWorkerGateway.MusicJobStatus completedJob = musicGenWorkerGateway.awaitCompletion(submittedJob.provider(), submittedJob.jobId());
-			String cacheKey = buildCacheKey(submittedJob.provider(), request, item, reuseScope);
-			GeneratedAssetEntity asset = generatedAssetService.registerExistingAsset(
-					GeneratedAssetType.MUSIC,
-					Path.of(completedJob.assetPath()),
-					completedJob.providerFingerprint() == null || completedJob.providerFingerprint().isBlank()
-							? submittedJob.provider().providerKey()
-							: completedJob.providerFingerprint(),
-					item.getId(),
-					providerJob.getId(),
-					cacheKey,
-					buildGeneratedMetadata(stationId, item, request, submittedJob.provider(), providerJob, completedJob, cacheKey));
-			providerJobService.markSucceeded(providerJob.getId());
-			return new GeneratedMusicAsset(
-					asset.getId(),
-					"/api/assets/audio/" + asset.getId() + ".wav",
-					providerJob.getId(),
-					submittedJob.jobId(),
-					"LIVE_GEN");
+			if (gpuExecutionCoordinator == null) {
+				return generateWithProvider(stationId, item, providers, request, reuseScope, providerJob);
+			}
+			return gpuExecutionCoordinator.execute(
+					origin == null ? ExecutionOrigin.AUTOMATIC : origin,
+					InferenceWorkload.MUSIC,
+					providers.getFirst().providerKey(),
+					() -> generateWithProvider(stationId, item, providers, request, reuseScope, providerJob));
 		} catch (MusicGenWorkerException exception) {
 			providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
 			throw exception;
+		} catch (ProviderRuntimeException exception) {
+			providerJobService.markFailed(providerJob.getId(), exception.providerErrorCode());
+			throw new MusicGenWorkerException(exception.errorCode(), exception.getMessage(), exception);
 		} catch (RuntimeException exception) {
 			providerJobService.markFailed(providerJob.getId(), ProviderErrorCode.PROVIDER_BAD_RESPONSE);
 			throw exception;
 		}
+	}
+
+	private GeneratedMusicAsset generateWithProvider(
+			String stationId,
+			QueueItemEntity item,
+			List<MusicGenWorkerGateway.ResolvedMusicProvider> providers,
+			MusicGenerationRequest request,
+			String reuseScope,
+			ProviderJobEntity providerJob) {
+		MusicGenWorkerGateway.SubmittedMusicJob submittedJob = musicGenWorkerGateway.submitWithFallback(providers, request);
+		providerJobService.markRunning(providerJob.getId(), submittedJob.provider().providerKey(), submittedJob.jobId());
+		MusicGenWorkerGateway.MusicJobStatus completedJob = musicGenWorkerGateway.awaitCompletion(
+				submittedJob.provider(),
+				submittedJob.jobId());
+		String cacheKey = buildCacheKey(submittedJob.provider(), request, item, reuseScope);
+		GeneratedAssetEntity asset = generatedAssetService.registerExistingAsset(
+				GeneratedAssetType.MUSIC,
+				Path.of(completedJob.assetPath()),
+				completedJob.providerFingerprint() == null || completedJob.providerFingerprint().isBlank()
+						? submittedJob.provider().providerKey()
+						: completedJob.providerFingerprint(),
+				item.getId(),
+				providerJob.getId(),
+				cacheKey,
+				buildGeneratedMetadata(stationId, item, request, submittedJob.provider(), providerJob, completedJob, cacheKey));
+		providerJobService.markSucceeded(providerJob.getId());
+		return new GeneratedMusicAsset(
+				asset.getId(),
+				"/api/assets/audio/" + asset.getId() + ".wav",
+				providerJob.getId(),
+				submittedJob.jobId(),
+				"LIVE_GEN");
+	}
+
+	public boolean discardGeneratedAsset(String assetId) {
+		return generatedAssetService.discardUnlinkedGeneratedAsset(assetId);
 	}
 
 	private CachedAssetHit findReusableAsset(

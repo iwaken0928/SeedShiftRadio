@@ -63,6 +63,7 @@ import com.seedshiftradio.radio.RadioController;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.settings.AceStepModelService;
 import com.seedshiftradio.settings.AssetService;
+import com.seedshiftradio.settings.GpuExecutionCoordinator;
 import com.seedshiftradio.settings.SettingsController;
 import com.seedshiftradio.settings.SettingsService;
 import com.seedshiftradio.station.StationAdminService;
@@ -128,6 +129,9 @@ class ApiContractTests {
 
 	@MockitoBean
 	AceStepModelService aceStepModelService;
+
+	@MockitoBean
+	GpuExecutionCoordinator gpuExecutionCoordinator;
 
 	@MockitoBean
 	SettingsService settingsService;

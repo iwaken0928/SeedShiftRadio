@@ -172,6 +172,31 @@ function createSettingsResponse(overrides: Partial<SettingsResponse> = {}): Sett
       streaming: {
         placeholderEnabled: true,
       },
+      jobExecution: {
+        singleGpuMode: true,
+        resourceGroup: "gpu-0",
+        requireAceStepCpuOffload: true,
+        manual: {
+          waitStrategy: "WAIT",
+          resourceWaitTimeoutSeconds: 900,
+          providerIdleTimeoutSeconds: 900,
+          modelLoadTimeoutSeconds: 900,
+          jobTimeoutSeconds: 1800,
+          pollIntervalMillis: 1000,
+          unloadOllamaBeforeMusic: true,
+          waitForAceStepIdleBeforeLlm: true,
+        },
+        automatic: {
+          waitStrategy: "WAIT",
+          resourceWaitTimeoutSeconds: 1800,
+          providerIdleTimeoutSeconds: 900,
+          modelLoadTimeoutSeconds: 900,
+          jobTimeoutSeconds: 1800,
+          pollIntervalMillis: 1000,
+          unloadOllamaBeforeMusic: true,
+          waitForAceStepIdleBeforeLlm: true,
+        },
+      },
     },
     ...overrides,
   };
@@ -206,6 +231,11 @@ function createUpdateRequest(settings: SettingsResponse): SettingsUpdateRequest 
     security: { ...settings.security },
     features: {
       streaming: { ...settings.features.streaming },
+      jobExecution: {
+        ...settings.features.jobExecution,
+        manual: { ...settings.features.jobExecution.manual },
+        automatic: { ...settings.features.jobExecution.automatic },
+      },
     },
   };
 }

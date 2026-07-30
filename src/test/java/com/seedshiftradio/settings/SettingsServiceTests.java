@@ -56,6 +56,10 @@ class SettingsServiceTests {
 		assertEquals(3, response.playout().ttsAheadCount());
 		assertEquals(2, response.playout().musicAheadCount());
 		assertTrue(response.playout().idlePrefetchEnabled());
+		assertTrue(response.features().jobExecution().singleGpuMode());
+		assertEquals("gpu-0", response.features().jobExecution().resourceGroup());
+		assertEquals("WAIT", response.features().jobExecution().manual().waitStrategy());
+		assertEquals(1_800, response.features().jobExecution().automatic().resourceWaitTimeoutSeconds());
 		assertTrue(Files.exists(configPath));
 	}
 
@@ -119,6 +123,45 @@ class SettingsServiceTests {
 						null)));
 
 		assertEquals("VALIDATION_ERROR", exception.getCode());
+	}
+
+	@Test
+	void updateSettingsRejectsInvalidJobExecutionPolicy() {
+		SettingsDtos.SettingsResponse current = settingsService.getSettings();
+		SettingsDocument.JobExecutionPolicy invalidManual = new SettingsDocument.JobExecutionPolicy(
+				"RUN_ANYWAY",
+				900,
+				900,
+				900,
+				1_800,
+				50,
+				true,
+				true);
+		SettingsDocument.FeatureSettings invalidFeatures = new SettingsDocument.FeatureSettings(
+				current.features().streaming(),
+				new SettingsDocument.JobExecutionSettings(
+						true,
+						"gpu-0",
+						true,
+						invalidManual,
+						current.features().jobExecution().automatic()));
+
+		ApiException exception = assertThrows(
+				ApiException.class,
+				() -> settingsService.updateSettings(new SettingsDtos.SettingsUpdateRequest(
+						current.version(),
+						current.schemaVersion(),
+						current.server(),
+						current.paths(),
+						current.playout(),
+						current.cache(),
+						current.programming(),
+						current.providers(),
+						current.security(),
+						invalidFeatures)));
+
+		assertEquals("VALIDATION_ERROR", exception.getCode());
+		assertEquals("features.jobExecution.manual.waitStrategy", exception.getDetails().get("field"));
 	}
 
 	@Test

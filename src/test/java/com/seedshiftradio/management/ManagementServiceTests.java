@@ -22,7 +22,11 @@ import org.springframework.context.ApplicationEventPublisher;
 
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.PreGenerationRequestStatus;
+import com.seedshiftradio.domain.ProgramBlockStatus;
 import com.seedshiftradio.domain.ProviderErrorCode;
+import com.seedshiftradio.domain.QueueItemStatus;
+import com.seedshiftradio.domain.SegmentType;
+import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.management.ManagementDtos.ManagementDashboardResponse;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationRequest;
@@ -34,10 +38,14 @@ import com.seedshiftradio.programming.ProgramTemplateRepository;
 import com.seedshiftradio.programming.ProgrammingService;
 import com.seedshiftradio.radio.PlayoutSessionEntity;
 import com.seedshiftradio.radio.PlayoutSessionRepository;
+import com.seedshiftradio.radio.ProgramBlockEntity;
 import com.seedshiftradio.radio.ProgramBlockRepository;
+import com.seedshiftradio.radio.QueueItemEntity;
+import com.seedshiftradio.radio.QueueItemRepository;
 import com.seedshiftradio.radio.RadioService;
 import com.seedshiftradio.radio.ScriptGenerationException;
 import com.seedshiftradio.settings.GeneratedAssetRepository;
+import com.seedshiftradio.settings.GeneratedAssetEntity;
 import com.seedshiftradio.settings.GeneratedAssetService;
 import com.seedshiftradio.station.StationEntity;
 import com.seedshiftradio.station.StationRepository;
@@ -57,6 +65,7 @@ class ManagementServiceTests {
 	@Mock RadioService radioService;
 	@Mock ApplicationEventPublisher eventPublisher;
 	@Mock OperationalEventService operationalEventService;
+	@Mock QueueItemRepository queueItemRepository;
 
 	ManagementService service;
 
@@ -74,7 +83,8 @@ class ManagementServiceTests {
 				programmingService,
 				radioService,
 				eventPublisher,
-				operationalEventService);
+				operationalEventService,
+				queueItemRepository);
 	}
 
 	@Test
@@ -108,6 +118,58 @@ class ManagementServiceTests {
 		assertEquals(24_576L, dashboard.stations().getFirst().generatedAssetBytes());
 		assertEquals(4L, dashboard.stations().getFirst().musicAssetCount());
 		assertEquals("pregen-station-night", dashboard.stations().getFirst().latestPreGeneration().id());
+	}
+
+	@Test
+	void stationProgramsReturnsProgramSegmentsAndAssetsForSelectedStation() {
+		StationEntity station = org.mockito.Mockito.mock(StationEntity.class);
+		when(station.getName()).thenReturn("Midnight Echo");
+		when(stationRepository.findById("station-night")).thenReturn(Optional.of(station));
+		ProgramBlockEntity block = org.mockito.Mockito.mock(ProgramBlockEntity.class);
+		when(block.getId()).thenReturn("block-1");
+		when(block.getSessionId()).thenReturn("session-1");
+		when(block.getProgramTemplateId()).thenReturn("template-1");
+		when(block.getProgramTemplateVersion()).thenReturn(2);
+		when(block.getTitle()).thenReturn("夜の番組");
+		when(block.getStatus()).thenReturn(ProgramBlockStatus.PLANNED);
+		when(block.getPlannedDurationMs()).thenReturn(60_000);
+		when(block.getStartedAt()).thenReturn(Instant.parse("2026-07-30T00:00:00Z"));
+		when(programBlockRepository.findTop100ByStationIdOrderByStartedAtDesc("station-night"))
+				.thenReturn(List.of(block));
+		PlayoutSessionEntity session = org.mockito.Mockito.mock(PlayoutSessionEntity.class);
+		when(session.getId()).thenReturn("session-1");
+		when(session.isPreGeneration()).thenReturn(true);
+		when(playoutSessionRepository.findAllById(List.of("session-1"))).thenReturn(List.of(session));
+		QueueItemEntity item = org.mockito.Mockito.mock(QueueItemEntity.class);
+		when(item.getId()).thenReturn("queue-1");
+		when(item.getProgramBlockId()).thenReturn("block-1");
+		when(item.getSequenceNo()).thenReturn(1);
+		when(item.getSegmentType()).thenReturn(SegmentType.MUSIC_AI);
+		when(item.getSlotRole()).thenReturn(SlotRole.MUSIC_BREAK);
+		when(item.getTitle()).thenReturn("生成曲");
+		when(item.getStatus()).thenReturn(QueueItemStatus.READY);
+		when(item.getContentOrigin()).thenReturn("LIVE_GEN");
+		when(item.getDurationMs()).thenReturn(30_000);
+		when(item.getAssetId()).thenReturn("asset-1");
+		when(queueItemRepository.findByProgramBlockIdInOrderByProgramBlockIdAscSequenceNoAsc(List.of("block-1")))
+				.thenReturn(List.of(item));
+		GeneratedAssetEntity asset = org.mockito.Mockito.mock(GeneratedAssetEntity.class);
+		when(asset.getId()).thenReturn("asset-1");
+		when(asset.getQueueItemId()).thenReturn("queue-1");
+		when(asset.getAssetType()).thenReturn(GeneratedAssetType.MUSIC);
+		when(asset.getByteSize()).thenReturn(4_096L);
+		when(asset.getCreatedAt()).thenReturn(Instant.parse("2026-07-30T00:01:00Z"));
+		when(generatedAssetRepository.findByQueueItemIdIn(List.of("queue-1"))).thenReturn(List.of(asset));
+
+		ManagementDtos.StationProgramContentResponse response = service.stationPrograms("station-night");
+
+		assertEquals("Midnight Echo", response.stationName());
+		assertEquals(1, response.programs().size());
+		assertTrue(response.programs().getFirst().preGenerated());
+		assertEquals(1, response.programs().getFirst().readySegmentCount());
+		assertEquals(1, response.programs().getFirst().musicAssetCount());
+		assertEquals(4_096L, response.programs().getFirst().generatedAssetBytes());
+		assertEquals("queue-1", response.programs().getFirst().segments().getFirst().queueItemId());
 	}
 
 	@Test

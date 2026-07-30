@@ -70,7 +70,9 @@ ACE-Step adapter の JDK `HttpClient` は `HTTP_1_1` を明示する。ACE-Step 
 
 `status=2` の失敗理由は `result` だけでなく `progress_text` に格納される実装がある。adapter は両方を分類対象とし、CUDA / device の out-of-memory を `PROVIDER_RESOURCE_EXHAUSTED`、未知失敗を `PROVIDER_BAD_RESPONSE` とする。診断本文は Provider job、monitor、標準ログへ保存せず、安全な日本語メッセージだけを上位へ返す。
 
-Ollama と ACE-Step が同一 GPU を共有する production では、先行する Ollama `/api/chat` に `keep_alive=0` を指定し、台本生成後に LLM model をアンロードしてから音楽生成へ進む。
+Ollama と ACE-Step が同一 GPU を共有する production では、`GpuExecutionCoordinator` が LLM / Music Generation / ACE-Step model load を直列化する。音楽生成前は Ollama `POST /api/generate` に `keep_alive=0` を指定して `GET /api/ps` から model が消えるまで待ち、LLM 実行前は ACE-Step `/v1/stats` の queued/running が 0 になるまで待つ。個々の Ollama `/api/chat` も `keep_alive=0` を維持する。
+
+ACE-Step `v0.1.8` には SeedShiftRadio から使用できる汎用の全 model unload API がないため、単一 GPU 用の ACE-Step container は `ACESTEP_OFFLOAD_TO_CPU=true`, `ACESTEP_OFFLOAD_DIT_TO_CPU=true`, `ACESTEP_LM_OFFLOAD_TO_CPU=true` を前提とする。SeedShiftRadio の `requireAceStepCpuOffload` はこの前提を可視化する設定であり、ACE-Step container の環境変数自体は `releases/acestep` の配備設定で管理する。
 
 iwaken-server の production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server は host network で動作するため `baseUrl=http://127.0.0.1:8001` を使い、ACE-Step の host port `8001` へ接続する。
 
@@ -93,7 +95,7 @@ HTTP `401/403` は `PROVIDER_AUTH_FAILED`、`408/504` と通信 timeout は `PRO
 
 `modelProfiles` は SeedShiftRadio 側の名前付き設定であり、ACE-Step 側に同名 profile を登録するものではない。通常生成では選択 profile を `/release_task` の `model`, `lm_model_path`, `thinking` へ展開する。管理者が ACE-Step のロード済み model を切り替える場合だけ、SeedShiftRadio 管理 API `POST /api/settings/providers/music-gen/{providerKey}/model-loads` から ACE-Step `POST /v1/init` を呼ぶ。
 
-`/v1/init` には profile の `model`、`slot`、`thinking` を写像した `init_llm`、thinking profile の `lmModel` を写像した `lm_model_path` を送る。Web 初期実装では `slot=1` とし、ACE-Step `/v1/models` で検出できた model を持つ保存済み profile だけを選択できる。設定保存、接続確認、Server 起動時には自動実行しない。モデルロード中の request timeout は最大 10 分とし、二重実行を避ける。完了後は接続確認を再実行し、`models_initialized`, `llm_initialized`, loaded/selected model の一致を確認する。
+`/v1/init` には profile の `model`、`slot`、`thinking` を写像した `init_llm`、thinking profile の `lmModel` を写像した `lm_model_path` を送る。Web 初期実装では `slot=1` とし、ACE-Step `/v1/models` で検出できた model を持つ保存済み profile だけを選択できる。設定保存、接続確認、Server 起動時には自動実行しない。モデルロード中の request timeout は `features.jobExecution.manual.modelLoadTimeoutSeconds` を使い、共有 GPU 実行権の取得と Ollama unload が完了してから `/v1/init` を呼ぶ。完了後は接続確認を再実行し、`models_initialized`, `llm_initialized`, loaded/selected model の一致を確認する。
 
 各 profile は `thinking=true`, `lyricsLanguage=ja`, `lyricsTransliterationMode=native`, `outputFormat=wav` を既定とする。互換/品質対策として `lyricsTransliterationMode` は `native | kana | romaji` を持つが、日本語歌詞の既定は日本語本文をそのまま送る `native` とする。
 

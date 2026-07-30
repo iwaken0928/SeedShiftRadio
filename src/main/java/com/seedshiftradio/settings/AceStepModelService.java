@@ -3,20 +3,33 @@ package com.seedshiftradio.settings;
 import java.time.Instant;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import com.seedshiftradio.common.api.ApiException;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.ExecutionOrigin;
+import com.seedshiftradio.settings.GpuExecutionCoordinator.InferenceWorkload;
 
 @Service
 public class AceStepModelService {
 
 	private final RadioSettingsStore settingsStore;
 	private final MusicGenWorkerGateway musicGenWorkerGateway;
+	private final GpuExecutionCoordinator gpuExecutionCoordinator;
 
-	public AceStepModelService(RadioSettingsStore settingsStore, MusicGenWorkerGateway musicGenWorkerGateway) {
+	@Autowired
+	public AceStepModelService(
+			RadioSettingsStore settingsStore,
+			MusicGenWorkerGateway musicGenWorkerGateway,
+			GpuExecutionCoordinator gpuExecutionCoordinator) {
 		this.settingsStore = settingsStore;
 		this.musicGenWorkerGateway = musicGenWorkerGateway;
+		this.gpuExecutionCoordinator = gpuExecutionCoordinator;
+	}
+
+	AceStepModelService(RadioSettingsStore settingsStore, MusicGenWorkerGateway musicGenWorkerGateway) {
+		this(settingsStore, musicGenWorkerGateway, null);
 	}
 
 	public SettingsDtos.AceStepModelLoadResponse loadProfile(
@@ -41,12 +54,28 @@ public class AceStepModelService {
 		}
 
 		MusicGenWorkerGateway.ResolvedMusicProvider provider = musicGenWorkerGateway.resolveProvider(providerKey);
+		if (gpuExecutionCoordinator != null) {
+			return gpuExecutionCoordinator.execute(
+					ExecutionOrigin.MANUAL,
+					InferenceWorkload.MUSIC,
+					providerKey,
+					() -> loadValidatedProfile(providerKey, request.profileId(), slot, provider, profile));
+		}
+		return loadValidatedProfile(providerKey, request.profileId(), slot, provider, profile);
+	}
+
+	private SettingsDtos.AceStepModelLoadResponse loadValidatedProfile(
+			String providerKey,
+			String profileId,
+			int slot,
+			MusicGenWorkerGateway.ResolvedMusicProvider provider,
+			SettingsDocument.MusicGenerationModelProfile profile) {
 		MusicGenWorkerGateway.ModelCatalog catalog = musicGenWorkerGateway.listModels(provider);
 		boolean modelAvailable = catalog.models().stream()
 				.map(MusicGenWorkerGateway.ModelInfo::name)
 				.anyMatch(model -> modelMatches(model, profile.model()));
 		if (!modelAvailable) {
-			throw validation("profileId", "生成プロファイルのモデルが ACE-Step のモデル一覧に存在しません。", request.profileId());
+			throw validation("profileId", "生成プロファイルのモデルが ACE-Step のモデル一覧に存在しません。", profileId);
 		}
 
 		MusicGenWorkerGateway.ModelInitializationResult result = musicGenWorkerGateway.initializeModel(
@@ -55,7 +84,7 @@ public class AceStepModelService {
 				slot);
 		return new SettingsDtos.AceStepModelLoadResponse(
 				providerKey,
-				request.profileId(),
+				profileId,
 				result.slot() == null ? slot : result.slot(),
 				result.loadedModel(),
 				result.loadedLmModel(),

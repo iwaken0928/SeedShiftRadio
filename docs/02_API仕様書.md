@@ -37,8 +37,11 @@
 | `POST` | `/api/letters/public/history` | `PUBLIC` |
 | `GET` | `/api/management/dashboard` | `ADMIN` |
 | `GET` | `/api/management/stations/{stationId}/content` | `ADMIN` |
+| `GET` | `/api/management/stations/{stationId}/content/programs` | `ADMIN` |
 | `POST` | `/api/management/stations/{stationId}/content/deletions` | `ADMIN` |
+| `POST` | `/api/management/stations/{stationId}/programs/{programBlockId}/content/deletions` | `ADMIN` |
 | `POST` | `/api/management/stations/{stationId}/pre-generations` | `ADMIN` |
+| `GET` | `/api/settings/job-execution/status` | `ADMIN` |
 | `GET` | `/api/monitor/assets/consistency` | `ADMIN` |
 | `GET` | `/api/monitor/logs` | `ADMIN` |
 | `GET` | `/api/monitor/summary` | `ADMIN` |
@@ -452,10 +455,13 @@
 | `GET` | `/api/settings` | 設定取得 |
 | `PUT` | `/api/settings` | 設定更新 |
 | `POST` | `/api/settings/test-connections` | Provider 接続テスト |
+| `GET` | `/api/settings/job-execution/status` | 共有 GPU ジョブ実行権の状態取得 |
 | `POST` | `/api/settings/providers/music-gen/{providerKey}/model-loads` | ACE-Step model profile の明示ロード |
 | `GET` | `/api/management/dashboard` | 管理トップ向けの全体状況と局別コンテンツ集約 |
 | `GET` | `/api/management/stations/{stationId}/content` | 指定局の番組・台本・音声・曲 asset 保有量 |
+| `GET` | `/api/management/stations/{stationId}/content/programs` | 指定局の番組・segment・asset 詳細 |
 | `POST` | `/api/management/stations/{stationId}/content/deletions` | 指定局のオフエア事前生成 payload 削除 |
+| `POST` | `/api/management/stations/{stationId}/programs/{programBlockId}/content/deletions` | 指定した事前生成番組の asset 削除 |
 | `POST` | `/api/management/stations/{stationId}/pre-generations` | オフエア事前生成 request 受付 |
 | `GET` | `/api/health` | ヘルス参照 |
 | `GET` | `/api/monitor/summary` | 監視サマリ参照 |
@@ -1132,6 +1138,31 @@ Response:
   "features": {
     "streaming": {
       "placeholderEnabled": true
+    },
+    "jobExecution": {
+      "singleGpuMode": true,
+      "resourceGroup": "gpu-0",
+      "requireAceStepCpuOffload": true,
+      "manual": {
+        "waitStrategy": "WAIT",
+        "resourceWaitTimeoutSeconds": 900,
+        "providerIdleTimeoutSeconds": 900,
+        "modelLoadTimeoutSeconds": 900,
+        "jobTimeoutSeconds": 1800,
+        "pollIntervalMillis": 1000,
+        "unloadOllamaBeforeMusic": true,
+        "waitForAceStepIdleBeforeLlm": true
+      },
+      "automatic": {
+        "waitStrategy": "WAIT",
+        "resourceWaitTimeoutSeconds": 1800,
+        "providerIdleTimeoutSeconds": 900,
+        "modelLoadTimeoutSeconds": 900,
+        "jobTimeoutSeconds": 1800,
+        "pollIntervalMillis": 1000,
+        "unloadOllamaBeforeMusic": true,
+        "waitForAceStepIdleBeforeLlm": true
+      }
     }
   },
   "security": {
@@ -1165,6 +1196,8 @@ Response:
 
 `programming.defaultPlanningHorizonMinutes` は 1 以上、`programming.legacyRatioFallback` は最終 fallback 許可フラグ、`programming.seedImportRef` は `file:` / `env:` を含む参照文字列です。`providers.*.providers.{key}` は `baseUrl`, `healthPath`, `timeoutMs`, `capabilities` を持ち、必要に応じて `adapter`, `apiKeyRef`, `defaultModelProfileId` を持ちます。`providers.musicGen.providers.{key}` は追加で `modelProfiles` を持ちます。LLM の `adapter` は `OLLAMA` または `OPENAI_COMPATIBLE` を必須とし、`defaultModelProfileId` は実 Provider へ送る model 名として必須です。LLM の timeout 未指定時は、Ollama のモデルロードを含む初回生成を考慮して 120000 ms に補正します。MusicGen の `adapter` は `MUSICGEN_WORKER` または `ACE_STEP`、TTS の `adapter` は `VOICEVOX` または `IRODORI_OPENAI_TTS` を使います。`apiKeyRef` は空値または `env:` / `file:` 参照だけを許可します。Web 初期実装では provider key の追加削除より先に既存 endpoint の編集と default/fallback 切替を優先します。
 
+`features.jobExecution` は Ollama と ACE-Step が GPU を共有する場合の実行制御を保持する。`singleGpuMode=true` では `resourceGroup` の実行権を 1 ジョブだけが取得し、`manual` を事前生成と管理操作、`automatic` を放送キューのバックグラウンド生成へ適用する。`waitStrategy` は `WAIT` または `FAIL_FAST`、`pollIntervalMillis` は 100 から 30000、各 timeout は 1 秒以上とする。`modelLoadTimeoutSeconds` は LLM コールドスタートと ACE-Step `/v1/init`、`jobTimeoutSeconds` は MusicGen 完了待機へ実際に適用する。
+
 Irodori-TTS は OpenAI互換 `POST /v1/audio/speech` を使う内部 provider であり、外部公開 API として `/v1/audio/speech` を SeedShiftRadio から再公開しません。Web / C# Client は従来どおり `QueueItem.assetUrl`, `/api/assets/audio/{assetId}.wav`, `SpeechDirective.voiceHint` を利用します。
 
 `modelProfiles` の各要素は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTransliterationMode`, `outputFormat`, `maxDurationSeconds` を持ちます。`lyricsTransliterationMode` は `native`, `kana`, `romaji`、`outputFormat` は v1 の `/api/assets/audio/{assetId}.wav` 契約に合わせて `wav` または `wav32` を受け付けます。未知 profile id や profile 上限を超える duration は Server 側 validation / 正規化で拒否または補正します。
@@ -1189,6 +1222,11 @@ Provider に対する接続テストを一括実行し、種別ごとの `status
   }
 }
 ```
+
+### 6.10.1 `GET /api/settings/job-execution/status`
+
+共有 GPU の現在の実行権を返す。レスポンスは `singleGpuMode`, `resourceGroup`, `phase`, `waitingJobs`, `executionId`, `origin`, `workload`, `providerKey`, `startedAt`, `lastCompletedAt`, `lastOutcome`, `aceStepCpuOffloadRequired` を持つ。
+`phase` は `IDLE`, `PREPARING`, `RUNNING`、`origin` は `MANUAL`, `AUTOMATIC`、`workload` は `LLM`, `MUSIC` とする。prompt、lyrics、モデル入力、API key、Provider 応答本文は返さない。
 
 ### 6.11 `POST /api/settings/providers/music-gen/{providerKey}/model-loads`
 
@@ -1376,7 +1414,12 @@ Response:
 `GET /api/management/stations/{stationId}/content` は 1 局分の `StationContentInventory` を返す。
 `programCount` は局の全 `program_block`、`preGeneratedProgramCount` は `playout_session.purpose=PRE_GENERATION` の block、`generatedAssetCount` / `generatedAssetBytes` と種別別件数はその block から生成された asset を表す。
 
+`GET /api/management/stations/{stationId}/content/programs` は指定局の直近 100 番組を新しい順に返す。
+各 `ProgramContentDetail` は `programBlockId`, `sessionId`, template ID/version, title, status, `preGenerated`, planned/started/ended、segment 状態別件数、asset 種別別件数・容量・最終生成時刻、`segments` を持つ。
+各 `ProgramSegmentContent` は `queueItemId`, `sequenceNo`, `segmentType`, `slotRole`, title, status, `contentOrigin`, `durationMs`, `primaryAssetId`, `assets` を持つ。`GeneratedAssetSummary` は `assetId`, `assetType`, `byteSize`, `createdAt` だけを返し、`storagePath`, metadata、prompt、lyrics、本文、秘密値は返さない。
+
 `POST /api/management/stations/{stationId}/content/deletions` は、指定した種別のオフエア事前生成 payload を局単位で削除する。
+`POST /api/management/stations/{stationId}/programs/{programBlockId}/content/deletions` は同じ request / response 契約を使い、指定した `PRE_GENERATION` 番組だけへ対象を狭める。通常放送の番組を指定した場合は `409 CONFLICT` とする。
 
 ```json
 {
@@ -1384,10 +1427,12 @@ Response:
 }
 ```
 
-対象は `playout_session.purpose=PRE_GENERATION` に属し、`byte_size > 0` かつ `archive_eligible=false` の `generated_asset` に限定する。
-ライブ session、`program_block`、`queue_item`、`provider_job`、監査イベント、`broadcast_archive` と asset record 自体は物理削除しない。
-削除した asset record は eviction と同じく `byte_size=0`, `cache_key=null`, `reuse_scope=DISABLED` の tombstone として残し、同じ `storage_path` を active record が共有している場合は最後の active record になるまで payload file を残す。
+対象は `playout_session.purpose=PRE_GENERATION` に属し、`archive_eligible=false` の `generated_asset` に限定する。過去の手動削除が残した `byte_size=0` の tombstone も選択種別に含める。
+ライブ session、`program_block`、`queue_item`、`provider_job`、監査イベント、`broadcast_archive` は物理削除しない。対象を参照する `queue_item.asset_id` / `asset_url` は `null`、status は `PLANNED`、`content_origin` は `DELETED` としてから `generated_asset` record を物理削除する。
+同じ `storage_path` を対象外の active record が共有している場合は payload file を保持し、対象 record だけが最後の active 参照になった場合に実ファイルを削除する。自動 retention / capacity eviction は従来どおり tombstone とし、管理者の明示削除だけを物理削除にする。
+非同期 MusicGen の完了と削除が競合し、完了時に対象 `queue_item` が既に `GENERATING` でない場合は、遅れて登録された未参照 asset record を物理削除する。共有 payload は他の active record が参照する間保持し、削除後に同じ番組の孤児 asset が再出現しないようにする。
 レスポンスは `stationId`, `executedAt`, `candidateAssetCount`, `deletedAssetCount`, `failedAssetCount`, `reclaimedBytes`, `deletedByType` を返す。
+`failedAssetCount` は asset record の削除失敗件数ではなく、選択した record は削除できたが payload file の削除に失敗した件数を表す。
 この管理操作は同一 origin BFF の管理 session と CSRF を必須とし、局 ID、件数、回収容量だけを `station_content.deleted` 監査イベントへ記録する。
 
 `POST /api/management/stations/{stationId}/pre-generations` は次の request を受け付け、`202 Accepted` で `PreGenerationResponse` を返す。
@@ -1479,7 +1524,7 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - 管理 API は `components.securitySchemes.adminToken` と operation 単位の `security` で `X-Admin-Token` 必須を表す
 - DTO は Server / Client 両方で再利用しやすいよう JSON naming を固定する
 - `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
-- 現在の OpenAPI snapshot SHA-256 は `4b5802eca90fd1bfd41609f7c5097b807f5118105898e200b348a468f2c2bef9` とする
+- 現在の OpenAPI snapshot SHA-256 は `6e56240bc81347ee57956af839a780fb5d6e7063d5910c936591b11c61349141` とする
 - 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
 - GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

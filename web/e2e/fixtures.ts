@@ -379,6 +379,31 @@ export function buildSettingsResponse(overrides: Record<string, unknown> = {}) {
       streaming: {
         placeholderEnabled: true,
       },
+      jobExecution: {
+        singleGpuMode: true,
+        resourceGroup: "gpu-0",
+        requireAceStepCpuOffload: true,
+        manual: {
+          waitStrategy: "WAIT",
+          resourceWaitTimeoutSeconds: 900,
+          providerIdleTimeoutSeconds: 900,
+          modelLoadTimeoutSeconds: 900,
+          jobTimeoutSeconds: 1800,
+          pollIntervalMillis: 1000,
+          unloadOllamaBeforeMusic: true,
+          waitForAceStepIdleBeforeLlm: true,
+        },
+        automatic: {
+          waitStrategy: "WAIT",
+          resourceWaitTimeoutSeconds: 1800,
+          providerIdleTimeoutSeconds: 900,
+          modelLoadTimeoutSeconds: 900,
+          jobTimeoutSeconds: 1800,
+          pollIntervalMillis: 1000,
+          unloadOllamaBeforeMusic: true,
+          waitForAceStepIdleBeforeLlm: true,
+        },
+      },
     },
     ...overrides,
   };

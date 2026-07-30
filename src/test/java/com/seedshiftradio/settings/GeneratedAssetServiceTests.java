@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,6 +32,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.QueueItemStatus;
+import com.seedshiftradio.radio.QueueItemEntity;
+import com.seedshiftradio.radio.QueueItemRepository;
 
 @ExtendWith(MockitoExtension.class)
 class GeneratedAssetServiceTests {
@@ -44,11 +48,14 @@ class GeneratedAssetServiceTests {
 	@Mock
 	RadioSettingsStore settingsStore;
 
+	@Mock
+	QueueItemRepository queueItemRepository;
+
 	GeneratedAssetService generatedAssetService;
 
 	@BeforeEach
 	void setUp() {
-		generatedAssetService = new GeneratedAssetService(generatedAssetRepository, settingsStore);
+		generatedAssetService = new GeneratedAssetService(generatedAssetRepository, settingsStore, queueItemRepository);
 		lenient().when(generatedAssetRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 	}
 
@@ -315,9 +322,66 @@ class GeneratedAssetServiceTests {
 		assertEquals(0, result.failedAssetCount());
 		assertEquals(1, result.deletedByType().get(GeneratedAssetType.SCRIPT));
 		assertEquals(1, result.deletedByType().get(GeneratedAssetType.MUSIC));
-		assertEquals("station-content-delete", script.getMetadata().get("evictionReason"));
-		assertEquals("DISABLED", music.getReuseScope());
-		assertEquals(0L, music.getByteSize());
+		assertFalse(script.getMetadata().containsKey("evictionReason"));
+		assertEquals("GLOBAL", music.getReuseScope());
+		assertEquals(5L, music.getByteSize());
+		verify(queueItemRepository).findByAssetIdIn(List.of("asset-script", "asset-music"));
+		verify(generatedAssetRepository).deleteAllInBatch(List.of(script, music));
+		verify(generatedAssetRepository).flush();
+	}
+
+	@Test
+	void deletePreGeneratedStationContentClearsQueueAssetReferenceBeforePhysicalDelete() throws Exception {
+		Path musicPath = tempDir.resolve("linked-music.wav");
+		Files.writeString(musicPath, "music");
+		GeneratedAssetEntity music = asset(
+				"asset-linked",
+				GeneratedAssetType.MUSIC,
+				musicPath,
+				Files.size(musicPath),
+				"cache-music",
+				Instant.parse("2026-08-20T09:00:00Z"),
+				false);
+		QueueItemEntity item = mock(QueueItemEntity.class);
+		when(generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(
+				"station-night",
+				List.of("MUSIC")))
+				.thenReturn(List.of(music));
+		when(queueItemRepository.findByAssetIdIn(List.of("asset-linked"))).thenReturn(List.of(item));
+
+		generatedAssetService.deletePreGeneratedStationContent(
+				"station-night",
+				Set.of(GeneratedAssetType.MUSIC));
+
+		verify(item).setAssetId(null);
+		verify(item).setAssetUrl(null);
+		verify(item).setContentOrigin("DELETED");
+		verify(item).setStatus(QueueItemStatus.PLANNED);
+		verify(queueItemRepository).saveAllAndFlush(List.of(item));
+		verify(generatedAssetRepository).deleteAllInBatch(List.of(music));
+	}
+
+	@Test
+	void discardUnlinkedGeneratedAssetRemovesLateJobResultAndPayload() throws Exception {
+		Path lateMusicPath = tempDir.resolve("late-music.wav");
+		Files.writeString(lateMusicPath, "late-music");
+		GeneratedAssetEntity lateMusic = asset(
+				"asset-late",
+				GeneratedAssetType.MUSIC,
+				lateMusicPath,
+				Files.size(lateMusicPath),
+				"cache-late",
+				Instant.parse("2026-08-20T09:00:00Z"),
+				false);
+		when(generatedAssetRepository.findById("asset-late")).thenReturn(Optional.of(lateMusic));
+		when(queueItemRepository.existsByAssetId("asset-late")).thenReturn(false);
+		when(generatedAssetRepository.countActivePayloadReferences(lateMusicPath.toString())).thenReturn(1L);
+
+		assertTrue(generatedAssetService.discardUnlinkedGeneratedAsset("asset-late"));
+
+		assertFalse(Files.exists(lateMusicPath));
+		verify(generatedAssetRepository).delete(lateMusic);
+		verify(generatedAssetRepository).flush();
 	}
 
 	@Test

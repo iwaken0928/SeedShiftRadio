@@ -6,6 +6,10 @@ import java.util.Map;
 
 import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.domain.PreGenerationRequestStatus;
+import com.seedshiftradio.domain.ProgramBlockStatus;
+import com.seedshiftradio.domain.QueueItemStatus;
+import com.seedshiftradio.domain.SegmentType;
+import com.seedshiftradio.domain.SlotRole;
 import com.seedshiftradio.monitor.MonitorDtos.MonitorSummaryResponse;
 
 import jakarta.validation.constraints.Max;
@@ -45,6 +49,58 @@ public final class ManagementDtos {
 			Instant latestProgramAt,
 			Instant latestAssetAt,
 			PreGenerationResponse latestPreGeneration) {
+	}
+
+	public record StationProgramContentResponse(
+			String stationId,
+			String stationName,
+			List<ProgramContentDetail> programs,
+			Instant updatedAt) {
+	}
+
+	public record ProgramContentDetail(
+			String programBlockId,
+			String sessionId,
+			String programTemplateId,
+			Integer programTemplateVersion,
+			String title,
+			ProgramBlockStatus status,
+			boolean preGenerated,
+			Integer plannedDurationMs,
+			Instant startedAt,
+			Instant endedAt,
+			long segmentCount,
+			long plannedSegmentCount,
+			long generatingSegmentCount,
+			long readySegmentCount,
+			long failedSegmentCount,
+			long generatedAssetCount,
+			long generatedAssetBytes,
+			long scriptAssetCount,
+			long audioAssetCount,
+			long musicAssetCount,
+			Instant latestAssetAt,
+			List<ProgramSegmentContent> segments) {
+	}
+
+	public record ProgramSegmentContent(
+			String queueItemId,
+			Integer sequenceNo,
+			SegmentType segmentType,
+			SlotRole slotRole,
+			String title,
+			QueueItemStatus status,
+			String contentOrigin,
+			Integer durationMs,
+			String primaryAssetId,
+			List<GeneratedAssetSummary> assets) {
+	}
+
+	public record GeneratedAssetSummary(
+			String assetId,
+			GeneratedAssetType assetType,
+			long byteSize,
+			Instant createdAt) {
 	}
 
 	public record PreGenerationRequest(

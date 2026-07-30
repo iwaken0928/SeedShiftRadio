@@ -415,6 +415,58 @@ export interface StationContentInventory {
   latestPreGeneration: PreGenerationResponse | null;
 }
 
+export interface StationProgramContentResponse {
+  stationId: string;
+  stationName: string;
+  programs: ProgramContentDetail[];
+  updatedAt: string;
+}
+
+export interface ProgramContentDetail {
+  programBlockId: string;
+  sessionId: string;
+  programTemplateId: string | null;
+  programTemplateVersion: number | null;
+  title: string;
+  status: ProgramBlockStatus;
+  preGenerated: boolean;
+  plannedDurationMs: number;
+  startedAt: string;
+  endedAt: string | null;
+  segmentCount: number;
+  plannedSegmentCount: number;
+  generatingSegmentCount: number;
+  readySegmentCount: number;
+  failedSegmentCount: number;
+  generatedAssetCount: number;
+  generatedAssetBytes: number;
+  scriptAssetCount: number;
+  audioAssetCount: number;
+  musicAssetCount: number;
+  latestAssetAt: string | null;
+  segments: ProgramSegmentContent[];
+}
+
+export interface ProgramSegmentContent {
+  queueItemId: string;
+  sequenceNo: number;
+  segmentType: SegmentType;
+  slotRole: SlotRole;
+  title: string;
+  status: QueueItemStatus;
+  contentOrigin: string;
+  durationMs: number;
+  primaryAssetId: string | null;
+  assets: GeneratedAssetSummary[];
+}
+
+export interface GeneratedAssetSummary {
+  assetId: string;
+  assetType: GeneratedAssetType;
+  byteSize: number;
+  createdAt: string;
+}
+
 export interface ManagementDashboardResponse {
   system: MonitorSummary;
   stationCount: number;
@@ -639,10 +691,45 @@ export interface SecuritySettings {
 
 export interface FeatureSettings {
   streaming: StreamingFeatureSettings;
+  jobExecution: JobExecutionSettings;
 }
 
 export interface StreamingFeatureSettings {
   placeholderEnabled: boolean;
+}
+
+export interface JobExecutionSettings {
+  singleGpuMode: boolean;
+  resourceGroup: string;
+  requireAceStepCpuOffload: boolean;
+  manual: JobExecutionPolicy;
+  automatic: JobExecutionPolicy;
+}
+
+export interface JobExecutionPolicy {
+  waitStrategy: "WAIT" | "FAIL_FAST";
+  resourceWaitTimeoutSeconds: number;
+  providerIdleTimeoutSeconds: number;
+  modelLoadTimeoutSeconds: number;
+  jobTimeoutSeconds: number;
+  pollIntervalMillis: number;
+  unloadOllamaBeforeMusic: boolean;
+  waitForAceStepIdleBeforeLlm: boolean;
+}
+
+export interface JobExecutionStatus {
+  singleGpuMode: boolean;
+  resourceGroup: string;
+  phase: "IDLE" | "PREPARING" | "RUNNING";
+  waitingJobs: number;
+  executionId: string | null;
+  origin: "MANUAL" | "AUTOMATIC" | null;
+  workload: "LLM" | "MUSIC" | null;
+  providerKey: string | null;
+  startedAt: string | null;
+  lastCompletedAt: string | null;
+  lastOutcome: "IDLE" | "SUCCEEDED" | "FAILED";
+  aceStepCpuOffloadRequired: boolean;
 }
 
 export interface PreGenerationProfile {

@@ -17,6 +17,8 @@ public interface ProgramBlockRepository extends JpaRepository<ProgramBlockEntity
 
 	Optional<ProgramBlockEntity> findTopByStationIdOrderByStartedAtDesc(String stationId);
 
+	List<ProgramBlockEntity> findTop100ByStationIdOrderByStartedAtDesc(String stationId);
+
 	@Query(value = """
 			SELECT COUNT(*)
 			FROM program_block pb

@@ -21,6 +21,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.seedshiftradio.common.api.ApiException;
 import com.seedshiftradio.domain.GeneratedAssetType;
+import com.seedshiftradio.domain.QueueItemStatus;
+import com.seedshiftradio.radio.QueueItemEntity;
+import com.seedshiftradio.radio.QueueItemRepository;
 
 @Service
 public class GeneratedAssetService {
@@ -37,10 +41,20 @@ public class GeneratedAssetService {
 
 	private final GeneratedAssetRepository generatedAssetRepository;
 	private final RadioSettingsStore settingsStore;
+	private final QueueItemRepository queueItemRepository;
 
-	public GeneratedAssetService(GeneratedAssetRepository generatedAssetRepository, RadioSettingsStore settingsStore) {
+	@Autowired
+	public GeneratedAssetService(
+			GeneratedAssetRepository generatedAssetRepository,
+			RadioSettingsStore settingsStore,
+			QueueItemRepository queueItemRepository) {
 		this.generatedAssetRepository = generatedAssetRepository;
 		this.settingsStore = settingsStore;
+		this.queueItemRepository = queueItemRepository;
+	}
+
+	GeneratedAssetService(GeneratedAssetRepository generatedAssetRepository, RadioSettingsStore settingsStore) {
+		this(generatedAssetRepository, settingsStore, null);
 	}
 
 	@Transactional
@@ -256,6 +270,28 @@ public class GeneratedAssetService {
 	public StationContentDeletionResult deletePreGeneratedStationContent(
 			String stationId,
 			Set<GeneratedAssetType> assetTypes) {
+		return deletePreGeneratedContent(stationId, null, assetTypes);
+	}
+
+	@Transactional
+	public StationContentDeletionResult deletePreGeneratedProgramContent(
+			String stationId,
+			String programBlockId,
+			Set<GeneratedAssetType> assetTypes) {
+		if (programBlockId == null || programBlockId.isBlank()) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"programBlockId を指定してください。",
+					Map.of("programBlockId", programBlockId == null ? "" : programBlockId));
+		}
+		return deletePreGeneratedContent(stationId, programBlockId, assetTypes);
+	}
+
+	private StationContentDeletionResult deletePreGeneratedContent(
+			String stationId,
+			String programBlockId,
+			Set<GeneratedAssetType> assetTypes) {
 		if (stationId == null || stationId.isBlank()) {
 			throw new ApiException(
 					HttpStatus.BAD_REQUEST,
@@ -275,28 +311,101 @@ public class GeneratedAssetService {
 				.map(Enum::name)
 				.sorted()
 				.toList();
-		List<GeneratedAssetEntity> candidates = generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(
-				stationId,
-				requestedTypes);
+		List<GeneratedAssetEntity> candidates = programBlockId == null
+				? generatedAssetRepository.findDeletablePreGeneratedAssetsByStationId(stationId, requestedTypes)
+				: generatedAssetRepository.findDeletablePreGeneratedAssetsByProgramBlockId(
+						stationId,
+						programBlockId,
+						requestedTypes);
 		Instant now = Instant.now();
-		EvictionAccumulator accumulator = new EvictionAccumulator(now);
 		Map<GeneratedAssetType, Integer> deletedByType = new EnumMap<>(GeneratedAssetType.class);
 		for (GeneratedAssetType assetType : assetTypes) {
 			deletedByType.put(assetType, 0);
 		}
+		if (candidates.isEmpty()) {
+			return new StationContentDeletionResult(
+					stationId,
+					now,
+					0,
+					0,
+					0,
+					0L,
+					Map.copyOf(deletedByType));
+		}
+
+		Map<String, List<GeneratedAssetEntity>> candidatesByPath = new LinkedHashMap<>();
 		for (GeneratedAssetEntity candidate : candidates) {
-			if (evictPayload(candidate, "station-content-delete", now, accumulator)) {
-				deletedByType.compute(candidate.getAssetType(), (ignored, count) -> count == null ? 1 : count + 1);
+			candidatesByPath.computeIfAbsent(candidate.getStoragePath(), ignored -> new ArrayList<>()).add(candidate);
+			deletedByType.compute(candidate.getAssetType(), (ignored, count) -> count == null ? 1 : count + 1);
+		}
+
+		int failedPayloadCount = 0;
+		long reclaimedBytes = 0L;
+		for (Map.Entry<String, List<GeneratedAssetEntity>> entry : candidatesByPath.entrySet()) {
+			long activeReferences = generatedAssetRepository.countActivePayloadReferences(entry.getKey());
+			long selectedActiveReferences = entry.getValue().stream()
+					.filter(asset -> normalizeByteSize(asset.getByteSize()) > 0L)
+					.count();
+			if (activeReferences > selectedActiveReferences) {
+				continue;
+			}
+			try {
+				Path path = Path.of(entry.getKey()).toAbsolutePath().normalize();
+				long payloadBytes = Files.isRegularFile(path) ? Files.size(path) : 0L;
+				if (Files.deleteIfExists(path)) {
+					reclaimedBytes += payloadBytes;
+				}
+			} catch (IOException | InvalidPathException exception) {
+				failedPayloadCount += entry.getValue().size();
 			}
 		}
+
+		if (queueItemRepository != null) {
+			List<String> candidateIds = candidates.stream().map(GeneratedAssetEntity::getId).toList();
+			List<QueueItemEntity> linkedItems = queueItemRepository.findByAssetIdIn(candidateIds);
+			for (QueueItemEntity item : linkedItems) {
+				item.setAssetId(null);
+				item.setAssetUrl(null);
+				item.setContentOrigin("DELETED");
+				item.setStatus(QueueItemStatus.PLANNED);
+			}
+			queueItemRepository.saveAllAndFlush(linkedItems);
+		}
+		generatedAssetRepository.deleteAllInBatch(candidates);
+		generatedAssetRepository.flush();
 		return new StationContentDeletionResult(
 				stationId,
 				now,
 				candidates.size(),
-				accumulator.evictedAssetCount,
-				accumulator.failedAssetCount,
-				accumulator.reclaimedBytes,
+				candidates.size(),
+				failedPayloadCount,
+				reclaimedBytes,
 				Map.copyOf(deletedByType));
+	}
+
+	@Transactional
+	public boolean discardUnlinkedGeneratedAsset(String assetId) {
+		if (assetId == null || assetId.isBlank() || queueItemRepository == null) {
+			return false;
+		}
+		GeneratedAssetEntity asset = generatedAssetRepository.findById(assetId).orElse(null);
+		if (asset == null || asset.isArchiveEligible() || queueItemRepository.existsByAssetId(assetId)) {
+			return false;
+		}
+		String storagePath = asset.getStoragePath();
+		if (storagePath != null
+				&& !storagePath.isBlank()
+				&& normalizeByteSize(asset.getByteSize()) > 0L
+				&& generatedAssetRepository.countActivePayloadReferences(storagePath) <= 1L) {
+			try {
+				Files.deleteIfExists(Path.of(storagePath).toAbsolutePath().normalize());
+			} catch (IOException | InvalidPathException | SecurityException ignored) {
+				// DB の孤児 record を残さないことを優先し、payload cleanup は定期 cleanup へ委ねる。
+			}
+		}
+		generatedAssetRepository.delete(asset);
+		generatedAssetRepository.flush();
+		return true;
 	}
 
 	@Transactional(readOnly = true)

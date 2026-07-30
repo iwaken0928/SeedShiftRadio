@@ -7,6 +7,9 @@ import {
   createProgramTemplate,
   createStation,
   deleteStationContent,
+  deleteProgramContent,
+  getJobExecutionStatus,
+  getStationPrograms,
   listLetters,
   loadAceStepModel,
   previewProgramming,
@@ -169,6 +172,49 @@ describe("api helpers", () => {
           "Content-Type": "application/json",
           "X-CSRF-Token": "csrf-from-session",
         },
+      },
+    );
+  });
+
+  it("番組詳細と番組単位削除は局・番組 ID を管理 BFF へ送る", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (input === "/api/auth/session") {
+        return Response.json({ authenticated: true, csrfToken: "csrf-from-session" });
+      }
+      if (String(input).endsWith("/content/programs")) {
+        return Response.json({ stationId: "station/night", stationName: "Night", programs: [], updatedAt: "2026-07-30T00:00:00Z" });
+      }
+      return Response.json({ stationId: "station/night", deletedAssetCount: 1 });
+    });
+
+    await getStationPrograms("station/night");
+    await deleteProgramContent("station/night", "block/1", { assetTypes: ["MUSIC"] });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api-proxy/api/management/stations/station%2Fnight/content/programs",
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api-proxy/api/management/stations/station%2Fnight/programs/block%2F1/content/deletions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ assetTypes: ["MUSIC"] }),
+      }),
+    );
+  });
+
+  it("ジョブ実行状態を管理設定 API から取得する", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ phase: "IDLE", waitingJobs: 0 }),
+    );
+
+    await getJobExecutionStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api-proxy/api/settings/job-execution/status",
+      {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
       },
     );
   });

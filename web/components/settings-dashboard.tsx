@@ -1889,6 +1889,11 @@ function cloneFeatures(features: FeatureSettings): FeatureSettings {
     streaming: {
       placeholderEnabled: features.streaming.placeholderEnabled,
     },
+    jobExecution: {
+      ...features.jobExecution,
+      manual: { ...features.jobExecution.manual },
+      automatic: { ...features.jobExecution.automatic },
+    },
   };
 }
 

@@ -1,6 +1,8 @@
 import type {
   CacheSettings,
   FeatureSettings,
+  JobExecutionPolicy,
+  JobExecutionSettings,
   MusicGenerationModelProfile,
   PathSettings,
   PlayoutSettings,
@@ -52,7 +54,7 @@ export function parseSettingsImportPayload(value: unknown, current: SettingsResp
       programming: readProgrammingSettings(root.programming),
       providers: readProviderCatalog(root.providers),
       security: readSecuritySettings(root.security),
-      features: readFeatureSettings(root.features),
+      features: readFeatureSettings(root.features, current.features),
     },
     versionAdjusted: importedVersion !== current.version,
   };
@@ -71,6 +73,11 @@ function cloneSettingsUpdateRequest(draft: SettingsUpdateRequest): SettingsUpdat
     security: { ...draft.security },
     features: {
       streaming: { ...draft.features.streaming },
+      jobExecution: {
+        ...draft.features.jobExecution,
+        manual: { ...draft.features.jobExecution.manual },
+        automatic: { ...draft.features.jobExecution.automatic },
+      },
     },
   };
 }
@@ -249,10 +256,17 @@ function readSecuritySettings(value: unknown): SecuritySettings {
   };
 }
 
-function readFeatureSettings(value: unknown): FeatureSettings {
+function readFeatureSettings(value: unknown, fallback: FeatureSettings): FeatureSettings {
   const record = readObject(value, "features");
   return {
     streaming: readStreamingFeatureSettings(record.streaming),
+    jobExecution: record.jobExecution === undefined
+      ? {
+          ...fallback.jobExecution,
+          manual: { ...fallback.jobExecution.manual },
+          automatic: { ...fallback.jobExecution.automatic },
+        }
+      : readJobExecutionSettings(record.jobExecution),
   };
 }
 
@@ -260,6 +274,43 @@ function readStreamingFeatureSettings(value: unknown): StreamingFeatureSettings 
   const record = readObject(value, "features.streaming");
   return {
     placeholderEnabled: readBoolean(record, "placeholderEnabled", "features.streaming.placeholderEnabled"),
+  };
+}
+
+function readJobExecutionSettings(value: unknown): JobExecutionSettings {
+  const record = readObject(value, "features.jobExecution");
+  return {
+    singleGpuMode: readBoolean(record, "singleGpuMode", "features.jobExecution.singleGpuMode"),
+    resourceGroup: readString(record, "resourceGroup", "features.jobExecution.resourceGroup"),
+    requireAceStepCpuOffload: readBoolean(
+      record,
+      "requireAceStepCpuOffload",
+      "features.jobExecution.requireAceStepCpuOffload",
+    ),
+    manual: readJobExecutionPolicy(record.manual, "features.jobExecution.manual"),
+    automatic: readJobExecutionPolicy(record.automatic, "features.jobExecution.automatic"),
+  };
+}
+
+function readJobExecutionPolicy(value: unknown, label: string): JobExecutionPolicy {
+  const record = readObject(value, label);
+  const waitStrategy = readString(record, "waitStrategy", `${label}.waitStrategy`);
+  if (waitStrategy !== "WAIT" && waitStrategy !== "FAIL_FAST") {
+    throw new Error(`${label}.waitStrategy は WAIT または FAIL_FAST である必要があります。`);
+  }
+  return {
+    waitStrategy,
+    resourceWaitTimeoutSeconds: readInteger(record, "resourceWaitTimeoutSeconds", `${label}.resourceWaitTimeoutSeconds`),
+    providerIdleTimeoutSeconds: readInteger(record, "providerIdleTimeoutSeconds", `${label}.providerIdleTimeoutSeconds`),
+    modelLoadTimeoutSeconds: readInteger(record, "modelLoadTimeoutSeconds", `${label}.modelLoadTimeoutSeconds`),
+    jobTimeoutSeconds: readInteger(record, "jobTimeoutSeconds", `${label}.jobTimeoutSeconds`),
+    pollIntervalMillis: readInteger(record, "pollIntervalMillis", `${label}.pollIntervalMillis`),
+    unloadOllamaBeforeMusic: readBoolean(record, "unloadOllamaBeforeMusic", `${label}.unloadOllamaBeforeMusic`),
+    waitForAceStepIdleBeforeLlm: readBoolean(
+      record,
+      "waitForAceStepIdleBeforeLlm",
+      `${label}.waitForAceStepIdleBeforeLlm`,
+    ),
   };
 }
 

@@ -19,6 +19,7 @@ import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
 import com.seedshiftradio.management.ManagementDtos.StationContentDeletionRequest;
 import com.seedshiftradio.management.ManagementDtos.StationContentDeletionResponse;
 import com.seedshiftradio.management.ManagementDtos.StationContentInventory;
+import com.seedshiftradio.management.ManagementDtos.StationProgramContentResponse;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
@@ -52,6 +53,14 @@ public class ManagementController {
 		return managementService.stationInventory(stationId);
 	}
 
+	@GetMapping("/stations/{stationId}/content/programs")
+	public StationProgramContentResponse stationPrograms(
+			@PathVariable String stationId,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken) {
+		adminApiGuard.require(adminToken);
+		return managementService.stationPrograms(stationId);
+	}
+
 	@PostMapping("/stations/{stationId}/pre-generations")
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	public PreGenerationResponse requestPreGeneration(
@@ -69,5 +78,15 @@ public class ManagementController {
 			@Valid @RequestBody StationContentDeletionRequest request) {
 		adminApiGuard.require(adminToken);
 		return managementService.deleteStationContent(stationId, request);
+	}
+
+	@PostMapping("/stations/{stationId}/programs/{programBlockId}/content/deletions")
+	public StationContentDeletionResponse deleteProgramContent(
+			@PathVariable String stationId,
+			@PathVariable String programBlockId,
+			@RequestHeader(value = AdminApiGuard.HEADER_NAME, required = false) String adminToken,
+			@Valid @RequestBody StationContentDeletionRequest request) {
+		adminApiGuard.require(adminToken);
+		return managementService.deleteProgramContent(stationId, programBlockId, request);
 	}
 }

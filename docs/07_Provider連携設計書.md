@@ -151,15 +151,15 @@ fallback 方針:
 ## 6. タイムアウト/リトライ
 
 Provider の接続確認は health endpoint と model inventory の確認であり、実生成 request の完了時間や構造化出力の妥当性までは保証しない。
-とくに Ollama のコールドスタートはモデルロード時間を含むため、`timeoutMs` は対象モデルの実測ロード時間より十分長く設定する。
+とくに Ollama のコールドスタートはモデルロード時間を含むため、`timeoutMs` と `features.jobExecution.{manual|automatic}.modelLoadTimeoutSeconds` は対象モデルの実測ロード時間より十分長く設定する。
 接続確認が `UP` でも、実生成で Server 側 timeout が先に切れると Ollama はクライアント切断を HTTP 499 として記録し、モデルロードを中断することがある。
 実生成の `PROVIDER_TIMEOUT` / `PROVIDER_BAD_RESPONSE` は `operational_event_log` へ安全な分類済み情報として保存し、`/monitor/logs` から Provider key と correlation ID を追跡する。
 
 | Provider | Timeout | Retry |
 |---|---|---|
-| LLM | 20 秒 | 1 回 |
+| LLM | endpoint `timeoutMs` と job policy の `modelLoadTimeoutSeconds` の長い方 | 1 回 |
 | TTS | 15 秒。Irodori は初回 model load / CPU fallback を考慮し provider ごとに 60 から 300 秒へ延長可能 | 1 回。Irodori の 503 / queue timeout は同一 provider 再試行より fallback provider を優先 |
-| Music Generation | submit/poll は provider timeout、完了待ちは 180 秒 | 即時再試行なし。許可された error code に限る fallback provider、または上位の queue planning による新規論理要求で回復する |
+| Music Generation | submit/poll は provider timeout、完了待ちは job policy の `jobTimeoutSeconds`。既定 1800 秒 | 即時再試行なし。許可された error code に限る fallback provider、または上位の queue planning による新規論理要求で回復する |
 
 再試行時は `correlationId` を継承する。
 
@@ -167,7 +167,15 @@ Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE
 `PROVIDER_REJECTED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_INTERRUPTED` では同じ要求を別 Provider へ自動送信しない。
 ただし Provider chain の fallback を行わない場合でも、上位の playout は安全な cache、archive、local asset、placeholder による縮退継続を選べる。
 
-### 6.1 stale `RUNNING` の回収
+### 6.1 共有 GPU の実行制御
+
+`features.jobExecution.singleGpuMode=true` では `GpuExecutionCoordinator` が `resourceGroup` ごとの実行権を 1 ジョブへ限定する。`MANUAL` はオフエア事前生成と ACE-Step model load、`AUTOMATIC` は通常放送の先読み生成に使い、それぞれ独立した `JobExecutionPolicy` を適用する。
+
+`MUSIC` の実行権を取得した時は、`unloadOllamaBeforeMusic=true` なら Ollama `POST /api/generate` に model と `keep_alive=0` を送り、`GET /api/ps` から対象 model が消えるまで `providerIdleTimeoutSeconds` の範囲で待つ。`LLM` の実行権を取得した時は、`waitForAceStepIdleBeforeLlm=true` なら ACE-Step `GET /v1/stats` の queued/running がともに 0 になるまで待つ。実行権待機は `WAIT` または `FAIL_FAST` とし、timeout / interrupt は共通 Provider error へ分類する。
+
+この排他は SeedShiftRadio Server process 内の job と管理操作を対象とする。複数 Server replica や Provider への直接 request を同じ GPU で使う構成では排他境界を共有できないため、v1 production は active Server / scheduler を 1 instance とし、Provider への直接生成を行わない。
+
+### 6.2 stale `RUNNING` の回収
 
 Server process の停止や中断で `provider_job.status=RUNNING` のまま残った job は、`ProviderJobRecoveryJob` が `updated_at` を基準に stale 判定する。
 回収処理は `seedshift.radio.provider-job.recovery.enabled` で有効化し、`seedshift.radio.provider-job.recovery.stale-after=15m`, `seedshift.radio.provider-job.recovery.fixed-delay=60s`, `seedshift.radio.provider-job.recovery.batch-size=100` を既定として個別に変更できる。
@@ -243,6 +251,9 @@ ACE-Step profile は `model`, `lmModel`, `thinking`, `lyricsLanguage`, `lyricsTr
 ACE-Step は `/health`, `/v1/models`, `/v1/stats` を監視に使える。`/v1/models` は model 一覧と既定 model、`/v1/stats` は queue size、queued/running jobs、平均処理時間を返す前提とする。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両方を読み取る。`/health` の HTTP status だけでは生成可能と判定せず、`models_initialized=true` を必須とし、選択 profile が `thinking=true` なら `llm_initialized=true` も必須とする。未初期化時は `musicGen=DOWN` とし、番組編成は `MUSIC_AI` を選ばずローカル音源や TALK へ縮退する。`/health` と `/v1/models` が匿名で成功する実装でも、保護対象の `/v1/stats`, `/release_task`, `/query_result`, `/v1/audio` に同じ Bearer token が必要なため、Server container へ `ACESTEP_API_KEY` を必ず注入する。監視 UI は生成本文ではなく、provider key、adapter、profile id、初期化状態、分類済み失敗理由だけを表示する。
 
 ACE-Step の FastAPI / Uvicorn HTTP/1.1 endpoint へは JDK `HttpClient` を `HTTP_1_1` 固定で接続する。平文 HTTP で既定の HTTP/2 negotiation を使うと `h2c` upgrade header が付与され、GET の health probe が成功しても JSON body 付き POST が `Malformed JSON payload` として拒否される実装があるため、`/release_task`, `/query_result`, `/v1/init` と audio download を含む MusicGen gateway 全体で同じ transport policy を使う。
+
+ACE-Step 1.5 `v0.1.8` は内部の LLM handler に unload 処理を持つが、SeedShiftRadio が利用できる汎用の全 model unload API は公開していない。そのため単一 GPU の production では ACE-Step 配備側へ `ACESTEP_OFFLOAD_TO_CPU=true`, `ACESTEP_OFFLOAD_DIT_TO_CPU=true`, `ACESTEP_LM_OFFLOAD_TO_CPU=true` を設定し、job idle 時に VRAM を占有し続けない構成を前提とする。`requireAceStepCpuOffload` はこの配備前提を管理画面と status API に明示するためのフラグであり、環境変数を Server から遠隔変更する機能ではない。
+配備設定の確認先は `ssh://git@192.168.0.57:2222/releases/ollama.git` と `ssh://git@192.168.0.57:2222/releases/acestep.git` とし、SeedShiftRadio の設定画面にも両方の参照先と必須環境変数を表示する。
 
 `/query_result` が HTTP 200 で `status=2` を返した場合も、adapter は `progress_text` と result の安全な分類だけを行う。`out of memory`, `OutOfMemoryError`, `CUDA OOM`, `resource exhausted` を検出した失敗は `PROVIDER_RESOURCE_EXHAUSTED`、それ以外の未知失敗は `PROVIDER_BAD_RESPONSE` とし、上流の traceback、prompt、lyrics は monitor や標準ログへ露出しない。
 

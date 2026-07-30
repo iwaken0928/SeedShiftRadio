@@ -1,8 +1,10 @@
 package com.seedshiftradio.management;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -23,6 +25,7 @@ import com.seedshiftradio.domain.PreGenerationRequestStatus;
 import com.seedshiftradio.domain.GeneratedAssetType;
 import com.seedshiftradio.management.ManagementDtos.PreGenerationResponse;
 import com.seedshiftradio.management.ManagementDtos.StationContentDeletionResponse;
+import com.seedshiftradio.management.ManagementDtos.StationProgramContentResponse;
 
 @ExtendWith(MockitoExtension.class)
 class ManagementControllerTests {
@@ -98,6 +101,60 @@ class ManagementControllerTests {
 				.andExpect(jsonPath("$.reclaimedBytes").value(8192))
 				.andExpect(jsonPath("$.deletedByType.AUDIO").value(3))
 				.andExpect(jsonPath("$.deletedByType.MUSIC").value(1));
+
+		verify(adminApiGuard).require("test-admin-token");
+	}
+
+	@Test
+	void stationProgramsRequiresAdminAndReturnsSafeProgramLedger() throws Exception {
+		when(managementService.stationPrograms("station-night"))
+				.thenReturn(new StationProgramContentResponse(
+						"station-night",
+						"Nocturne FM",
+						java.util.List.of(),
+						Instant.parse("2026-07-30T00:00:00Z")));
+
+		mockMvc.perform(get("/api/management/stations/station-night/content/programs")
+						.header(AdminApiGuard.HEADER_NAME, "test-admin-token"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.stationId").value("station-night"))
+				.andExpect(jsonPath("$.stationName").value("Nocturne FM"))
+				.andExpect(jsonPath("$.programs").isArray())
+				.andExpect(jsonPath("$.storagePath").doesNotExist())
+				.andExpect(jsonPath("$.metadata").doesNotExist());
+
+		verify(adminApiGuard).require("test-admin-token");
+	}
+
+	@Test
+	void programContentDeletionScopesRequestToProgramBlock() throws Exception {
+		when(managementService.deleteProgramContent(
+				eq("station-night"),
+				eq("block-pregen-1"),
+				any(ManagementDtos.StationContentDeletionRequest.class)))
+				.thenReturn(new StationContentDeletionResponse(
+						"station-night",
+						Instant.parse("2026-07-30T00:02:00Z"),
+						1,
+						1,
+						0,
+						2_048L,
+						java.util.Map.of(GeneratedAssetType.AUDIO, 1)));
+
+		mockMvc.perform(post("/api/management/stations/station-night/programs/block-pregen-1/content/deletions")
+						.header(AdminApiGuard.HEADER_NAME, "test-admin-token")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "assetTypes": ["AUDIO"]
+								}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.stationId").value("station-night"))
+				.andExpect(jsonPath("$.candidateAssetCount").value(1))
+				.andExpect(jsonPath("$.deletedAssetCount").value(1))
+				.andExpect(jsonPath("$.failedAssetCount").value(0))
+				.andExpect(jsonPath("$.reclaimedBytes").value(2048));
 
 		verify(adminApiGuard).require("test-admin-token");
 	}

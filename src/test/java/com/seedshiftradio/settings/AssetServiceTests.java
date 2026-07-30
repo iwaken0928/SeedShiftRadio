@@ -678,7 +678,9 @@ class AssetServiceTests {
 				SettingsDocument.ProgrammingSettings.defaults(),
 				SettingsDocument.ProviderCatalog.defaults(),
 				SettingsDocument.SecuritySettings.defaults(),
-				new SettingsDocument.FeatureSettings(new SettingsDocument.StreamingFeatureSettings(placeholderEnabled)))
+				new SettingsDocument.FeatureSettings(
+						new SettingsDocument.StreamingFeatureSettings(placeholderEnabled),
+						null))
 				.normalize();
 	}
 }

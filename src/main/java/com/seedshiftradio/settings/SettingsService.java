@@ -20,6 +20,7 @@ public class SettingsService {
 	private static final Set<String> TTS_PROVIDER_ADAPTERS = Set.of("VOICEVOX", "IRODORI_OPENAI_TTS");
 	private static final Set<String> MUSIC_OUTPUT_FORMATS = Set.of("wav", "wav32");
 	private static final Set<String> LYRICS_TRANSLITERATION_MODES = Set.of("native", "kana", "romaji");
+	private static final Set<String> JOB_WAIT_STRATEGIES = Set.of("WAIT", "FAIL_FAST");
 	private static final List<String> SECRET_REF_PREFIXES = List.of("env:", "file:");
 
 	private final RadioSettingsStore settingsStore;
@@ -42,6 +43,9 @@ public class SettingsService {
 		}
 		if (!current.schemaVersion().equals(request.schemaVersion())) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "schemaVersion が現在の設定と一致しません。", Map.of("field", "schemaVersion"));
+		}
+		if (request.features() != null && request.features().jobExecution() != null) {
+			validateJobExecutionInput(request.features().jobExecution());
 		}
 
 		SettingsDocument merged = new SettingsDocument(
@@ -94,6 +98,7 @@ public class SettingsService {
 		validateProviderGroup("providers.tts", document.providers().tts());
 		validateProviderGroup("providers.musicGen", document.providers().musicGen());
 		validateCache(document.cache());
+		validateJobExecution(document.features().jobExecution());
 		validateSecretRef(document.security().adminTokenRef(), "security.adminTokenRef");
 	}
 
@@ -262,8 +267,86 @@ public class SettingsService {
 		validateReuseScope(cache.musicReuseScope(), "cache.musicReuseScope");
 	}
 
+	private void validateJobExecution(SettingsDocument.JobExecutionSettings settings) {
+		if (settings.resourceGroup() == null || settings.resourceGroup().isBlank() || settings.resourceGroup().length() > 64) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"features.jobExecution.resourceGroup は 1 文字以上 64 文字以下で指定してください。",
+					Map.of("field", "features.jobExecution.resourceGroup"));
+		}
+		validateJobExecutionPolicy(settings.manual(), "features.jobExecution.manual");
+		validateJobExecutionPolicy(settings.automatic(), "features.jobExecution.automatic");
+	}
+
+	private void validateJobExecutionInput(SettingsDocument.JobExecutionSettings settings) {
+		if (settings.resourceGroup() != null
+				&& (settings.resourceGroup().isBlank() || settings.resourceGroup().trim().length() > 64)) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					"features.jobExecution.resourceGroup は 1 文字以上 64 文字以下で指定してください。",
+					Map.of("field", "features.jobExecution.resourceGroup"));
+		}
+		validateJobExecutionPolicyInput(settings.manual(), "features.jobExecution.manual");
+		validateJobExecutionPolicyInput(settings.automatic(), "features.jobExecution.automatic");
+	}
+
+	private void validateJobExecutionPolicyInput(SettingsDocument.JobExecutionPolicy policy, String field) {
+		if (policy == null) {
+			return;
+		}
+		if (policy.waitStrategy() != null
+				&& !JOB_WAIT_STRATEGIES.contains(policy.waitStrategy().trim().toUpperCase())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".waitStrategy は WAIT または FAIL_FAST で指定してください。",
+					Map.of("field", field + ".waitStrategy"));
+		}
+		validatePositiveWhenPresent(policy.resourceWaitTimeoutSeconds(), field + ".resourceWaitTimeoutSeconds");
+		validatePositiveWhenPresent(policy.providerIdleTimeoutSeconds(), field + ".providerIdleTimeoutSeconds");
+		validatePositiveWhenPresent(policy.modelLoadTimeoutSeconds(), field + ".modelLoadTimeoutSeconds");
+		validatePositiveWhenPresent(policy.jobTimeoutSeconds(), field + ".jobTimeoutSeconds");
+		if (policy.pollIntervalMillis() != null
+				&& (policy.pollIntervalMillis() < 100 || policy.pollIntervalMillis() > 30_000)) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".pollIntervalMillis は 100 から 30000 の範囲で指定してください。",
+					Map.of("field", field + ".pollIntervalMillis"));
+		}
+	}
+
+	private void validateJobExecutionPolicy(SettingsDocument.JobExecutionPolicy policy, String field) {
+		if (!JOB_WAIT_STRATEGIES.contains(policy.waitStrategy())) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".waitStrategy は WAIT または FAIL_FAST で指定してください。",
+					Map.of("field", field + ".waitStrategy"));
+		}
+		validatePositive(policy.resourceWaitTimeoutSeconds(), field + ".resourceWaitTimeoutSeconds");
+		validatePositive(policy.providerIdleTimeoutSeconds(), field + ".providerIdleTimeoutSeconds");
+		validatePositive(policy.modelLoadTimeoutSeconds(), field + ".modelLoadTimeoutSeconds");
+		validatePositive(policy.jobTimeoutSeconds(), field + ".jobTimeoutSeconds");
+		if (policy.pollIntervalMillis() == null || policy.pollIntervalMillis() < 100 || policy.pollIntervalMillis() > 30_000) {
+			throw new ApiException(
+					HttpStatus.BAD_REQUEST,
+					"VALIDATION_ERROR",
+					field + ".pollIntervalMillis は 100 から 30000 の範囲で指定してください。",
+					Map.of("field", field + ".pollIntervalMillis"));
+		}
+	}
+
 	private void validatePositive(Number value, String field) {
 		if (value == null || value.longValue() < 1L) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + " は 1 以上で指定してください。", Map.of("field", field));
+		}
+	}
+
+	private void validatePositiveWhenPresent(Number value, String field) {
+		if (value != null && value.longValue() < 1L) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", field + " は 1 以上で指定してください。", Map.of("field", field));
 		}
 	}

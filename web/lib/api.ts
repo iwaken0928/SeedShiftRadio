@@ -10,6 +10,7 @@ import {
   type LetterStatus,
   type LetterSummary,
   type ManagementDashboardResponse,
+  type JobExecutionStatus,
   type MonitorSummary,
   type OperationalEvent,
   type PlaybackEventRequest,
@@ -24,6 +25,7 @@ import {
   type StationProgrammingUpdateRequest,
   type StationContentDeletionRequest,
   type StationContentDeletionResponse,
+  type StationProgramContentResponse,
   type ProgramBlockSummary,
   type QueueSnapshot,
   type RadioStatus,
@@ -408,6 +410,28 @@ export function deleteStationContent(stationId: string, body: StationContentDele
   );
 }
 
+export function getStationPrograms(stationId: string) {
+  return requestJson<StationProgramContentResponse>(
+    `/api/management/stations/${encodeURIComponent(stationId)}/content/programs`,
+    { headers: withAdminHeaders() },
+  );
+}
+
+export function deleteProgramContent(
+  stationId: string,
+  programBlockId: string,
+  body: StationContentDeletionRequest,
+) {
+  return requestJson<StationContentDeletionResponse>(
+    `/api/management/stations/${encodeURIComponent(stationId)}/programs/${encodeURIComponent(programBlockId)}/content/deletions`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: withAdminHeaders({ "Content-Type": "application/json" }),
+    },
+  );
+}
+
 export function getHealth() {
   return requestJson<HealthResponse>("/api/health");
 }
@@ -429,6 +453,12 @@ export function updateSettings(body: SettingsUpdateRequest) {
 export function testConnections() {
   return requestJson<ConnectionsTestResponse>("/api/settings/test-connections", {
     method: "POST",
+    headers: withAdminHeaders(),
+  });
+}
+
+export function getJobExecutionStatus() {
+  return requestJson<JobExecutionStatus>("/api/settings/job-execution/status", {
     headers: withAdminHeaders(),
   });
 }

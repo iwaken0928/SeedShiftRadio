@@ -2,8 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiRequestError, deleteStationContent, getManagementDashboard, listProgramTemplates, requestPreGeneration } from "@/lib/api";
-import type { GeneratedAssetType } from "@/lib/types";
+import {
+  ApiRequestError,
+  deleteProgramContent,
+  deleteStationContent,
+  getManagementDashboard,
+  getStationPrograms,
+  listProgramTemplates,
+  requestPreGeneration,
+} from "@/lib/api";
+import type { GeneratedAssetType, ProgramContentDetail } from "@/lib/types";
 import { Badge, Button, Card, EmptyState, Input, Label, Metric, SectionHeader } from "@/components/ui";
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { formatBytes } from "@/components/management-dashboard";
@@ -22,6 +30,14 @@ export function StationContentManagement() {
   const [includeSpeech, setIncludeSpeech] = useState(true);
   const [includeMusic, setIncludeMusic] = useState(true);
   const [deletionAssetTypes, setDeletionAssetTypes] = useState<GeneratedAssetType[]>(["SCRIPT", "AUDIO", "MUSIC"]);
+  const [programBlockId, setProgramBlockId] = useState("");
+
+  const programsQuery = useQuery({
+    queryKey: ["station-program-content", stationId],
+    queryFn: () => getStationPrograms(stationId),
+    enabled: Boolean(stationId),
+    refetchInterval: 10_000,
+  });
 
   useEffect(() => {
     if (!stationId && dashboardQuery.data?.stations.length) {
@@ -29,7 +45,15 @@ export function StationContentManagement() {
     }
   }, [dashboardQuery.data, stationId]);
 
+  useEffect(() => {
+    const programs = programsQuery.data?.programs ?? [];
+    if (!programs.some((program) => program.programBlockId === programBlockId)) {
+      setProgramBlockId(programs[0]?.programBlockId ?? "");
+    }
+  }, [programBlockId, programsQuery.data]);
+
   const selectedStation = dashboardQuery.data?.stations.find((station) => station.stationId === stationId) ?? null;
+  const selectedProgram = programsQuery.data?.programs.find((program) => program.programBlockId === programBlockId) ?? null;
   const applicableTemplates = useMemo(
     () => (templatesQuery.data ?? []).filter((template) =>
       template.isActive && (template.scope.toUpperCase() === "GLOBAL" || template.stationId === stationId)),
@@ -44,12 +68,21 @@ export function StationContentManagement() {
     }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["management-dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["station-program-content", stationId] });
     },
   });
   const deletionMutation = useMutation({
     mutationFn: () => deleteStationContent(stationId, { assetTypes: deletionAssetTypes }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["management-dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["station-program-content", stationId] });
+    },
+  });
+  const programDeletionMutation = useMutation({
+    mutationFn: () => deleteProgramContent(stationId, programBlockId, { assetTypes: deletionAssetTypes }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["management-dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["station-program-content", stationId] });
     },
   });
 
@@ -65,9 +98,18 @@ export function StationContentManagement() {
     if (!selectedStation || deletionAssetTypes.length === 0) return;
     const labels = deletionAssetTypes.map((assetType) => assetTypeLabel(assetType)).join("・");
     const confirmed = window.confirm(
-      `${selectedStation.stationName} の事前生成済み ${labels} を削除します。番組・queue・監査履歴は残ります。続行しますか？`,
+      `${selectedStation.stationName} の事前生成済み ${labels} を物理削除します。番組・queue・監査履歴は残し、queue の asset 参照を解除します。続行しますか？`,
     );
     if (confirmed) deletionMutation.mutate();
+  };
+
+  const confirmProgramDeletion = () => {
+    if (!selectedProgram || !selectedProgram.preGenerated || deletionAssetTypes.length === 0) return;
+    const labels = deletionAssetTypes.map((assetType) => assetTypeLabel(assetType)).join("・");
+    const confirmed = window.confirm(
+      `${selectedProgram.title} の事前生成済み ${labels} を物理削除します。番組とセグメントは残ります。続行しますか？`,
+    );
+    if (confirmed) programDeletionMutation.mutate();
   };
 
   if (dashboardQuery.isLoading || templatesQuery.isLoading) {
@@ -190,11 +232,66 @@ export function StationContentManagement() {
           </Card>
         </div>
 
+        <Card>
+          <SectionHeader
+            eyebrow="By program"
+            title={`${selectedStation?.stationName ?? "選択中の局"} の番組詳細`}
+            description="局を起点に直近 100 番組を確認し、番組内のセグメント状態と生成 asset を管理します。事前生成番組は番組単位でも削除できます。"
+          />
+          {programsQuery.isLoading ? <EmptyState title="番組詳細を読み込んでいます" /> : null}
+          {programsQuery.error ? (
+            <p role="alert" className="text-sm font-semibold text-rose-700">番組詳細を取得できませんでした。</p>
+          ) : null}
+          {programsQuery.data && programsQuery.data.programs.length === 0 ? (
+            <EmptyState title="番組データはまだありません" description="事前生成を実行するか、局の放送を開始すると番組単位の詳細が表示されます。" />
+          ) : null}
+          {programsQuery.data?.programs.length ? (
+            <div className="grid gap-4 xl:grid-cols-[minmax(300px,2fr)_minmax(0,5fr)]">
+              <div className="max-h-[38rem] space-y-2 overflow-y-auto pr-1">
+                {programsQuery.data.programs.map((program) => (
+                  <button
+                    key={program.programBlockId}
+                    type="button"
+                    className={`w-full rounded-2xl border p-4 text-left transition ${
+                      program.programBlockId === programBlockId
+                        ? "border-teal-400 bg-teal-50"
+                        : "border-slate-200 bg-white hover:border-teal-200"
+                    }`}
+                    onClick={() => setProgramBlockId(program.programBlockId)}
+                  >
+                    <span className="flex items-start justify-between gap-3">
+                      <strong className="text-sm text-slate-950">{program.title}</strong>
+                      <Badge tone={program.status === "FAILED" ? "danger" : program.status === "DONE" ? "success" : "warning"}>
+                        {program.status}
+                      </Badge>
+                    </span>
+                    <span className="mt-2 block text-xs leading-5 text-slate-600">
+                      {program.preGenerated ? "事前生成" : "通常放送"} · {program.segmentCount} セグメント · {program.generatedAssetCount} asset · {formatBytes(program.generatedAssetBytes)}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">{formatDateTime(program.startedAt)}</span>
+                  </button>
+                ))}
+              </div>
+              {selectedProgram ? (
+                <ProgramDetails
+                  program={selectedProgram}
+                  deletionAssetTypes={deletionAssetTypes}
+                  toggleDeletionAssetType={toggleDeletionAssetType}
+                  deleting={programDeletionMutation.isPending}
+                  deletionResult={programDeletionMutation.data?.deletedAssetCount ?? null}
+                  deletionError={programDeletionMutation.error}
+                  onDelete={confirmProgramDeletion}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </Card>
+
         <Card className="border-rose-200 bg-rose-50">
           <SectionHeader
             eyebrow="Content cleanup"
             title="事前生成コンテンツを削除"
-            description="選択中の局に属するオフエア事前生成 asset の payload を削除します。ライブ再生、番組 block、queue、Provider job、監査履歴、archive 対象は削除しません。"
+            description="選択中の局に属するオフエア事前生成 asset のレコードと payload を削除します。ライブ再生、番組 block、queue、Provider job、監査履歴、archive 対象は削除しません。"
           />
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <div>
@@ -214,7 +311,7 @@ export function StationContentManagement() {
                 ))}
               </div>
               <p className="mt-3 text-xs leading-6 text-rose-900">
-                同じファイルを別 asset が共有している場合、最後の参照が残る間は実ファイルを保持します。削除済み metadata は参照整合性と監査のため tombstone として残ります。
+                同じファイルを別 asset が共有している場合、最後の参照が残る間は実ファイルを保持します。選択した generated asset レコードは残さず削除し、queue の asset 参照は解除します。
               </p>
             </div>
             <Button
@@ -240,9 +337,134 @@ export function StationContentManagement() {
   );
 }
 
+function ProgramDetails({
+  program,
+  deletionAssetTypes,
+  toggleDeletionAssetType,
+  deleting,
+  deletionResult,
+  deletionError,
+  onDelete,
+}: {
+  program: ProgramContentDetail;
+  deletionAssetTypes: GeneratedAssetType[];
+  toggleDeletionAssetType: (assetType: GeneratedAssetType) => void;
+  deleting: boolean;
+  deletionResult: number | null;
+  deletionError: Error | null;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="min-w-0 space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">
+              {program.preGenerated ? "Pre-generated program" : "Live program"}
+            </p>
+            <h3 className="mt-1 text-lg font-bold text-slate-950">{program.title}</h3>
+            <p className="mt-1 break-all text-xs text-slate-500">{program.programBlockId}</p>
+          </div>
+          <Badge tone={program.preGenerated ? "warning" : "default"}>
+            {program.preGenerated ? "事前生成" : "通常放送"}
+          </Badge>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="セグメント" value={`${program.segmentCount} 件`} />
+          <Metric label="生成待ち / 実行中" value={`${program.plannedSegmentCount} / ${program.generatingSegmentCount}`} />
+          <Metric label="準備完了 / 失敗" value={`${program.readySegmentCount} / ${program.failedSegmentCount}`} />
+          <Metric label="保存量" value={formatBytes(program.generatedAssetBytes)} />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2">順番</th>
+              <th className="px-3 py-2">セグメント</th>
+              <th className="px-3 py-2">状態</th>
+              <th className="px-3 py-2">生成元</th>
+              <th className="px-3 py-2">asset</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {program.segments.map((segment) => (
+              <tr key={segment.queueItemId}>
+                <td className="px-3 py-3">{segment.sequenceNo}</td>
+                <td className="px-3 py-3">
+                  <strong className="block text-slate-900">{segment.title}</strong>
+                  <span className="text-xs text-slate-500">{segment.segmentType} / {segment.slotRole}</span>
+                </td>
+                <td className="px-3 py-3">
+                  <Badge tone={segment.status === "FAILED" ? "danger" : segment.status === "READY" || segment.status === "DONE" ? "success" : "warning"}>
+                    {segment.status}
+                  </Badge>
+                </td>
+                <td className="px-3 py-3 text-xs text-slate-600">{segment.contentOrigin}</td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {segment.assets.length
+                      ? segment.assets.map((asset) => (
+                          <span key={asset.assetId} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                            {assetTypeLabel(asset.assetType)} {formatBytes(asset.byteSize)}
+                          </span>
+                        ))
+                      : <span className="text-xs text-slate-400">なし</span>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {program.preGenerated ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <p className="text-sm font-semibold text-rose-950">この番組の生成データを削除</p>
+          <div className="mt-3 flex flex-wrap gap-4">
+            {(["SCRIPT", "AUDIO", "MUSIC"] as GeneratedAssetType[]).map((assetType) => (
+              <label key={assetType} className="flex items-center gap-2 text-sm text-rose-950">
+                <input
+                  type="checkbox"
+                  checked={deletionAssetTypes.includes(assetType)}
+                  onChange={() => toggleDeletionAssetType(assetType)}
+                />
+                {assetTypeLabel(assetType)} ({selectedAssetCount(program, assetType)} 件)
+              </label>
+            ))}
+          </div>
+          <Button
+            tone="danger"
+            className="mt-4"
+            disabled={deleting || deletionAssetTypes.length === 0}
+            onClick={onDelete}
+          >
+            {deleting ? "削除しています…" : "この番組から選択データを削除"}
+          </Button>
+          {deletionResult !== null ? (
+            <p role="status" className="mt-3 text-sm font-semibold text-rose-950">{deletionResult} 件を削除しました。</p>
+          ) : null}
+          {deletionError ? (
+            <p role="alert" className="mt-3 text-sm font-semibold text-rose-950">{errorMessage(deletionError)}</p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+          通常放送の番組はこの画面の一括削除対象外です。再生履歴と archive の整合性を維持します。
+        </p>
+      )}
+    </div>
+  );
+}
+
 function errorMessage(error: Error) {
   if (error instanceof ApiRequestError) return error.message;
   return "管理操作を完了できませんでした。";
+}
+
+function formatDateTime(value: string | null) {
+  return value ? new Date(value).toLocaleString("ja-JP") : "未記録";
 }
 
 function assetTypeLabel(assetType: GeneratedAssetType) {

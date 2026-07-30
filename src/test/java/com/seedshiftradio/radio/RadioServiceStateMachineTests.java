@@ -298,6 +298,110 @@ class RadioServiceStateMachineTests {
 	}
 
 	@Test
+	void playDoesNotSkipUnreadyOpeningWithinCurrentProgram() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", session.getId(), ProgramBlockStatus.ACTIVE);
+		ProgramBlockEntity nextBlock = programBlock("block-next", session.getId(), ProgramBlockStatus.PLANNED);
+		nextBlock.setStartedAt(Instant.parse("2026-03-20T09:30:00Z"));
+		QueueItemEntity opening = queueItem("queue-opening", session.getId(), QueueItemStatus.GENERATING);
+		opening.setProgramBlockId(currentBlock.getId());
+		opening.setSequenceNo(1);
+		opening.setSlotRole(SlotRole.OPENING);
+		QueueItemEntity laterReady = queueItem("queue-topic", session.getId(), QueueItemStatus.READY);
+		laterReady.setProgramBlockId(currentBlock.getId());
+		laterReady.setSequenceNo(2);
+		QueueItemEntity nextProgramReady = queueItem("queue-next", session.getId(), QueueItemStatus.READY);
+		nextProgramReady.setProgramBlockId(nextBlock.getId());
+		nextProgramReady.setSequenceNo(3);
+		wireRepositoryState(
+				session,
+				List.of(currentBlock, nextBlock),
+				Map.of(currentBlock.getId(), List.of(), nextBlock.getId(), List.of()),
+				new ArrayList<>(List.of(opening, laterReady, nextProgramReady)));
+		when(playoutSessionRepository.findById(session.getId())).thenReturn(Optional.of(session));
+
+		ApiException exception = assertThrows(ApiException.class, () -> radioService.play());
+
+		assertEquals("QUEUE_NOT_READY", exception.getCode());
+		assertTrue(queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()).stream()
+				.noneMatch(item -> item.getStatus() == QueueItemStatus.PLAYING));
+	}
+
+	@Test
+	void playbackEventRejectsStartingNextProgramDirectly() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		session.setCurrentProgramBlockId("block-current");
+		ProgramBlockEntity currentBlock = programBlock("block-current", session.getId(), ProgramBlockStatus.ACTIVE);
+		ProgramBlockEntity nextBlock = programBlock("block-next", session.getId(), ProgramBlockStatus.PLANNED);
+		nextBlock.setStartedAt(Instant.parse("2026-03-20T09:30:00Z"));
+		QueueItemEntity currentOpening = queueItem("queue-opening", session.getId(), QueueItemStatus.READY);
+		currentOpening.setProgramBlockId(currentBlock.getId());
+		currentOpening.setSequenceNo(1);
+		QueueItemEntity nextProgramOpening = queueItem("queue-next", session.getId(), QueueItemStatus.READY);
+		nextProgramOpening.setProgramBlockId(nextBlock.getId());
+		nextProgramOpening.setSequenceNo(2);
+		wireRepositoryState(
+				session,
+				List.of(currentBlock, nextBlock),
+				Map.of(currentBlock.getId(), List.of(), nextBlock.getId(), List.of()),
+				new ArrayList<>(List.of(currentOpening, nextProgramOpening)));
+		when(playoutSessionRepository.findById(session.getId())).thenReturn(Optional.of(session));
+
+		ApiException exception = assertThrows(ApiException.class, () -> radioService.recordPlaybackEvent(
+				new PlaybackEventRequest(
+						"web-client",
+						session.getId(),
+						nextProgramOpening.getId(),
+						PlaybackEventType.SEGMENT_STARTED,
+						Instant.now())));
+
+		assertEquals("PROGRAM_PLAYBACK_ORDER_CONFLICT", exception.getCode());
+		assertEquals(QueueItemStatus.READY, nextProgramOpening.getStatus());
+	}
+
+	@Test
+	void nextSegmentDoesNotSkipUnreadyOpeningWithinCurrentProgram() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PREPARING, null);
+		session.setCurrentProgramBlockId("block-current");
+		QueueItemEntity opening = queueItem("queue-opening", session.getId(), QueueItemStatus.GENERATING);
+		opening.setProgramBlockId("block-current");
+		opening.setSequenceNo(1);
+		QueueItemEntity laterReady = queueItem("queue-topic", session.getId(), QueueItemStatus.READY);
+		laterReady.setProgramBlockId("block-current");
+		laterReady.setSequenceNo(2);
+		wireRepositoryState(session, List.of(), Map.of(), new ArrayList<>(List.of(opening, laterReady)));
+
+		ApiException exception = assertThrows(ApiException.class, () -> radioService.getNextSegment());
+
+		assertEquals("QUEUE_NOT_READY", exception.getCode());
+	}
+
+	@Test
+	void nextSegmentReturnsFollowingReadyItemWhileCurrentItemIsPlaying() {
+		PlayoutSessionEntity session = session("playout-001", PlayoutState.PLAYING, "queue-opening");
+		session.setCurrentProgramBlockId("block-current");
+		QueueItemEntity opening = queueItem("queue-opening", session.getId(), QueueItemStatus.PLAYING);
+		opening.setProgramBlockId("block-current");
+		opening.setSequenceNo(1);
+		QueueItemEntity nextReady = queueItem("queue-topic", session.getId(), QueueItemStatus.READY);
+		nextReady.setProgramBlockId("block-current");
+		nextReady.setSequenceNo(2);
+		QueueItemEntity nextProgramReady = queueItem("queue-next", session.getId(), QueueItemStatus.READY);
+		nextProgramReady.setProgramBlockId("block-next");
+		nextProgramReady.setSequenceNo(3);
+		wireRepositoryState(
+				session,
+				List.of(),
+				Map.of(),
+				new ArrayList<>(List.of(opening, nextReady, nextProgramReady)));
+
+		QueueItemResponse response = radioService.getNextSegment();
+
+		assertEquals(nextReady.getId(), response.id());
+	}
+
+	@Test
 	void tuneStopsPreviousSessionBeforeCreatingNewOne() {
 		PlayoutSessionEntity previousSession = session("playout-old", PlayoutState.PLAYING, "queue-old");
 		QueueItemEntity previousItem = queueItem("queue-old", "playout-old", QueueItemStatus.PLAYING);
@@ -370,6 +474,11 @@ class RadioServiceStateMachineTests {
 		assertEquals(PlayoutState.PREPARING, session.getState());
 		assertEquals(3, queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").size());
 		assertEquals(3, session.getBufferReadyCount());
+		assertEquals(15_000, queueItemRepository.findBySessionIdOrderBySequenceNoAsc("playout-001").stream()
+				.filter(item -> item.getSlotRole() == SlotRole.ENDING)
+				.findFirst()
+				.orElseThrow()
+				.getDurationMs());
 
 		RadioStatusResponse response = radioService.play();
 

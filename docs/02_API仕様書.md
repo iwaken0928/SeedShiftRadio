@@ -498,6 +498,14 @@ Response:
 - `resumePlayback=false` の場合は `PREPARING` のまま返し、Client が `POST /api/radio/play` で開始する
 - `requestedBy` は `playout_session.requested_by` に保存し、監査と相関確認に使う
 
+### 6.1.1 `POST /radio/play` と番組単位再生
+
+- 再生開始の最小単位は現在の `ProgramBlock` とし、Client は1回の再生操作で先頭の未再生セグメントから block 末尾まで順次再生する
+- Server は現在 block の先頭未完了 item が `READY` になるまで `QUEUE_NOT_READY` を返し、後続の `READY` item や次 block を先に開始しない
+- `SEGMENT_STARTED` も同じ順序制約を受け、現在 block の先頭未完了 item 以外を指定した場合は `409 PROGRAM_PLAYBACK_ORDER_CONFLICT` とする
+- `GET /radio/next-segment` と `GET /radio/next-speech-directive` は現在 block の順序を優先し、未準備の先頭 item を飛ばして後続を返さない
+- 一時停止、再開、明示的な停止は番組再生中の transport 操作として許可する。通常終了時は次の `ProgramBlock` へ自動で跨がない
+
 ### 6.2 `POST /clients/capabilities`
 
 ```json

@@ -12,6 +12,7 @@ type Props = {
   sessionId: string | null;
   volume: number;
   autoPlay: boolean;
+  programPlaybackActive: boolean;
   onPlaybackEvent: (request: PlaybackEventRequest) => Promise<void> | void;
 };
 
@@ -21,7 +22,7 @@ export type AudioConsoleHandle = {
 };
 
 export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function AudioConsole(
-  { sourceUrl, label, clientId, itemId, sessionId, volume, autoPlay, onPlaybackEvent },
+  { sourceUrl, label, clientId, itemId, sessionId, volume, autoPlay, programPlaybackActive, onPlaybackEvent },
   ref,
 ) {
     const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -207,7 +208,7 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
   };
 
   useEffect(() => {
-    if (!autoPlay || !sourceUrl || !itemId) {
+    if (!autoPlay || !sourceUrl || !itemId || playbackRequestedRef.current || sentStartRef.current === itemId) {
       return;
     }
     void play().catch(() => undefined);
@@ -226,8 +227,14 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button type="button" tone="secondary" onClick={() => void play().catch(() => undefined)} disabled={!sourceUrl} data-testid="audio-play">
-            再生
+          <Button
+            type="button"
+            tone="secondary"
+            onClick={() => void play().catch(() => undefined)}
+            disabled={!sourceUrl || !programPlaybackActive}
+            data-testid="audio-play"
+          >
+            番組を再開
           </Button>
           <Button type="button" tone="ghost" onClick={pause} data-testid="audio-pause">
             一時停止
@@ -250,9 +257,9 @@ export const AudioConsole = forwardRef<AudioConsoleHandle, Props>(function Audio
         {playbackError ? <p className="text-sm font-semibold text-rose-200" role="alert">{playbackError}</p> : null}
         <p className="text-sm leading-6 text-slate-200">
           {sourceUrl
-            ? autoPlay
+            ? programPlaybackActive
               ? "この番組の残りセグメントを順番に連続再生します。"
-              : "現在の READY セグメントを再生できます。"
+              : "上の「番組を再生」から、番組単位の連続再生を開始できます。"
             : "再生可能な asset がまだありません。"}
         </p>
       </div>

@@ -133,16 +133,7 @@ public class RadioService {
 		PlayoutSessionEntity session = playoutSessionRepository.findById(sessionId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "再生セッションが見つかりません。", Map.of("sessionId", sessionId)));
 		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
-		QueueItemEntity item = items.stream()
-				.filter(candidate -> candidate.getStatus() == QueueItemStatus.PLAYING)
-				.findFirst()
-				.orElse(null);
-		if (item == null) {
-			item = items.stream()
-					.filter(candidate -> candidate.getStatus() == QueueItemStatus.READY)
-					.findFirst()
-					.orElse(null);
-		}
+		QueueItemEntity item = selectProgramPlaybackItem(session, items);
 		if (item == null) {
 			if (session.getState() == PlayoutState.STOPPED) {
 				session.setState(PlayoutState.PREPARING);
@@ -258,7 +249,9 @@ public class RadioService {
 	@Transactional(readOnly = true)
 	public QueueItemResponse getNextSegment() {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
-		QueueItemEntity item = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
+		QueueItemEntity item = Optional.ofNullable(selectNextProgramItem(
+						session,
+						queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId())))
 				.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "次のセグメントはまだ生成されていません。", Map.of("sessionId", session.getId())));
 		return toQueueItem(item);
 	}
@@ -266,7 +259,9 @@ public class RadioService {
 	@Transactional(readOnly = true)
 	public SpeechDirectiveResponse getNextSpeechDirective(String clientId) {
 		PlayoutSessionEntity session = getLatestSessionOrThrow();
-		QueueItemEntity item = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
+		QueueItemEntity item = Optional.ofNullable(selectNextProgramItem(
+						session,
+						queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId())))
 				.orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "QUEUE_NOT_READY", "次のセグメントはまだ生成されていません。", Map.of("sessionId", session.getId())));
 		return scriptGenerationService.resolveDirective(session, item, clientId);
 	}
@@ -602,7 +597,7 @@ public class RadioService {
 		entity.setPlaybackMode(PlaybackMode.SERVER_AUDIO);
 		entity.setSpeechDirectiveId("sd-" + entity.getId());
 		entity.setContentOrigin("LIVE_GEN");
-		entity.setDurationMs(blockSlot.getTargetDurationMs());
+		entity.setDurationMs(resolvePlaybackDurationMs(blockSlot));
 		entity.setCorrelationId(session.getCorrelationId());
 		applyArchiveReplay(session, block, blockSlot, entity, totalBlockSlots);
 		return entity;
@@ -698,6 +693,14 @@ public class RadioService {
 				queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()),
 				currentBlock,
 				latestBlock);
+	}
+
+	private int resolvePlaybackDurationMs(ProgramBlockSlotEntity slot) {
+		if ((slot.getResolvedSegmentType() == SegmentType.JINGLE || slot.getResolvedSegmentType() == SegmentType.MUSIC_AI)
+				&& (slot.getRole() == SlotRole.OPENING || slot.getRole() == SlotRole.ENDING)) {
+			return 15_000;
+		}
+		return slot.getTargetDurationMs();
 	}
 
 	private ProgramBlockEntity getCurrentProgramBlock(PlayoutSessionEntity session) {
@@ -960,8 +963,9 @@ public class RadioService {
 				|| session.getState() == PlayoutState.ERROR) {
 			return;
 		}
-		QueueItemEntity readyItem = queueItemRepository.findTopBySessionIdAndStatusOrderBySequenceNoAsc(session.getId(), QueueItemStatus.READY)
-				.orElse(null);
+		QueueItemEntity readyItem = selectProgramPlaybackItem(
+				session,
+				queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId()));
 		if (readyItem == null) {
 			return;
 		}
@@ -1049,6 +1053,9 @@ public class RadioService {
 				if (item.getStatus() != QueueItemStatus.READY && !alreadyCurrent) {
 					throw invalidPlaybackTransition(request.eventType(), item);
 				}
+				if (!alreadyCurrent) {
+					assertProgramPlaybackOrder(session, item);
+				}
 			}
 			case SEGMENT_ENDED -> {
 				if (item.getStatus() != QueueItemStatus.PLAYING || !item.getId().equals(session.getCurrentQueueItemId())) {
@@ -1083,6 +1090,72 @@ public class RadioService {
 
 	private boolean isRecoveryCandidate(QueueItemEntity item) {
 		return item.getProgramSlotId() != null && !item.isAssetBanned();
+	}
+
+	private QueueItemEntity selectProgramPlaybackItem(PlayoutSessionEntity session, List<QueueItemEntity> items) {
+		QueueItemEntity playingItem = items.stream()
+				.filter(candidate -> candidate.getStatus() == QueueItemStatus.PLAYING)
+				.findFirst()
+				.orElse(null);
+		if (playingItem != null) {
+			return playingItem;
+		}
+		if (session.getCurrentProgramBlockId() == null || session.getCurrentProgramBlockId().isBlank()) {
+			return items.stream()
+					.filter(candidate -> candidate.getStatus() == QueueItemStatus.READY)
+					.findFirst()
+					.orElse(null);
+		}
+		QueueItemEntity firstRemainingItem = items.stream()
+				.filter(candidate -> session.getCurrentProgramBlockId().equals(candidate.getProgramBlockId()))
+				.filter(candidate -> candidate.getStatus() != QueueItemStatus.DONE && candidate.getStatus() != QueueItemStatus.FAILED)
+				.findFirst()
+				.orElse(null);
+		return firstRemainingItem != null && firstRemainingItem.getStatus() == QueueItemStatus.READY
+				? firstRemainingItem
+				: null;
+	}
+
+	private QueueItemEntity selectNextProgramItem(PlayoutSessionEntity session, List<QueueItemEntity> items) {
+		if (session.getCurrentProgramBlockId() == null || session.getCurrentProgramBlockId().isBlank()) {
+			return items.stream()
+					.filter(candidate -> candidate.getStatus() == QueueItemStatus.READY)
+					.findFirst()
+					.orElse(null);
+		}
+		boolean currentItemPassed = session.getCurrentQueueItemId() == null;
+		for (QueueItemEntity candidate : items) {
+			if (!session.getCurrentProgramBlockId().equals(candidate.getProgramBlockId())
+					|| candidate.getStatus() == QueueItemStatus.DONE
+					|| candidate.getStatus() == QueueItemStatus.FAILED) {
+				continue;
+			}
+			if (!currentItemPassed) {
+				if (candidate.getId().equals(session.getCurrentQueueItemId())) {
+					currentItemPassed = true;
+				}
+				continue;
+			}
+			return candidate.getStatus() == QueueItemStatus.READY ? candidate : null;
+		}
+		return null;
+	}
+
+	private void assertProgramPlaybackOrder(PlayoutSessionEntity session, QueueItemEntity requestedItem) {
+		List<QueueItemEntity> items = queueItemRepository.findBySessionIdOrderBySequenceNoAsc(session.getId());
+		QueueItemEntity expectedItem = selectProgramPlaybackItem(session, items);
+		if (expectedItem != null && expectedItem.getId().equals(requestedItem.getId())) {
+			return;
+		}
+		throw new ApiException(
+				HttpStatus.CONFLICT,
+				"PROGRAM_PLAYBACK_ORDER_CONFLICT",
+				"番組は先頭の未再生セグメントから番組単位で再生してください。",
+				Map.of(
+						"sessionId", session.getId(),
+						"programBlockId", session.getCurrentProgramBlockId() == null ? "" : session.getCurrentProgramBlockId(),
+						"itemId", requestedItem.getId(),
+						"expectedItemId", expectedItem == null ? "" : expectedItem.getId()));
 	}
 
 	private void stopActiveSessionBeforeRetune() {

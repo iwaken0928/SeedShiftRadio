@@ -64,7 +64,8 @@
 ### 5.3 音声プレイヤー挙動
 
 - Queue の先頭 `READY` セグメントを順次再生する
-- 主操作の「番組を再生」は、その時点の `programBlockId` を連続再生対象として固定し、冒頭から末尾まで同一 `ProgramBlock` のセグメントを順次再生する。次の `ProgramBlock` へ到達した時点で自動再生を解除する
+- 主操作の「番組を再生」は、その時点の `programBlockId` を連続再生対象として固定し、先頭の未再生セグメントから末尾まで同一 `ProgramBlock` のセグメントを順次再生する。先頭セグメントが未準備なら後続や次番組を選ばず待機し、次の `ProgramBlock` へ到達した時点で自動再生を解除する
+- セグメント表示内の音声プレイヤーから単独セグメント再生は開始できない。「番組を再生」で開始した後だけ、番組全体に対する一時停止、再開、停止を提供する
 - Tune 後は SSE が切断・再接続中でも生成完了を見失わないよう、`RadioStatus` と Queue を 3 秒程度の REST polling でも再同期する
 - `programBlockId` が未設定の間は `/api/radio/program`、再生可能 item がない間は `/api/radio/next-speech-directive` を呼ばず、準備中の 404 / 409 をブラウザーエラーとして連打しない
 - Queue、番組、次の `SpeechDirective` の query key には `sessionId`、`programBlockId`、対象 `QueueItem` を含め、Tune 前セッションの cache や実行中 item の directive を再利用しない

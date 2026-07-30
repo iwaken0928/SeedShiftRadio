@@ -136,6 +136,7 @@ cache key は少なくとも以下を正規化して含める。
 歌もの生成は queue の即時補充をブロックしない。再生予定時刻までに `SUCCEEDED` でなければ上記順で縮退し、`provider_job` と SSE `provider.job.failed` に分類済み理由だけを残す。
 現行 runtime では `GenerateMusicJob` の async failure 時、対象 `MUSIC_AI` item をそのまま使って `paths.musicLibrary` 配下の `.wav` を優先的に `MUSIC_LOCAL` `READY` へ差し替え、候補が無い場合は placeholder 音声付き `JINGLE` `READY` に降ろす。どちらも `queue_item.assetId` と `content_origin` を更新して無音停止を避ける。
 既定の `tmpl-night-regular` は `OPENING(TALK) -> MUSIC_BREAK(MUSIC_AI) -> ENDING(TALK)` とし、通常経路でもトークの後に Music Generation Provider を使った曲を配置する。
+`OPENING` / `ENDING` に効果音用の `JINGLE` または将来の短尺 MusicGen cue を割り当てる場合、生成目標は15秒とする。`MUSIC_BREAK` の曲尺にはこの上限を適用しない。
 `paths.musicLibrary` が空の skeleton 環境で `MUSIC_LOCAL_PLACEHOLDER` を作る場合は、短い通知音ではなく和音、ベース、旋律、リズムを持つ音楽用 WAV とする。これは実モデル生成物ではなく、Provider またはローカル曲へ到達できない時の再生継続用 asset である。
 
 Provider chain の fallback を許可する error code は `PROVIDER_UNREACHABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_BAD_RESPONSE`, `PROVIDER_RESOURCE_EXHAUSTED` に限定する。

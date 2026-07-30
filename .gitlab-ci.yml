@@ -30,11 +30,19 @@ variables:
   PODMAN_TEST_PLAYWRIGHT_IMAGE: "mcr.microsoft.com/playwright:v1.55.0-jammy"
   PODMAN_TEST_RUBY_IMAGE: "docker.io/ruby:3.3-alpine"
   PODMAN_SMOKE_CURL_IMAGE: "docker.io/curlimages/curl:8.15.0"
+  PODMAN_RESET_POSTGRES_IMAGE: "docker.io/postgres:17-alpine"
+  PODMAN_RESET_VOLUME_IMAGE: "docker.io/alpine:3.22"
   SEEDSHIFT_LOCAL_IMAGE_REPOSITORY: "localhost/seedshift-radio"
   SEEDSHIFT_RADIO_DB_NAME: "seedshift_radio"
   SEEDSHIFT_RADIO_DB_USERNAME: "seedshift"
   SERVER_INTERNAL_API_BASE_URL: "http://127.0.0.1:8080"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
+  RESET_ALL_DATA_CONFIRMATION:
+    value: "KEEP"
+    options:
+      - "KEEP"
+      - "RESET_ALL_DATA"
+    description: "本番DB、Server永続データ、設定済みMusicGen永続データを全消去する場合だけ RESET_ALL_DATA を選択します。"
 
 # Shell executor Runner 用
 # 対象Runnerタグ: shared, shell
@@ -379,6 +387,23 @@ deploy-migrate:
       -e SPRING_MAIN_WEB_APPLICATION_TYPE=none
       "${SEEDSHIFT_SERVER_IMAGE}"
 
+reset-production-data:
+  extends: .deploy-job
+  stage: migrate
+  resource_group: seedshift-radio-deploy
+  interruptible: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+    - when: never
+  script:
+    - sh scripts/ci/require-env.sh SEEDSHIFT_RADIO_DB_PASSWORD SEEDSHIFT_RADIO_DATA_VOLUME
+    - export SEEDSHIFT_RADIO_DB_HOST="${SEEDSHIFT_RADIO_DB_HOST:-127.0.0.1}"
+    - export SEEDSHIFT_RADIO_DB_PORT="${SEEDSHIFT_RADIO_DB_PORT:-5432}"
+    - export SEEDSHIFT_RADIO_DB_NAME="${SEEDSHIFT_RADIO_DB_NAME:-seedshift_radio}"
+    - export SEEDSHIFT_RADIO_DB_USERNAME="${SEEDSHIFT_RADIO_DB_USERNAME:-seedshift}"
+    - sh scripts/ci/reset-all-data.sh
+
 deploy-app:
   extends:
     - .deploy-job
@@ -461,8 +486,8 @@ pipeline-docs-check:
   script:
     - test -f docs/16_パイプライン・コンテナデプロイ仕様書.md
     - test -f docs/17_パイプライン・コンテナデプロイ手順書.md
-    - rg -n "Podman Compose|deploy-migrate|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" docs/16_パイプライン・コンテナデプロイ仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/04_データ構造設計書.md
-    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" docs/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "Podman Compose|deploy-migrate|reset-production-data|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" docs/16_パイプライン・コンテナデプロイ仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/04_データ構造設計書.md
+    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|reset-production-data|RESET_ALL_DATA_CONFIRMATION|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" docs/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "api-contract|apiContractTest|openapi.sha256" docs/02_API仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/16_パイプライン・コンテナデプロイ仕様書.md docs/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:

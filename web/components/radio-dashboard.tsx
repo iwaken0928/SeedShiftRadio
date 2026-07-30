@@ -19,7 +19,8 @@ import { AudioConsole, type AudioConsoleHandle } from "@/components/audio-consol
 import { PanelColumn, PanelGrid } from "@/components/markdown";
 import { Badge, Button, Card, EmptyState, Metric, SectionHeader } from "@/components/ui";
 import { useUiStore } from "@/stores/ui-store";
-import type { PlaybackEventRequest, QueueItem, RadioStatus, SpeechDirective, StationSummary } from "@/lib/types";
+import { resolveCurrentOrNextProgramItem } from "@/lib/radio-playback";
+import type { PlaybackEventRequest, SpeechDirective, StationSummary } from "@/lib/types";
 
 export function RadioDashboard() {
   const queryClient = useQueryClient();
@@ -56,7 +57,7 @@ export function RadioDashboard() {
     refetchOnWindowFocus: false,
   });
   const queue = queueQuery.data;
-  const currentOrNextItem = resolveCurrentOrNextItem(status, queue?.items ?? []);
+  const currentOrNextItem = resolveCurrentOrNextProgramItem(status, queue?.items ?? []);
   const programQuery = useQuery({
     queryKey: ["radio", "program", status?.sessionId, status?.programBlockId],
     queryFn: getRadioProgram,
@@ -65,7 +66,7 @@ export function RadioDashboard() {
     refetchInterval: 5_000,
     refetchOnWindowFocus: false,
   });
-  const nextReadyItemId = queue?.items.find((item) => item.status === "READY")?.id;
+  const nextReadyItemId = currentOrNextItem?.status === "READY" ? currentOrNextItem.id : undefined;
   const speechDirectiveQuery = useQuery({
     queryKey: ["radio", "speech-directive", status?.sessionId, nextReadyItemId, clientId],
     queryFn: () => getNextSpeechDirective(clientId),
@@ -300,6 +301,7 @@ export function RadioDashboard() {
                         sessionId={status.sessionId}
                         volume={volume}
                         autoPlay={shouldAutoPlayCurrentItem}
+                        programPlaybackActive={Boolean(continuousPlayback)}
                         onPlaybackEvent={handlePlaybackEvent}
                       />
                     </div>
@@ -418,13 +420,6 @@ export function RadioDashboard() {
       </PanelColumn>
     </PanelGrid>
   );
-}
-
-function resolveCurrentOrNextItem(status: RadioStatus | undefined, items: QueueItem[]) {
-  if (!status) {
-    return null;
-  }
-  return items.find((item) => item.id === status.currentItemId) ?? items.find((item) => item.status === "READY") ?? null;
 }
 
 function getAssetUrl(assetUrl: string) {

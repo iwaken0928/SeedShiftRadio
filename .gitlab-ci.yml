@@ -38,12 +38,6 @@ variables:
   SEEDSHIFT_RADIO_DATA_VOLUME: "seedshift-radio-data"
   SERVER_INTERNAL_API_BASE_URL: "http://127.0.0.1:8080"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
-  RESET_ALL_DATA_CONFIRMATION:
-    value: "KEEP"
-    options:
-      - "KEEP"
-      - "RESET_ALL_DATA"
-    description: "本番DB、Server永続データ、設定済みMusicGen永続データを全消去する場合だけ RESET_ALL_DATA を選択します。"
 
 # Shell executor Runner 用
 # 対象Runnerタグ: shared, shell
@@ -78,6 +72,11 @@ semgrep-sast:
   tags:
     - shared
     - docker
+  artifacts:
+    access: developer
+    reports:
+      sast: gl-sast-report.json
+    paths: []
   variables:
     TMPDIR: "$CI_PROJECT_DIR/.tmp"
     TMP: "$CI_PROJECT_DIR/.tmp"
@@ -281,7 +280,7 @@ ci-yaml-validate:
       -v "${CI_PROJECT_DIR}:/workspace"
       -w /workspace
       "${PODMAN_TEST_RUBY_IMAGE}"
-      ruby -e 'require "yaml"; config = YAML.load_file(".gitlab-ci.yml"); expected = "seedshift-radio-data"; actual = config.dig("variables", "SEEDSHIFT_RADIO_DATA_VOLUME"); abort("SEEDSHIFT_RADIO_DATA_VOLUME default mismatch: #{actual.inspect}") unless actual == expected; puts "gitlab-ci-yaml-ok"'
+      ruby -e 'require "yaml"; config = YAML.load_file(".gitlab-ci.yml"); expected = "seedshift-radio-data"; actual = config.dig("variables", "SEEDSHIFT_RADIO_DATA_VOLUME"); abort("SEEDSHIFT_RADIO_DATA_VOLUME default mismatch: #{actual.inspect}") unless actual == expected; reset = config.fetch("reset-production-data"); abort("manual_confirmation is required") if reset["manual_confirmation"].to_s.empty?; abort("reset confirmation injection is missing") unless reset.fetch("script").include?("RESET_ALL_DATA_CONFIRMATION=RESET_ALL_DATA sh scripts/ci/reset-all-data.sh"); abort("semgrep generic artifact must be disabled") unless config.dig("semgrep-sast", "artifacts", "paths") == []; puts "gitlab-ci-yaml-ok"'
 
 compose-prod-validate:
   extends: .test-job
@@ -393,6 +392,7 @@ reset-production-data:
   stage: migrate
   resource_group: seedshift-radio-deploy
   interruptible: false
+  manual_confirmation: "本番DB、Server永続データ、設定済みMusicGen永続データをすべて削除します。バックアップと対象を確認しましたか？"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
@@ -403,7 +403,7 @@ reset-production-data:
     - export SEEDSHIFT_RADIO_DB_PORT="${SEEDSHIFT_RADIO_DB_PORT:-5432}"
     - export SEEDSHIFT_RADIO_DB_NAME="${SEEDSHIFT_RADIO_DB_NAME:-seedshift_radio}"
     - export SEEDSHIFT_RADIO_DB_USERNAME="${SEEDSHIFT_RADIO_DB_USERNAME:-seedshift}"
-    - sh scripts/ci/reset-all-data.sh
+    - RESET_ALL_DATA_CONFIRMATION=RESET_ALL_DATA sh scripts/ci/reset-all-data.sh
 
 deploy-app:
   extends:
@@ -488,7 +488,7 @@ pipeline-docs-check:
     - test -f docs/16_パイプライン・コンテナデプロイ仕様書.md
     - test -f docs/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "Podman Compose|deploy-migrate|reset-production-data|smoke-production|SEEDSHIFT_RADIO_DB_HOST|MUSICGEN_DATA_VOLUME" docs/16_パイプライン・コンテナデプロイ仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/04_データ構造設計書.md
-    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|reset-production-data|RESET_ALL_DATA_CONFIRMATION|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" docs/17_パイプライン・コンテナデプロイ手順書.md
+    - rg -n "GitLab CI/CD Variables|Job 別の必要変数|server-container-publish|deploy-migrate|reset-production-data|manual_confirmation|設定例|local image fallback|Rollback|SEEDSHIFT_RADIO_DB_PASSWORD|SEEDSHIFT_WEB_SESSION_SECRET|smoke-admin-session|CI_REGISTRY|MUSICGEN_DATA_VOLUME" docs/17_パイプライン・コンテナデプロイ手順書.md
     - rg -n "api-contract|apiContractTest|openapi.sha256" docs/02_API仕様書.md docs/11_運用・監視・セキュリティ・テスト設計書.md docs/16_パイプライン・コンテナデプロイ仕様書.md docs/17_パイプライン・コンテナデプロイ手順書.md
 
 gpu-smoke:

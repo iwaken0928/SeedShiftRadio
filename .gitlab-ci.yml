@@ -35,6 +35,7 @@ variables:
   SEEDSHIFT_LOCAL_IMAGE_REPOSITORY: "localhost/seedshift-radio"
   SEEDSHIFT_RADIO_DB_NAME: "seedshift_radio"
   SEEDSHIFT_RADIO_DB_USERNAME: "seedshift"
+  SEEDSHIFT_RADIO_DATA_VOLUME: "seedshift-radio-data"
   SERVER_INTERNAL_API_BASE_URL: "http://127.0.0.1:8080"
   SAST_EXCLUDED_PATHS: "spec,test,tests,tmp,build,target"
   RESET_ALL_DATA_CONFIRMATION:
@@ -280,7 +281,7 @@ ci-yaml-validate:
       -v "${CI_PROJECT_DIR}:/workspace"
       -w /workspace
       "${PODMAN_TEST_RUBY_IMAGE}"
-      ruby -e "require 'yaml'; YAML.load_file('.gitlab-ci.yml'); puts 'gitlab-ci-yaml-ok'"
+      ruby -e 'require "yaml"; config = YAML.load_file(".gitlab-ci.yml"); expected = "seedshift-radio-data"; actual = config.dig("variables", "SEEDSHIFT_RADIO_DATA_VOLUME"); abort("SEEDSHIFT_RADIO_DATA_VOLUME default mismatch: #{actual.inspect}") unless actual == expected; puts "gitlab-ci-yaml-ok"'
 
 compose-prod-validate:
   extends: .test-job

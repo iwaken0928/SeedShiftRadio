@@ -35,4 +35,18 @@ describe("resolveCurrentOrNextProgramItem", () => {
       [currentReady, nextProgramReady] as QueueItem[],
     )?.id).toBe(currentReady.id);
   });
+
+  it("queue の PLAYING 更新が status.currentItemId より先でも再生対象を維持する", () => {
+    const completedOpening = buildQueueItem({ id: "opening", status: "DONE" });
+    const playingMusic = buildQueueItem({
+      id: "music",
+      programSlotId: "music-slot",
+      status: "PLAYING",
+    });
+
+    expect(resolveCurrentOrNextProgramItem(
+      buildRadioStatus({ programBlockId: "block-night-001", currentItemId: null }) as RadioStatus,
+      [completedOpening, playingMusic] as QueueItem[],
+    )?.id).toBe(playingMusic.id);
+  });
 });

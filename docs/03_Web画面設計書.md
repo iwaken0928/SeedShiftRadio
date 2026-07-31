@@ -72,6 +72,7 @@
 - Web の Tune は `resumePlayback=false` を送り、Server が音声出力前に `PLAYING` へ先行しないようにする
 - 主操作の「音声を再生」は、クリックの user activation が失われる前に `HTMLAudioElement.play()` を開始し、Server の再生開始 API と並行して完了を確認する。どちらかが失敗した場合はブラウザー音声を停止し、Server も停止状態へ戻して理由を画面へ表示する
 - `ended` / `error` の playback event は Promise を破棄せず Server の受理と radio query の再同期まで待ち、次の `READY` item が確定してから自動再生する
+- `radio.status.changed` と `queue.updated` は別々に到着し得るため、`status.currentItemId` が一時的に未反映でも、現在 block 内に一意な `PLAYING` item があれば再生対象として維持する。部分更新を理由に再生中の `HTMLAudioElement` を破棄して `PLAYBACK_STOPPED` を送らない
 - 次セグメントは再生終了 3 秒前を目安に preload する
 - Tune 時は現在音声を即時停止せず、フェードアウト後に新局へ切り替える
 - 再生エラー時は 1 回だけ同一 asset を再試行し、失敗なら次候補へ進む

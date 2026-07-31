@@ -1297,6 +1297,7 @@ Server は profile の `model`, `thinking`, `lmModel` を ACE-Step の `model`, 
 音楽生成ジョブの submit / poll / download は Server 内部の `MusicGenerationProvider` 契約で扱い、Web / C# Client は通常 `queue_item`, `generated_asset`, `provider_job`, `/api/assets/audio/{assetId}.wav`, `/api/monitor/summary` を通じて状態を参照します。外部公開 API として prompt / lyrics 本文を返さない方針を維持します。
 
 `MusicGenerationRequest` は `purpose`, `mode`, `prompt`, `lyrics`, `lyricsLanguage`, `durationSeconds`, `bpm`, `keyScale`, `timeSignature`, `seed`, `modelProfileId`, `outputFormat` を持ちます。`lyricsLanguage=ja` は ACE-Step で `vocal_language=ja` に写像され、既定 profile は `ace-ja-fast` です。
+`QueueItem.durationMs` は計画時には slot の目標尺を表し、MusicGen の生成完了後は worker が返した正の実尺へ更新する。Web と Native Client は READY 以降の `durationMs` を表示・進捗計算の正本とし、実際の音声終了イベントをセグメント完了の最終契機とする。
 
 `MusicGenerationJob` 相当の状態は `provider_job` と監視 DTO へ集約し、`queued/running/succeeded/failed/canceled`, `providerTaskId`, `assetId`, `model`, `lmModel`, `seed`, `duration`, `errorCode` を短い metadata として扱います。prompt / lyrics / letter body / radioName / API key は API response、SSE、標準ログへ生で出しません。
 

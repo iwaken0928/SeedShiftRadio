@@ -12,15 +12,24 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import javax.sound.sampled.AudioFileFormat;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -58,6 +67,9 @@ class MusicGenerationRuntimeServiceTests {
 
 	MusicGenerationRuntimeService musicGenerationRuntimeService;
 
+	@TempDir
+	Path tempDir;
+
 	@BeforeEach
 	void setUp() {
 		musicGenerationRuntimeService = new MusicGenerationRuntimeService(
@@ -77,6 +89,8 @@ class MusicGenerationRuntimeServiceTests {
 		ProviderJobEntity providerJob = providerJob("provider-job-1");
 		GeneratedAssetEntity cachedAsset = asset("asset-existing", "/tmp/music-existing.wav", "cache-key-1");
 		GeneratedAssetEntity clonedAsset = asset("asset-cloned", "/tmp/music-existing.wav", "cache-key-1");
+		cachedAsset.setMetadata(Map.of("promptHash", "prompt-hash-1", "duration", 28));
+		clonedAsset.setMetadata(Map.of("promptHash", "prompt-hash-1", "duration", 28));
 		MusicGenWorkerGateway.ResolvedMusicProvider provider = new MusicGenWorkerGateway.ResolvedMusicProvider(
 				"ace-step",
 				"http://127.0.0.1:8000",
@@ -102,6 +116,7 @@ class MusicGenerationRuntimeServiceTests {
 		assertEquals("provider-job-1", response.providerJobId());
 		assertNull(response.workerJobId());
 		assertEquals("CACHE_REUSED", response.contentOrigin());
+		assertEquals(28, response.durationSec());
 		verify(providerJobService).markRunning("provider-job-1", "ace-step", "cache-hit:asset-existing");
 		verify(providerJobService).markSucceeded("provider-job-1");
 		verify(musicGenWorkerGateway, never()).submitWithFallback(any(), any(MusicGenerationRequest.class));
@@ -109,8 +124,10 @@ class MusicGenerationRuntimeServiceTests {
 	}
 
 	@Test
-	void generateFallsBackToWorkerWhenNoReusableAssetExists() {
+	void generateFallsBackToWorkerWhenNoReusableAssetExists() throws IOException {
 		QueueItemEntity item = queueItem("queue-1", "corr-1");
+		when(item.getDurationMs()).thenReturn(120_000);
+		Path actualWav = writeSilentWav(tempDir.resolve("music-created.wav"), 2);
 		ProviderJobEntity providerJob = providerJob("provider-job-1");
 		GeneratedAssetEntity createdAsset = asset("asset-created", "/tmp/music-created.wav", "cache-key-1");
 
@@ -134,8 +151,8 @@ class MusicGenerationRuntimeServiceTests {
 				.thenReturn(new MusicGenWorkerGateway.MusicJobStatus(
 						"worker-job-1",
 						"SUCCEEDED",
-						Path.of("/tmp/music-created.wav").toString(),
-						30,
+						actualWav.toString(),
+						117,
 						"ace-step:1.0",
 						"prompt-hash-1",
 						"lyrics-hash-1",
@@ -146,12 +163,13 @@ class MusicGenerationRuntimeServiceTests {
 						"12345"));
 		when(generatedAssetService.registerExistingAsset(
 				eq(GeneratedAssetType.MUSIC),
-				eq(Path.of("/tmp/music-created.wav")),
+				eq(actualWav),
 				eq("ace-step:1.0"),
 				eq("queue-1"),
 				eq("provider-job-1"),
 				anyString(),
-				argThat(metadata -> Integer.valueOf(30).equals(metadata.get("duration"))
+				argThat(metadata -> Integer.valueOf(2).equals(metadata.get("duration"))
+						&& Integer.valueOf(117).equals(metadata.get("workerDuration"))
 						&& !metadata.containsKey("durationSec"))))
 				.thenReturn(createdAsset);
 
@@ -162,6 +180,15 @@ class MusicGenerationRuntimeServiceTests {
 		assertEquals("provider-job-1", response.providerJobId());
 		assertEquals("worker-job-1", response.workerJobId());
 		assertEquals("LIVE_GEN", response.contentOrigin());
+		assertEquals(2, response.durationSec());
+		ArgumentCaptor<MusicGenerationRequest> requestCaptor = ArgumentCaptor.forClass(MusicGenerationRequest.class);
+		verify(musicGenWorkerGateway).submitWithFallback(any(), requestCaptor.capture());
+		assertTrue(requestCaptor.getValue().prompt().contains("complete the full song form within exactly 120 seconds"));
+		assertTrue(requestCaptor.getValue().prompt().contains("begin the outro no later than 100 seconds"));
+		assertTrue(requestCaptor.getValue().prompt().contains("resolve to a clear final tonic cadence"));
+		assertTrue(requestCaptor.getValue().prompt().contains("final 6 seconds for a natural fade"));
+		assertTrue(requestCaptor.getValue().lyrics().contains("[End: hold final chord and fade out completely]"));
+		assertTrue(requestCaptor.getValue().lyrics().contains("[Verse 2]"));
 		verify(providerJobService).markRunning("provider-job-1", "ace-step", "worker-job-1");
 		verify(providerJobService).markSucceeded("provider-job-1");
 		verify(generatedAssetService, never()).cloneAssetForQueue(any(), anyString(), anyString(), anyString(), any(Map.class));
@@ -327,6 +354,16 @@ class MusicGenerationRuntimeServiceTests {
 		when(entity.getSlotRole()).thenReturn(SlotRole.MUSIC_BREAK);
 		when(entity.getDurationMs()).thenReturn(30_000);
 		return entity;
+	}
+
+	private Path writeSilentWav(Path path, int durationSec) throws IOException {
+		AudioFormat format = new AudioFormat(48_000, 16, 2, true, false);
+		long frameLength = (long) format.getFrameRate() * durationSec;
+		byte[] samples = new byte[Math.toIntExact(frameLength * format.getFrameSize())];
+		try (AudioInputStream audio = new AudioInputStream(new ByteArrayInputStream(samples), format, frameLength)) {
+			AudioSystem.write(audio, AudioFileFormat.Type.WAVE, path.toFile());
+		}
+		return path;
 	}
 
 	private ProviderJobEntity providerJob(String id) {

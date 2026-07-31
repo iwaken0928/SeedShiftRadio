@@ -49,6 +49,9 @@ public class GenerateMusicJob {
 			latestItem.setAssetId(generatedAsset.assetId());
 			latestItem.setAssetUrl(generatedAsset.assetUrl());
 			latestItem.setContentOrigin(generatedAsset.contentOrigin());
+			if (generatedAsset.durationSec() != null && generatedAsset.durationSec() > 0) {
+				latestItem.setDurationMs(Math.multiplyExact(generatedAsset.durationSec(), 1_000));
+			}
 			latestItem.setStatus(QueueItemStatus.READY);
 			queueItemRepository.save(latestItem);
 			if (session.isPreGeneration()) {

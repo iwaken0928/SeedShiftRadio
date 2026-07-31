@@ -32,7 +32,7 @@ public interface MusicGenerationProvider {
 | `prompt` | 曲調、楽器、テンポ感などの caption。API 応答、SSE、標準ログへ全文を出さない |
 | `lyrics` | 歌詞本文。日本語歌詞は台本/TTS とは別生成物として扱い、全文をログへ出さない |
 | `lyricsLanguage` | `ja` を既定とし、ACE-Step では `vocal_language` へ写像する |
-| `durationSeconds` | 生成目標秒数。profile の `maxDurationSeconds` 内へ正規化する |
+| `durationSeconds` | 生成目標秒数。profile の `maxDurationSeconds` 内へ正規化する。生成完了後は WAV frame から測定した実尺を QueueItem へ反映する |
 | `bpm`, `keyScale`, `timeSignature` | 任意の音楽メタ |
 | `seed` | 再現性が必要な場合の seed |
 | `modelProfileId` | `ace-ja-fast` などの profile id |
@@ -112,6 +112,8 @@ flowchart LR
 ```
 
 - `lyrics` は日本語本文と `[Verse]`, `[Chorus]`, `[Bridge]`, `[Outro]` などの構造タグを含める
+- 90秒以上の歌ものは `Verse -> Chorus -> Verse 2 -> Chorus -> Bridge -> Outro` を基本形とし、短尺へ全構成を詰め込まない
+- prompt には全体尺、アウトロ開始期限、終止和音、末尾6秒の自然な fade、語句や持続音を途中で切らない条件を含める
 - レター本文、ユーザー投稿、既存アーティスト名、著作権曲名は歌詞へ直接混ぜない
 - 必要な場合は要約/抽象化した安全なテーマだけを使う
 - 歌詞生成後にボーカル性別、楽器、テンポ感、曲調、言語の軽量整合チェックを行い、caption と lyrics の矛盾を避ける
@@ -135,7 +137,7 @@ cache key は少なくとも以下を正規化して含める。
 
 歌もの生成は queue の即時補充をブロックしない。再生予定時刻までに `SUCCEEDED` でなければ上記順で縮退し、`provider_job` と SSE `provider.job.failed` に分類済み理由だけを残す。
 現行 runtime では `GenerateMusicJob` の async failure 時、対象 `MUSIC_AI` item をそのまま使って `paths.musicLibrary` 配下の `.wav` を優先的に `MUSIC_LOCAL` `READY` へ差し替え、候補が無い場合は placeholder 音声付き `JINGLE` `READY` に降ろす。どちらも `queue_item.assetId` と `content_origin` を更新して無音停止を避ける。
-既定の `tmpl-night-regular` は `OPENING(TALK) -> MUSIC_BREAK(MUSIC_AI) -> ENDING(TALK)` とし、通常経路でもトークの後に Music Generation Provider を使った曲を配置する。
+既定の `tmpl-night-regular` は `OPENING(TALK) -> MUSIC_BREAK(MUSIC_AI) -> ENDING(TALK)` とし、通常経路でもトークの後に Music Generation Provider を使った曲を配置する。中央の曲は120秒を目標とし、100秒までにアウトロへ入り、末尾6秒で終止・fade する生成指示を使う。
 `OPENING` / `ENDING` に効果音用の `JINGLE` または将来の短尺 MusicGen cue を割り当てる場合、生成目標は15秒とする。`MUSIC_BREAK` の曲尺にはこの上限を適用しない。
 `paths.musicLibrary` が空の skeleton 環境で `MUSIC_LOCAL_PLACEHOLDER` を作る場合は、短い通知音ではなく和音、ベース、旋律、リズムを持つ音楽用 WAV とする。これは実モデル生成物ではなく、Provider またはローカル曲へ到達できない時の再生継続用 asset である。
 

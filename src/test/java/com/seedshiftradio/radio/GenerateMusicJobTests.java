@@ -51,6 +51,7 @@ class GenerateMusicJobTests {
 		item.setId("queue-1");
 		item.setSessionId("playout-1");
 		item.setStatus(QueueItemStatus.GENERATING);
+		item.setDurationMs(120_000);
 
 		PlayoutSessionEntity session = new PlayoutSessionEntity();
 		session.setId("playout-1");
@@ -67,12 +68,14 @@ class GenerateMusicJobTests {
 						"/api/assets/audio/asset-1.wav",
 						"provider-job-1",
 						"worker-job-1",
-						"CACHE_REUSED"));
+						"CACHE_REUSED",
+						117));
 
 		generateMusicJob.run("queue-1", "corr-1");
 
 		verify(queueItemRepository).save(item);
 		org.junit.jupiter.api.Assertions.assertEquals("CACHE_REUSED", item.getContentOrigin());
+		org.junit.jupiter.api.Assertions.assertEquals(117_000, item.getDurationMs());
 		verify(radioService).synchronizeSessionAfterAsyncUpdate("playout-1");
 		verify(radioService, never()).handleAsyncGenerationFailure(any(), any());
 	}
@@ -125,7 +128,8 @@ class GenerateMusicJobTests {
 						"/api/assets/audio/asset-pregen.wav",
 						"provider-job-pregen",
 						"worker-job-pregen",
-						"LIVE_GEN"));
+						"LIVE_GEN",
+						120));
 
 		generateMusicJob.run("queue-pregen", "pregen-1");
 
@@ -162,7 +166,8 @@ class GenerateMusicJobTests {
 						"/api/assets/audio/asset-late.wav",
 						"provider-job-late",
 						"worker-job-late",
-						"LIVE_GEN"));
+						"LIVE_GEN",
+						120));
 
 		generateMusicJob.run("queue-pregen", "pregen-1");
 

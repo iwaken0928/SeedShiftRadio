@@ -67,9 +67,10 @@ class SeedShiftRadioApplicationTests {
 	@Test
 	void defaultProgramPlacesMusicGenAfterTheOpeningTalk() {
 		var slot = jdbcTemplate.queryForMap("""
-				select sequence_no, role, constraint_mode,
+				select sequence_no, role, constraint_mode, target_duration_ms,
 				       candidate_segment_types::text as candidate_segment_types,
-				       fallback_segment_types::text as fallback_segment_types
+				       fallback_segment_types::text as fallback_segment_types,
+				       slot_policy::text as slot_policy
 				from program_template_slot
 				where id = 'slot-night-regular-topic'
 				""");
@@ -77,10 +78,13 @@ class SeedShiftRadioApplicationTests {
 		assertEquals(2, slot.get("sequence_no"));
 		assertEquals("MUSIC_BREAK", slot.get("role"));
 		assertEquals("HARD", slot.get("constraint_mode"));
+		assertEquals(120000, slot.get("target_duration_ms"));
 		assertEquals("[\"MUSIC_AI\"]", slot.get("candidate_segment_types"));
 		assertEquals("[\"MUSIC_LOCAL\", \"JINGLE\"]", slot.get("fallback_segment_types"));
+		org.junit.jupiter.api.Assertions.assertTrue(slot.get("slot_policy").toString().contains("\"outroLeadSeconds\": 20"));
+		org.junit.jupiter.api.Assertions.assertTrue(slot.get("slot_policy").toString().contains("\"fadeOutSeconds\": 6"));
 		assertEquals(
-				4,
+				5,
 				jdbcTemplate.queryForObject(
 						"select version from program_template where id = 'tmpl-night-regular'",
 						Integer.class));

@@ -1,5 +1,6 @@
 package com.seedshiftradio.settings;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -9,6 +10,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.UnsupportedAudioFileException;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -108,7 +113,8 @@ public class MusicGenerationRuntimeService {
 						"/api/assets/audio/" + asset.getId() + ".wav",
 						providerJob.getId(),
 						null,
-						"CACHE_REUSED");
+						"CACHE_REUSED",
+						resolveDurationSec(asset.getMetadata(), request.durationSeconds()));
 			}
 			if (gpuExecutionCoordinator == null) {
 				return generateWithProvider(stationId, item, providers, request, reuseScope, providerJob);
@@ -142,24 +148,30 @@ public class MusicGenerationRuntimeService {
 		MusicGenWorkerGateway.MusicJobStatus completedJob = musicGenWorkerGateway.awaitCompletion(
 				submittedJob.provider(),
 				submittedJob.jobId());
+		Path assetPath = Path.of(completedJob.assetPath());
+		Integer actualDurationSec = resolveAssetDurationSec(
+				assetPath,
+				completedJob.durationSec(),
+				request.durationSeconds());
 		String cacheKey = buildCacheKey(submittedJob.provider(), request, item, reuseScope);
 		GeneratedAssetEntity asset = generatedAssetService.registerExistingAsset(
 				GeneratedAssetType.MUSIC,
-				Path.of(completedJob.assetPath()),
+				assetPath,
 				completedJob.providerFingerprint() == null || completedJob.providerFingerprint().isBlank()
 						? submittedJob.provider().providerKey()
 						: completedJob.providerFingerprint(),
 				item.getId(),
 				providerJob.getId(),
 				cacheKey,
-				buildGeneratedMetadata(stationId, item, request, submittedJob.provider(), providerJob, completedJob, cacheKey));
+				buildGeneratedMetadata(stationId, item, request, submittedJob.provider(), providerJob, completedJob, actualDurationSec, cacheKey));
 		providerJobService.markSucceeded(providerJob.getId());
 		return new GeneratedMusicAsset(
 				asset.getId(),
 				"/api/assets/audio/" + asset.getId() + ".wav",
 				providerJob.getId(),
 				submittedJob.jobId(),
-				"LIVE_GEN");
+				"LIVE_GEN",
+				actualDurationSec);
 	}
 
 	public boolean discardGeneratedAsset(String assetId) {
@@ -197,8 +209,9 @@ public class MusicGenerationRuntimeService {
 	private MusicGenerationRequest buildRequest(String stationId, QueueItemEntity item) {
 		String genre = resolveGenre(stationId);
 		List<String> mood = resolveMood(item.getSlotRole());
-		String prompt = buildPrompt(genre, mood, item);
-		String lyrics = buildSafeJapaneseLyrics(genre, mood, item);
+		Integer durationSec = normalizeDurationSec(item.getDurationMs());
+		String prompt = buildPrompt(genre, mood, item, durationSec);
+		String lyrics = buildSafeJapaneseLyrics(genre, mood, item, durationSec);
 		return new MusicGenerationRequest(
 				item.getCorrelationId() + ":" + item.getId(),
 				stationId,
@@ -207,7 +220,7 @@ public class MusicGenerationRuntimeService {
 				prompt,
 				lyrics,
 				"ja",
-				normalizeDurationSec(item.getDurationMs()),
+				durationSec,
 				resolveBpm(item.getSlotRole()),
 				"",
 				"4",
@@ -223,6 +236,7 @@ public class MusicGenerationRuntimeService {
 			MusicGenWorkerGateway.ResolvedMusicProvider provider,
 			ProviderJobEntity providerJob,
 			MusicGenWorkerGateway.MusicJobStatus completedJob,
+			Integer actualDurationSec,
 			String cacheKey) {
 		Map<String, Object> metadata = new LinkedHashMap<>();
 		metadata.put("stationId", stationId);
@@ -234,7 +248,8 @@ public class MusicGenerationRuntimeService {
 		metadata.put("cacheHit", false);
 		metadata.put("segmentType", item.getSegmentType().name());
 		metadata.put("slotRole", item.getSlotRole().name());
-		metadata.put("duration", completedJob.durationSec());
+		metadata.put("duration", actualDurationSec);
+		metadata.put("workerDuration", completedJob.durationSec());
 		metadata.put("modelProfileId", request.modelProfileId());
 		metadata.put("lyricsLanguage", request.lyricsLanguage());
 		metadata.put("promptHash", completedJob.promptHash() == null || completedJob.promptHash().isBlank() ? sha256(request.prompt()) : completedJob.promptHash());
@@ -270,31 +285,86 @@ public class MusicGenerationRuntimeService {
 		return metadata;
 	}
 
-	private String buildPrompt(String genre, List<String> mood, QueueItemEntity item) {
+	private String buildPrompt(String genre, List<String> mood, QueueItemEntity item, int durationSec) {
+		int outroStartSec = Math.max(10, durationSec - 20);
 		return "Japanese original radio song, "
 				+ "genre=" + sanitizePromptToken(genre)
 				+ ", mood=" + String.join(",", mood.stream().map(this::sanitizePromptToken).toList())
 				+ ", clear Japanese vocal, no artist imitation, no copyrighted song reference, "
-				+ "fits a local AI radio music break titled " + sanitizePromptToken(item.getTitle());
+				+ "fits a local AI radio music break titled " + sanitizePromptToken(item.getTitle()) + ", "
+				+ "complete the full song form within exactly " + durationSec + " seconds, "
+				+ "begin the outro no later than " + outroStartSec + " seconds, "
+				+ "resolve to a clear final tonic cadence, hold the ending, and use the final 6 seconds for a natural fade, "
+				+ "never cut off a vocal, phrase, or sustained note at the end";
 	}
 
-	private String buildSafeJapaneseLyrics(String genre, List<String> mood, QueueItemEntity item) {
+	private String buildSafeJapaneseLyrics(String genre, List<String> mood, QueueItemEntity item, int durationSec) {
 		String tone = mood.contains("bright") || mood.contains("intro") ? "新しい朝" : mood.contains("closing") ? "静かな夜" : "ゆるやかな時間";
 		String scene = sanitizeJapaneseText(item.getTitle());
 		if (scene.isBlank()) {
 			scene = sanitizeJapaneseText(genre);
 		}
-		return String.join("\n",
+		List<String> lyrics = new java.util.ArrayList<>(List.of(
 				"[Verse]",
 				"窓辺をすべる " + tone + "の風",
 				"名前のないリズムが 胸でほどけていく",
 				"[Chorus]",
 				"この街の音に 耳を澄ませば",
-				"小さな願いが メロディーになる",
+				"小さな願いが メロディーになる"));
+		if (durationSec >= 90) {
+			lyrics.addAll(List.of(
+					"[Verse 2]",
+					"移ろう景色を やさしく照らして",
+					"重なる足音が 明日へ続いていく",
+					"[Chorus]",
+					"この街の音に 耳を澄ませば",
+					"小さな願いが メロディーになる"));
+		}
+		lyrics.addAll(List.of(
 				"[Bridge]",
 				scene + "を越えて まだ見ぬ方へ",
 				"[Outro]",
-				"また次の曲で 会えますように");
+				"また次の曲で 会えますように",
+				"[End: hold final chord and fade out completely]"));
+		return String.join("\n", lyrics);
+	}
+
+	private Integer resolveDurationSec(Map<String, Object> metadata, Integer fallbackDurationSec) {
+		Object value = metadata == null ? null : metadata.get("duration");
+		if (value instanceof Number number) {
+			return positiveDurationOrFallback(number.intValue(), fallbackDurationSec);
+		}
+		if (value instanceof String text) {
+			try {
+				return positiveDurationOrFallback(Integer.valueOf(text), fallbackDurationSec);
+			} catch (NumberFormatException ignored) {
+				// 古い asset の不正な metadata は計画尺へフォールバックする。
+			}
+		}
+		return positiveDurationOrFallback(null, fallbackDurationSec);
+	}
+
+	private Integer resolveAssetDurationSec(Path assetPath, Integer workerDurationSec, Integer fallbackDurationSec) {
+		try (AudioInputStream audio = AudioSystem.getAudioInputStream(assetPath.toFile())) {
+			long frameLength = audio.getFrameLength();
+			float frameRate = audio.getFormat().getFrameRate();
+			if (frameLength > 0 && frameRate > 0) {
+				long roundedDurationSec = Math.round(frameLength / (double) frameRate);
+				if (roundedDurationSec > 0 && roundedDurationSec <= Integer.MAX_VALUE) {
+					return (int) roundedDurationSec;
+				}
+			}
+		} catch (IOException | UnsupportedAudioFileException ignored) {
+			// 読み取れない旧 asset は worker 応答または計画尺へフォールバックする。
+		}
+		return positiveDurationOrFallback(workerDurationSec, fallbackDurationSec);
+	}
+
+	private Integer positiveDurationOrFallback(Integer durationSec, Integer fallbackDurationSec) {
+		if (durationSec != null && durationSec > 0) {
+			return durationSec;
+		}
+		return fallbackDurationSec != null && fallbackDurationSec > 0 ? fallbackDurationSec : 30;
 	}
 
 	private Integer resolveBpm(SlotRole slotRole) {
@@ -403,7 +473,13 @@ public class MusicGenerationRuntimeService {
 		}
 	}
 
-	public record GeneratedMusicAsset(String assetId, String assetUrl, String providerJobId, String workerJobId, String contentOrigin) {
+	public record GeneratedMusicAsset(
+			String assetId,
+			String assetUrl,
+			String providerJobId,
+			String workerJobId,
+			String contentOrigin,
+			Integer durationSec) {
 	}
 
 	private record CachedAssetHit(

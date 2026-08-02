@@ -9,7 +9,7 @@ Spring Boot Server を再生状態と永続化の正本とし、Next.js Web Clie
 - Web: Next.js App Router、React、TypeScript、TanStack Query、Zustand
 - AI Provider: Ollama、VOICEVOX、Irodori-TTS-Server、ACE-Step
 - Music worker: FastAPI ベースの互換 MusicGen worker
-- Infra: Podman、Podman Compose、GitLab CI/CD
+- Infra: Podman、Podman Compose、GitHub Actions
 
 ```text
 .
@@ -70,7 +70,7 @@ npm --prefix web run dev
 - Server health: `http://127.0.0.1:8080/api/health`
 - OpenAPI UI: `http://127.0.0.1:8080/swagger-ui.html`
 
-詳しい起動・停止手順は [HELP.md](HELP.md)、コンテナを含む運用手順は [docs/17_パイプライン・コンテナデプロイ手順書.md](docs/17_パイプライン・コンテナデプロイ手順書.md) を参照してください。
+詳しい起動・停止手順は [HELP.md](HELP.md) を参照してください。
 
 ## テスト
 
@@ -96,7 +96,6 @@ Podman / Testcontainers を使う Server の統合テストは次で実行しま
 - [API 仕様](docs/02_API仕様書.md)
 - [Provider 連携](docs/07_Provider連携設計書.md)
 - [運用・監視・セキュリティ・テスト](docs/11_運用・監視・セキュリティ・テスト設計書.md)
-- [実装差分と段階実装計画](docs/15_設計差分棚卸しと段階実装計画.md)
 
 API、DTO、SSE、設定、DB、再生制御、Provider 契約を変更する場合は、実装と同じ変更で対応する設計書も更新してください。
 

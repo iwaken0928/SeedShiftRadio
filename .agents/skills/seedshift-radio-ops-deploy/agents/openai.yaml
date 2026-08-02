@@ -1,4 +1,0 @@
-interface:
-  display_name: "SeedShiftRadio Ops Deploy"
-  short_description: "Guide CI, Podman, deploy, and smoke workflows"
-  default_prompt: "Use $seedshift-radio-ops-deploy to work on SeedShiftRadio CI/CD, Podman Compose, deploy, rollback, or smoke-test changes."

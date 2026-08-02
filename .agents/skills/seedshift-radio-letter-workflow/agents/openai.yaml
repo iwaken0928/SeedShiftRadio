@@ -1,4 +1,0 @@
-interface:
-  display_name: "SeedShiftRadio Letter Workflow"
-  short_description: "Guide letter posting, moderation, and broadcast linkage"
-  default_prompt: "Use $seedshift-radio-letter-workflow to review or implement letter submission, moderation, adoption, reply, or broadcast linkage changes."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "SeedShiftRadio Playout Contracts"
-  short_description: "Guide radio state, queue, and shared playback contracts"
-  default_prompt: "Use $seedshift-radio-playout-contracts to review a change to tune/playback state, queue lifecycle, or shared client playback contracts."

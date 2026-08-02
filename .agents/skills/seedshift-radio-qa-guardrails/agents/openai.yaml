@@ -1,4 +1,0 @@
-interface:
-  display_name: "SeedShiftRadio QA Guardrails"
-  short_description: "Guide regression, observability, and release-readiness checks"
-  default_prompt: "Use $seedshift-radio-qa-guardrails to design or review tests, regression coverage, observability, and release-readiness for SeedShiftRadio changes."

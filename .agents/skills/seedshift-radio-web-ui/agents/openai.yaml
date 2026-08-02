@@ -1,4 +1,0 @@
-interface:
-  display_name: "SeedShiftRadio Web UI"
-  short_description: "Guide the Next.js radio, letters, settings, and monitor UI"
-  default_prompt: "Use $seedshift-radio-web-ui to plan or implement the Next.js radio UI, SSE flows, browser playback, or related screens."

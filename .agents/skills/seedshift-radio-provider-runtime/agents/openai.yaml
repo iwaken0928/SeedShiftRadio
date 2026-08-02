@@ -1,4 +1,0 @@
-interface:
-  display_name: "SeedShiftRadio Provider Runtime"
-  short_description: "Guide provider settings, health, jobs, and assets"
-  default_prompt: "Use $seedshift-radio-provider-runtime to work on provider settings, health checks, jobs, assets, or MusicGen worker integration."

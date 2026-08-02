@@ -65,9 +65,8 @@ npm run dev
 - `http://127.0.0.1:3000/settings`
 - `http://127.0.0.1:3000/monitor`
 
-`/letters` の管理 inbox、`/settings`、`/monitor` の現行開発導線は `NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` が読み込まれている前提です。
-この値は browser bundle へ入るため、公開環境では使用しません。
-production の管理 UI 認証は GitLab Issue `P0-11` で server-side session 方式へ移行するまで未完成です。
+`/letters` の管理 inbox、`/settings`、`/monitor` を公開環境で使う場合は、server-side session 方式の管理ログインを使用します。
+`NEXT_PUBLIC_SEEDSHIFT_ADMIN_TOKEN` は開発時だけに限定し、browser bundle へ入るため公開環境では使用しません。
 
 ## 6. 起動確認
 

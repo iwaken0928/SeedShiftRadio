@@ -162,7 +162,7 @@
 
 #### 4.7.3 推奨採用案（具体）
 
-- **Server Framework**: Spring Boot 4.x。現行実装は `4.0.4` で、公式 stable `4.1.0` への追随可否を GitLab `P2-06` で判断する
+- **Server Framework**: Spring Boot 4.x。現行実装は `4.0.4` で、公式 stable `4.1.0` への追随可否は互換試験と保守方針に基づいて判断する
 - **Web API**: Spring MVC（REST）
 - **Realtime**: まず SSE、必要箇所のみ WebSocket
 - **AI連携**: Spring AI は LLM抽象化で活用し、TTS / MusicGen は独自Provider I/Fで統合
@@ -174,7 +174,7 @@
 ##### Server: Spring Boot 4.x
 - Java製の stand-alone / production-grade アプリを作りやすく、組み込みWebサーバー、外部設定、ヘルスチェック、メトリクス等が揃う
 - Spring MVC / WebSocket / Security / Data など関連資産が厚い
-- 現行実装は Spring Boot `4.0.4` を基準とし、`4.1.0` 追随は互換試験と保守方針を GitLab `P2-06` で確定してから行う
+- 現行実装は Spring Boot `4.0.4` を基準とし、`4.1.0` 追随は互換試験と保守方針を確定してから行う
 
 ##### AI連携: Spring AI + 独自Provider
 - LLM接続は Spring AI の portable API を活かせる

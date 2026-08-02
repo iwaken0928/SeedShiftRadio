@@ -46,8 +46,8 @@ web/test-results/
 __pycache__/
 *.py[cod]
 *.tsbuildinfo
-
-# GitLab work management local credentials
-.gitlab/gitlab.env
-.gitlab/*.local.env
-.gitlab/.bootstrap-tmp/
+# 公開同期ブランチへ含めないリポジトリ運用資材
+.agents/
+.codex/
+.gitlab/
+AGENTS.md

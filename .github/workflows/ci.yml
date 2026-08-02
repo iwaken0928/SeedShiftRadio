@@ -34,6 +34,19 @@ jobs:
       - name: Run Docker-backed verification
         run: ./gradlew dockerTest
 
+  api-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Grant gradlew
+        run: chmod +x gradlew
+      - name: Verify API contract snapshots
+        run: ./gradlew apiContractTest
+
   web-typecheck:
     runs-on: ubuntu-latest
     defaults:

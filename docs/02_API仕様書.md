@@ -1535,5 +1535,5 @@ SSE は `Last-Event-ID` を受け付け、短時間切断時の再購読に備�
 - `ApiContractTests` は生成 JSON を正規化した SHA-256 snapshot、Spring MVC handler、認証マトリクス、本書の表を比較する
 - 現在の OpenAPI snapshot SHA-256 は `6e56240bc81347ee57956af839a780fb5d6e7063d5910c936591b11c61349141` とする
 - 意図した契約変更では `src/test/resources/contracts/api-auth-matrix.json`、`src/test/resources/contracts/openapi.sha256`、本書を同じ change set で更新する
-- GitLab CI の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
+- GitHub Actions の `api-contract` job は `./gradlew apiContractTest` を実行し、endpoint、DTO schema、認証区分の drift を検出する
 - 破壊的変更が必要な場合のみ `/api/v2` を追加する

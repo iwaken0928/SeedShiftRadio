@@ -55,7 +55,7 @@ Server process の停止などで worker の完了確認前に `provider_job` �
 - `GET /health`
 
 `workers/musicgen` の現行実装は deterministic WAV を生成し、Server と Worker の非同期契約、cache-first、fallback のテストに使う。
-worker のデータルートは `SEEDSHIFT_MUSICGEN_DATA_ROOT` で指定し、pipeline の `deploy-musicgen` では `/data` を使う。`MUSICGEN_DATA_VOLUME` が GitLab CI/CD Variables に設定されている場合だけ Podman volume または host path を `/data` へ mount し、未設定時は container-local の一時領域として扱う。
+worker のデータルートは `SEEDSHIFT_MUSICGEN_DATA_ROOT` で指定する。コンテナで永続化する場合は Podman volume または host path を `/data` へ mount して同変数を `/data` に設定し、未設定時は container-local の一時領域として扱う。
 
 ### 4.2 `ACE_STEP`
 
@@ -74,7 +74,7 @@ Ollama と ACE-Step が同一 GPU を共有する production では、`GpuExecut
 
 ACE-Step `v0.1.8` には SeedShiftRadio から使用できる汎用の全 model unload API がないため、単一 GPU 用の ACE-Step container は `ACESTEP_OFFLOAD_TO_CPU=true`, `ACESTEP_OFFLOAD_DIT_TO_CPU=true`, `ACESTEP_LM_OFFLOAD_TO_CPU=true` を前提とする。SeedShiftRadio の `requireAceStepCpuOffload` はこの前提を可視化する設定であり、ACE-Step container の環境変数自体は `releases/acestep` の配備設定で管理する。
 
-iwaken-server の production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server は host network で動作するため `baseUrl=http://127.0.0.1:8001` を使い、ACE-Step の host port `8001` へ接続する。
+production 接続では ACE-Step と SeedShiftRadio Server の両方へ同じ非空の `ACESTEP_API_KEY` を注入し、Provider 設定には `apiKeyRef=env:ACESTEP_API_KEY` を保存する。ACE-Step upstream `v0.1.8` は空文字を認証無効として扱わないため、空値による無認証運用を標準にしない。Server と ACE-Step を同一 host network で動かす場合は `baseUrl=http://127.0.0.1:8001` を使う。
 
 `/health` が HTTP 200 でも生成 model がロード済みとは限らない。SeedShiftRadio は `models_initialized=true` を必須とし、`thinking=true` の profile では `llm_initialized=true` も必須として、それ以外を `DOWN` と判定する。`/v1/models` は現行 OpenAI 互換の `data: []` と旧来の `data.models: []` の両形式を扱う。ACE-Step 側は起動時に生成 model を初期化し、thinking profile を使う production では `ACESTEP_INIT_LLM=true` または同等の `--init-llm` 起動指定で LM も初期化する。ACE-Step container の healthcheck も HTTP status だけでなく `models_initialized=true`、必要なら `llm_initialized=true` を検査する。
 

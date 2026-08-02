@@ -3,6 +3,10 @@
 SeedShiftRadio は、ローカル AI を使ってラジオ台本、音声、音楽を生成し、局・番組編成・レター・再生キューを一体的に扱う AI ラジオシステムです。
 Spring Boot Server を再生状態と永続化の正本とし、Next.js Web Client と将来の C# Native Client が同じ REST / SSE 契約を利用できる API First 構成を採用しています。
 
+> [!IMPORTANT]
+> このリポジトリは現在、MVP（Minimum Viable Product）の初期段階です。
+> 機能、API、データ構造、運用手順は今後変更される可能性があり、本番運用を前提とした安定版ではありません。
+
 ## 主な構成
 
 - Server: Java 21、Spring Boot、Spring MVC、PostgreSQL、Flyway、JobRunr
